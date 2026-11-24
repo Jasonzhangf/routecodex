@@ -80,28 +80,44 @@ async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
         "id":"batch_response","object":"chat.completion","model":"tool-wire",
         "choices":[{"index":0,"message":{"role":"assistant","content":"latest batch accepted"},
                     "finish_reason":"stop"}]
-    })).unwrap();
+    }))
+    .unwrap();
     let (tools_url, mut tool_captures, tools_shutdown) =
         start_controlled_terminal_upstream_with_body(
-            StatusCode::OK, "application/json", completion.clone(),
-        ).await;
+            StatusCode::OK,
+            "application/json",
+            completion.clone(),
+        )
+        .await;
     let (search_url, mut search_captures, search_shutdown) =
         start_controlled_terminal_upstream_with_body(
-            StatusCode::OK, "application/json", completion,
-        ).await;
+            StatusCode::OK,
+            "application/json",
+            completion,
+        )
+        .await;
     let mut manifest = responses_relay_provider_protocol_manifest(
-        free_port(), free_port(), &tools_url, "openai_chat", Some(&search_url),
+        free_port(),
+        free_port(),
+        &tools_url,
+        "openai_chat",
+        Some(&search_url),
     );
     let fallback = manifest.providers.get_mut("fallback").unwrap();
     fallback.provider_type = "openai_chat".into();
-    fallback.interfaces.get_mut("default").unwrap().provider_type = "openai_chat".into();
+    fallback
+        .interfaces
+        .get_mut("default")
+        .unwrap()
+        .provider_type = "openai_chat".into();
     let group = manifest.route_groups.get_mut("default").unwrap();
     group.pools.remove("client_test");
     let template = group.pools["default"].clone();
     for (pool_id, provider) in [("tools", "test"), ("search", "fallback")] {
         let mut pool = template.clone();
         pool.id = pool_id.into();
-        pool.targets.retain(|target| target.provider.as_deref() == Some(provider));
+        pool.targets
+            .retain(|target| target.provider.as_deref() == Some(provider));
         pool.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
             precedence: 10,
             entry_protocol: None,
@@ -126,7 +142,9 @@ async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
             {"type":"function_call_output","call_id":"call_fresh","output":"new tool result"}
         ]}))
         .timeout(Duration::from_secs(10))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     let status = response.status();
     let output = response.text().await.unwrap();
     let parallel = client
@@ -154,11 +172,17 @@ async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
     let parallel_wire = search_captures.try_recv().unwrap().body.to_string();
     assert!(parallel_wire.contains("parallel directory listing"));
     assert!(parallel_wire.contains("parallel result"));
-    assert!(search_captures.try_recv().is_err(), "only the parallel search case may select search");
+    assert!(
+        search_captures.try_recv().is_err(),
+        "only the parallel search case may select search"
+    );
     let wire = tool_captures.try_recv().unwrap().body.to_string();
     assert!(wire.contains("call_old") && wire.contains("directory listing"));
     assert!(wire.contains("call_fresh") && wire.contains("new tool result"));
-    assert!(tool_captures.try_recv().is_err(), "the tools provider must succeed on its first attempt");
+    assert!(
+        tool_captures.try_recv().is_err(),
+        "the tools provider must succeed on its first attempt"
+    );
 }
 
 #[path = "support/image_input_blackbox.rs"]

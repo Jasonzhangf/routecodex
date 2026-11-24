@@ -350,7 +350,11 @@ fn latest_responses_tool_batch_start(entries: &[ResponsesTurnEntry]) -> usize {
                 }
             }
             ResponsesTurnKind::ToolOutput => {
-                if entry.tool_call_id.as_deref().is_some_and(|id| pending.remove(id)) {
+                if entry
+                    .tool_call_id
+                    .as_deref()
+                    .is_some_and(|id| pending.remove(id))
+                {
                     complete = pending.is_empty() && !has_unidentified_call;
                 }
             }
@@ -674,7 +678,10 @@ fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
     entry.role = role;
     let kind = responses_kind_for_value(value);
     entry.kind = kind;
-    if matches!(kind, ResponsesTurnKind::ToolCall | ResponsesTurnKind::ToolOutput) {
+    if matches!(
+        kind,
+        ResponsesTurnKind::ToolCall | ResponsesTurnKind::ToolOutput
+    ) {
         entry.tool_call_id = value
             .get("call_id")
             .or_else(|| value.get("tool_call_id"))

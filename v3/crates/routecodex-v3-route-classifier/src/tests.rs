@@ -1136,7 +1136,11 @@ fn tool_call_category_matches_v2_command_semantics() {
         category("exec_command", Some(&read)).as_deref(),
         Some("thinking")
     );
-    for command in ["cat ./rg", "cat src/lib.rs | rg -n route", "cat< src/lib.rs | rg -n route"] {
+    for command in [
+        "cat ./rg",
+        "cat src/lib.rs | rg -n route",
+        "cat< src/lib.rs | rg -n route",
+    ] {
         assert_eq!(
             category("exec_command", Some(&json!({"cmd": command}))).as_deref(),
             Some("thinking"),
@@ -1144,11 +1148,19 @@ fn tool_call_category_matches_v2_command_semantics() {
         );
     }
     assert_eq!(
-        category("exec_command", Some(&json!({"cmd": "rg -n route src | head"}))).as_deref(),
+        category(
+            "exec_command",
+            Some(&json!({"cmd": "rg -n route src | head"}))
+        )
+        .as_deref(),
         Some("search")
     );
     assert_eq!(
-        category("exec_command", Some(&json!({"cmd": "cat src/lib.rs && bd create task"}))).as_deref(),
+        category(
+            "exec_command",
+            Some(&json!({"cmd": "cat src/lib.rs && bd create task"}))
+        )
+        .as_deref(),
         Some("coding")
     );
     assert_eq!(
@@ -1255,7 +1267,10 @@ fn responses_latest_tool_batch_does_not_inherit_completed_search() {
     });
     let facts = build_v3_current_turn_route_facts_from_value(&request);
     assert_eq!(facts.current_turn_tool_categories, vec!["other"]);
-    assert_eq!(classify_route(&route_facts_from_current_signals(&facts)).route_name, "tools");
+    assert_eq!(
+        classify_route(&route_facts_from_current_signals(&facts)).route_name,
+        "tools"
+    );
 }
 
 #[test]
@@ -1270,7 +1285,10 @@ fn responses_standalone_output_does_not_split_pending_parallel_calls() {
     ]});
     let facts = build_v3_current_turn_route_facts_from_value(&request);
     assert_eq!(facts.current_turn_tool_categories, vec!["search", "other"]);
-    assert_eq!(classify_route(&route_facts_from_current_signals(&facts)).route_name, "search");
+    assert_eq!(
+        classify_route(&route_facts_from_current_signals(&facts)).route_name,
+        "search"
+    );
 }
 
 #[test]

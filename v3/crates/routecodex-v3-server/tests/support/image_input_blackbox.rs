@@ -2176,7 +2176,8 @@ async fn thinking_pool_token_threshold_uses_current_turn_not_history_size() {
         run_thinking_pool_history_size_case(path, &long_history, "hello", true, None).await;
     }
     let path = "/v1beta/models/test:generateContent";
-    run_thinking_pool_history_size_case(path, &"old history ".repeat(3000), "hello", true, None).await;
+    run_thinking_pool_history_size_case(path, &"old history ".repeat(3000), "hello", true, None)
+        .await;
     run_thinking_pool_history_size_case(
         path,
         "short history",
