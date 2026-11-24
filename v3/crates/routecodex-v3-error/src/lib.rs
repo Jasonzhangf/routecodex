@@ -267,6 +267,8 @@ pub fn build_v3_internal_error_envelope(
 #[serde(rename_all = "snake_case")]
 pub enum V3ExternalErrorKind {
     Provider,
+    #[serde(rename = "provider")]
+    ProviderApplicationEvent,
     Upstream,
     Client,
     Transport,
@@ -285,6 +287,16 @@ pub struct V3ExternalErrorLink {
     pub upstream_request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+impl V3ExternalErrorLink {
+    pub fn provider_http_status(&self) -> Option<u16> {
+        if self.kind == V3ExternalErrorKind::Provider {
+            self.status
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

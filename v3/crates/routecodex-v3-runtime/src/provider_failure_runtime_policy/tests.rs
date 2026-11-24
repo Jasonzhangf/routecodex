@@ -493,11 +493,11 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
-    // Confirmed account/permission classes cool immediately. Real
-    // recoverable HTTP observations share the ten-failure identity threshold.
+    // A confirmed authentication failure cools immediately. HTTP 403 uses
+    // its consecutive threshold even when the body reports a permission error.
     let cases = [
         (401, "invalid_api_key", 1),
-        (403, "permission_error", 1),
+        (403, "permission_error", 10),
         (429, "provider_http_error", 10),
         (500, "provider_http_error", 10),
         (502, "provider_http_error", 10),

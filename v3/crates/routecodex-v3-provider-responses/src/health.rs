@@ -410,6 +410,34 @@ impl V3ProviderHealthError {
 }
 
 impl V3ProviderHealthStore {
+    pub fn interrupt_http_403_streak(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+    ) -> Result<(), String> {
+        let key = provider_cooldown_probe_key_for_interface(
+            provider_id,
+            interface_id,
+            Some(auth_alias),
+            Some(model_id),
+        );
+        let mut state = self.state.write().map_err(|error| error.to_string())?;
+        if let Some(history) = state.adaptive_history.get_mut(&key) {
+            if let Some(episode) = history.rate_limit_episode.as_mut() {
+                if episode.failure_streak_is_http_403 {
+                    history.failure_streak = 0;
+                    history.failure_fingerprint = None;
+                    episode.failure_count = 0;
+                    episode.failure_streak_is_http_403 = false;
+                    persist_cooldown_state(state);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn publish_availability_change(&self) {
         let next = self.availability_generation.borrow().wrapping_add(1);
         self.availability_generation.send_replace(next);
@@ -967,6 +995,9 @@ impl V3ProviderHealthStore {
             model_id,
         );
         record_adaptive_success(&mut state, &model_key, _now_ms);
+        if auth_alias.is_some() && model_id.is_some() {
+            Self::record_key_success(&mut state, &model_key, _now_ms);
+        }
         // A business success resets session evidence only. A pending provider
         // cooldown remains blocked until the typed probe owner reports probe
         // success; business traffic must never resurrect it.
@@ -1595,12 +1626,23 @@ impl V3ProviderHealthStore {
             record_health_delta(history, action.score_delta_milli);
         }
         history.success_streak = 0;
+        let is_http_403 = action
+            .failure_fingerprint
+            .as_ref()
+            .is_some_and(|fingerprint| fingerprint.http_status == 403);
         match action.recovery {
             V3ProviderRecoveryKind::RecoverableCounted
                 if action.scope == V3ProviderHealthScope::GlobalProviderKey =>
             {
-                // Preserve the fingerprint as evidence only. The complete
-                // provider identity owns one shared recoverable streak.
+                // HTTP 403 must form its own uninterrupted streak. The
+                // previous outcome is persisted alongside the count.
+                let previous_was_http_403 = history
+                    .rate_limit_episode
+                    .as_ref()
+                    .is_some_and(|episode| episode.failure_streak_is_http_403);
+                if is_http_403 != previous_was_http_403 {
+                    history.failure_streak = 0;
+                }
                 history.failure_streak = history.failure_streak.saturating_add(1);
                 history.failure_fingerprint = action.failure_fingerprint.clone();
             }
@@ -1628,6 +1670,7 @@ impl V3ProviderHealthStore {
                 .rate_limit_episode
                 .get_or_insert_with(Default::default);
             episode.failure_count = failure_streak;
+            episode.failure_streak_is_http_403 = is_http_403;
             episode.last_failure_at_ms = Some(now_ms);
             let interval = configured_max_probe_interval_ms
                 .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
@@ -1703,9 +1746,20 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
+        let projection = Self::record_key_success(&mut state, &key, now_ms);
+        persist_cooldown_state(state);
+        self.publish_availability_change();
+        Ok(projection)
+    }
+
+    fn record_key_success(
+        state: &mut V3ProviderHealthState,
+        key: &V3ProviderCooldownProbeKey,
+        now_ms: u64,
+    ) -> V3ProviderKeyHealthProjection {
         let committed_lock = state
             .adaptive_history
-            .get(&key)
+            .get(key)
             .and_then(|history| history.rate_limit_episode.as_ref())
             .is_some_and(|episode| {
                 episode.probe_required
@@ -1727,13 +1781,11 @@ impl V3ProviderHealthStore {
             history.rate_limit_episode = None;
         } else if let Some(episode) = history.rate_limit_episode.as_mut() {
             episode.failure_count = 0;
+            episode.failure_streak_is_http_403 = false;
             episode.last_failure_at_ms = None;
             episode.reset_429_observations();
         }
-        let projection = key_health_projection(&state, &key, now_ms);
-        persist_cooldown_state(state);
-        self.publish_availability_change();
-        Ok(projection)
+        key_health_projection(state, key, now_ms)
     }
 
     pub fn complete_probe_success(

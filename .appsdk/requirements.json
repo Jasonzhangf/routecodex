@@ -992,9 +992,36 @@
         "version": 3
       },
       "version": 37
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "连续 10 次 403 才 block",
+          "role": "user",
+          "source": "Codex RouteCodex conversation, 2026-11-24"
+        },
+        "base_version": 3,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261124-http403-ten-consecutive",
+        "requirement_id": "routecodex-precool-observation-and-healthy-alternative",
+        "text": "合法请求遇到真实 Provider HTTP 错误时，只要声明路径内仍有未尝试且合规的完整候选，保留 typed 原因并立即选择下一候选。当前请求不重发同一个失败身份。状态、健康观测、冷却和背景探测使用独立 listener/provider/interface/model/key 身份。Provider 健康状态不构成业务容量、准入或等待门槛。保持 routecodex-no-request-admission-wait 的唯一允许请求延迟。\n\n非最终候选返回的真实可恢复 Provider 错误归入完整身份的连续计数。普通真实 HTTP 429 单独记录次数与首末时间。匹配真实业务成功清零。达到十次且首末跨度不超过 120 秒时，该身份冷却 15 秒，计时到期后后续请求可重新选择，无须探测。第十次的首末跨度超过 120 秒时保持可路由。第十一次或以后且跨度严格超过 120 秒时进入一小时冷却。普通真实 HTTP 429 不依赖共享计数触发一小时。其他真实可恢复错误继续按共享计数在达到十次时触发一小时。真实 HTTP 403 按完整身份单独连续计数，即使响应体报告鉴权、权限、账户或额度错误，也须连续十次 403 才进入一小时冷却。其他真实 HTTP 错误或匹配业务成功打断 403 连续计数。其他确认不可恢复的鉴权、权限、账户或额度错误直接进入一小时冷却。一小时冷却到期且匹配真实 HTTP 2xx 探测成功后才恢复。探测失败只改变该身份的探测节奏。\n\n最后或唯一可尝试的候选仍不冷却。该尝试保留 typed 错误和终点证据，不因本次失败创建冷却或恢复探测。确实耗尽后的客户端终点按 routecodex-client-provider-error-decoupling v9 处理，保留完整真实最终 HTTP 错误并按协议透传。剩余合规候选存在时维持原请求通信，错误留在内部。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "连续 10 次 403 才 block",
+          "role": "user",
+          "source": "Codex RouteCodex conversation, 2026-11-24"
+        },
+        "requirement_id": "routecodex-precool-observation-and-healthy-alternative",
+        "status": "active",
+        "text": "合法请求遇到真实 Provider HTTP 错误时，只要声明路径内仍有未尝试且合规的完整候选，保留 typed 原因并立即选择下一候选。当前请求不重发同一个失败身份。状态、健康观测、冷却和背景探测使用独立 listener/provider/interface/model/key 身份。Provider 健康状态不构成业务容量、准入或等待门槛。保持 routecodex-no-request-admission-wait 的唯一允许请求延迟。\n\n非最终候选返回的真实可恢复 Provider 错误归入完整身份的连续计数。普通真实 HTTP 429 单独记录次数与首末时间。匹配真实业务成功清零。达到十次且首末跨度不超过 120 秒时，该身份冷却 15 秒，计时到期后后续请求可重新选择，无须探测。第十次的首末跨度超过 120 秒时保持可路由。第十一次或以后且跨度严格超过 120 秒时进入一小时冷却。普通真实 HTTP 429 不依赖共享计数触发一小时。其他真实可恢复错误继续按共享计数在达到十次时触发一小时。真实 HTTP 403 按完整身份单独连续计数，即使响应体报告鉴权、权限、账户或额度错误，也须连续十次 403 才进入一小时冷却。其他真实 HTTP 错误或匹配业务成功打断 403 连续计数。其他确认不可恢复的鉴权、权限、账户或额度错误直接进入一小时冷却。一小时冷却到期且匹配真实 HTTP 2xx 探测成功后才恢复。探测失败只改变该身份的探测节奏。\n\n最后或唯一可尝试的候选仍不冷却。该尝试保留 typed 错误和终点证据，不因本次失败创建冷却或恢复探测。确实耗尽后的客户端终点按 routecodex-client-provider-error-decoupling v9 处理，保留完整真实最终 HTTP 错误并按协议透传。剩余合规候选存在时维持原请求通信，错误留在内部。",
+        "version": 4
+      },
+      "version": 38
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 37
+  "version": 38
 }

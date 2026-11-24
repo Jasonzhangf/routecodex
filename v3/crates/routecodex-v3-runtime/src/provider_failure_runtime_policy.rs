@@ -992,7 +992,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
     let is_request_local_compat_failure = is_response_processing_failure
-        || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
+        || (!(is_real_http_failure && status == 403)
+            && is_health_neutral_request_compat_failure(source_stage, error_type.as_deref()));
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(
@@ -1003,6 +1004,22 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     )
     .await;
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
+    if has_alternative
+        && is_request_local_compat_failure
+        && is_real_http_failure
+        && matches!(status, 400..=402 | 404..=599)
+    {
+        context
+            .provider_health
+            .store()
+            .interrupt_http_403_streak(
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                &selected.candidate.auth_alias,
+                &selected.candidate.model_id,
+            )
+            .map_err(v3_relay_provider_policy_ordinary_error)?;
+    }
     // Resolve another eligible identity before any health mutation. A terminal
     // attempt publishes diagnostics only; it does not update health or actions.
     // The last or only eligible candidate stays health-neutral for every

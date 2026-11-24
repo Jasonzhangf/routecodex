@@ -206,10 +206,10 @@ Error classified as irrecoverable
 
 “不可恢复”表示当前 failure 不值得在本次请求内 retry，不表示 provider 永久死亡。
 
-不可恢复判定不仅由 HTTP 状态决定。`401/402/403` 以及 typed source code 中的
+不可恢复判定不仅由 HTTP 状态决定。`401/402` 以及 typed source code 中的
 `invalid_api_key`、`unauthorized`、`insufficient_quota`、`quota_exceeded`、
 `account_disabled`、`account_suspended`、`billing_disabled` 都必须立即走
-`IrrecoverableGlobalCooldown`；错误分类 owner 先生成 action，health owner 不得重新猜测。
+`IrrecoverableGlobalCooldown`。真实 HTTP 403 单独连续计数，同一完整身份第十次才进入一小时冷却。业务成功或其他 HTTP 错误打断这条连续计数。错误分类 owner 先生成 action，health owner 执行该 action。
 
 ### 5.2 可恢复错误
 
@@ -274,7 +274,8 @@ baseline = 100
 | --- | ---: | --- |
 | ordinary success | +1 | failure_streak=0 |
 | recoverable failure（含 502） | -5 | failure_streak += 1 |
-| account error（401/403） | -20 | 带阈值按连击阈值；无阈值时立即 cooldown |
+| account error（401/402，或对应 typed 错误） | -20 | 立即 cooldown，HTTP 403 例外 |
+| HTTP 403 | -5 | 同一完整身份连续十次才 cooldown |
 | probe failure | -5 | 保持 cooldown，reschedule |
 | probe success | reset to 100 | 清 cooldown、failure streak 和 probe backoff，开启新 generation |
 | health-neutral | 0 | 可写 request-local bypass |
