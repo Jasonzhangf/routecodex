@@ -156,22 +156,31 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
     let current_user_start = latest_user_index
         .map(|index| chat_current_user_run_start(entries, index))
         .unwrap_or(0);
-    let tool_start = if matches!(latest_role, Some(ChatTurnRole::User)) {
-        entries.len()
+    let latest_is_user = matches!(latest_role, Some(ChatTurnRole::User));
+    let current_entries = if latest_is_user {
+        &entries[current_user_start..]
     } else {
-        latest_user_index.map(|index| index + 1).unwrap_or(0)
+        let continuation = &entries[latest_user_index.map_or(0, |index| index + 1)..];
+        let mut start = continuation
+            .iter()
+            .rposition(|entry| entry.role == ChatTurnRole::Assistant)
+            .unwrap_or(0);
+        while start > 0 && continuation[start - 1].role == ChatTurnRole::Assistant {
+            start -= 1;
+        }
+        &continuation[start..]
     };
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_tool_execution_error = false;
     let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
     let mut current_turn_tool_categories = Vec::new();
-    for entry in &entries[current_user_start..] {
+    for entry in current_entries {
         if entry.parts.iter().any(|part| part.has_web_search) {
             has_current_turn_web_search = true;
         }
     }
-    for entry in &entries[tool_start..] {
+    for entry in current_entries {
         for part in &entry.parts {
             if matches!(entry.role, ChatTurnRole::Assistant) && part.kind == TurnPartKind::ToolCall
             {
@@ -213,25 +222,24 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
             }
         }
     }
-    let current_user_text = latest_user_index
-        .map(|index| {
-            let start = chat_current_user_run_start(entries, index);
-            entries[start..=index]
-                .iter()
-                .map(extract_chat_user_text)
-                .filter(|text| !text.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default();
+    let current_user_text = if latest_is_user {
+        current_entries
+            .iter()
+            .map(extract_chat_user_text)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    };
     V3CurrentTurnSignals {
-        latest_message_from_user: matches!(latest_role, Some(ChatTurnRole::User)),
+        latest_message_from_user: latest_is_user,
         current_user_text,
         has_current_turn_tool_output,
         has_current_turn_tool_execution_error,
         is_compaction: false,
         has_current_turn_web_search,
-        has_current_turn_image: entries[current_user_start..]
+        has_current_turn_image: current_entries
             .iter()
             .any(|entry| entry.parts.iter().any(|part| part.has_image)),
         last_assistant_tool,
@@ -247,20 +255,20 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     let current_turn_start = latest_user_index
         .map(|index| responses_current_user_run_start(entries, index))
         .unwrap_or(0);
-    let tool_start = if matches!(latest_role, Some(ResponsesTurnRole::User)) {
-        entries.len()
+    let latest_is_user = matches!(latest_role, Some(ResponsesTurnRole::User));
+    let current_entries = if latest_is_user {
+        &entries[current_turn_start..]
     } else {
-        latest_user_index.map(|index| index + 1).unwrap_or(0)
+        let continuation = &entries[latest_user_index.map_or(0, |index| index + 1)..];
+        &continuation[latest_responses_tool_batch_start(continuation)..]
     };
-    let tool_entries = &entries[tool_start..];
-    let batch_start = latest_responses_tool_batch_start(tool_entries);
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_tool_execution_error = false;
     let mut is_compaction = false;
     let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
     let mut current_turn_tool_categories = Vec::new();
-    let current_user_text = if matches!(latest_role, Some(ResponsesTurnRole::User)) {
+    let current_user_text = if latest_is_user {
         latest_user_index
             .map(|index| {
                 let start = responses_current_user_run_start(entries, index);
@@ -276,7 +284,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     } else {
         String::new()
     };
-    for entry in &entries[current_turn_start..] {
+    for entry in current_entries {
         if entry.has_web_search {
             has_current_turn_web_search = true;
         }
@@ -284,7 +292,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
             is_compaction = true;
         }
     }
-    for entry in &tool_entries[batch_start..] {
+    for entry in current_entries {
         if matches!(
             entry.kind,
             ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
@@ -317,15 +325,13 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
         }
     }
     V3CurrentTurnSignals {
-        latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
+        latest_message_from_user: latest_is_user,
         current_user_text,
         has_current_turn_tool_output,
         has_current_turn_tool_execution_error,
         is_compaction,
         has_current_turn_web_search,
-        has_current_turn_image: entries[current_turn_start..]
-            .iter()
-            .any(|entry| entry.has_image),
+        has_current_turn_image: current_entries.iter().any(|entry| entry.has_image),
         last_assistant_tool,
         current_turn_tool_categories,
     }
@@ -334,6 +340,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
 fn latest_responses_tool_batch_start(entries: &[ResponsesTurnEntry]) -> usize {
     let mut start = 0;
     let mut pending = BTreeSet::new();
+    let mut completed_ids = BTreeSet::new();
     let mut has_unidentified_call = false;
     let mut complete = false;
     for (index, entry) in entries.iter().enumerate() {
@@ -342,6 +349,7 @@ fn latest_responses_tool_batch_start(entries: &[ResponsesTurnEntry]) -> usize {
                 if complete {
                     start = index;
                     complete = false;
+                    completed_ids.clear();
                 }
                 if let Some(call_id) = entry.tool_call_id.as_deref() {
                     pending.insert(call_id);
@@ -350,13 +358,22 @@ fn latest_responses_tool_batch_start(entries: &[ResponsesTurnEntry]) -> usize {
                 }
             }
             ResponsesTurnKind::ToolOutput => {
-                if entry
-                    .tool_call_id
-                    .as_deref()
-                    .is_some_and(|id| pending.remove(id))
-                {
+                let call_id = entry.tool_call_id.as_deref();
+                if let Some(id) = call_id.filter(|id| pending.remove(id)) {
+                    completed_ids.insert(id);
                     complete = pending.is_empty() && !has_unidentified_call;
+                } else if complete && !call_id.is_some_and(|id| completed_ids.contains(id)) {
+                    start = index;
+                    complete = false;
+                    completed_ids.clear();
                 }
+            }
+            ResponsesTurnKind::Text | ResponsesTurnKind::Image | ResponsesTurnKind::Other
+                if complete && entry.role == ResponsesTurnRole::Assistant =>
+            {
+                start = index + 1;
+                complete = false;
+                completed_ids.clear();
             }
             _ => {}
         }
@@ -375,12 +392,26 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     {
         current_turn_start -= 1;
     }
+    let latest_is_user = matches!(latest_role, Some(GeminiTurnRole::User));
+    let current_entries = if latest_is_user {
+        &entries[current_turn_start..]
+    } else {
+        let continuation = &entries[latest_user_index.map_or(0, |index| index + 1)..];
+        let mut start = continuation
+            .iter()
+            .rposition(|entry| entry.role == GeminiTurnRole::Assistant)
+            .unwrap_or(0);
+        while start > 0 && continuation[start - 1].role == GeminiTurnRole::Assistant {
+            start -= 1;
+        }
+        &continuation[start..]
+    };
     let mut has_current_turn_image = false;
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
     let mut current_turn_tool_categories = Vec::new();
-    for entry in entries.iter().skip(current_turn_start) {
+    for entry in current_entries {
         for part in &entry.parts {
             has_current_turn_image |= part.has_image;
             if part.has_web_search {
@@ -404,23 +435,23 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
         }
     }
     V3CurrentTurnSignals {
-        latest_message_from_user: matches!(latest_role, Some(GeminiTurnRole::User)),
+        latest_message_from_user: latest_is_user,
         has_current_turn_tool_output,
         has_current_turn_web_search,
         has_current_turn_image,
         last_assistant_tool,
         current_turn_tool_categories,
-        current_user_text: latest_user_index
-            .map(|end| {
-                entries[current_turn_start..=end]
-                    .iter()
-                    .flat_map(|entry| &entry.parts)
-                    .filter(|part| part.kind == TurnPartKind::Text)
-                    .map(|part| part.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_default(),
+        current_user_text: if latest_is_user {
+            current_entries
+                .iter()
+                .flat_map(|entry| &entry.parts)
+                .filter(|part| part.kind == TurnPartKind::Text)
+                .map(|part| part.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        },
         ..Default::default()
     }
 }
@@ -528,13 +559,22 @@ pub fn project_v3_current_turn_entries_from_value(request: &Value) -> V3CurrentT
 fn project_chat_entries(messages: &[Value]) -> Vec<ChatTurnEntry> {
     messages
         .iter()
-        .map(|message| ChatTurnEntry {
-            role: chat_role(message.get("role").and_then(Value::as_str)),
-            parts: project_chat_parts(
-                message.get("content"),
-                message.get("role").and_then(Value::as_str) == Some("tool"),
-            ),
-            tool_calls: project_chat_tool_calls(message.get("tool_calls")),
+        .map(|message| {
+            let mut role = chat_role(message.get("role").and_then(Value::as_str));
+            let parts = project_chat_parts(message.get("content"), role == ChatTurnRole::Tool);
+            if role == ChatTurnRole::User
+                && parts
+                    .iter()
+                    .any(|part| part.kind == TurnPartKind::ToolOutput)
+            {
+                // Anthropic carries tool results in user-role message envelopes.
+                role = ChatTurnRole::Tool;
+            }
+            ChatTurnEntry {
+                role,
+                parts,
+                tool_calls: project_chat_tool_calls(message.get("tool_calls")),
+            }
         })
         .collect()
 }
@@ -715,6 +755,10 @@ fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
 }
 
 fn responses_role_for_value(value: &Value) -> ResponsesTurnRole {
+    let kind = responses_kind_for_value(value);
+    if kind == ResponsesTurnKind::ToolOutput {
+        return ResponsesTurnRole::Tool;
+    }
     if let Some(role) = value.get("role").and_then(Value::as_str) {
         return match role.trim().to_ascii_lowercase().as_str() {
             "user" => ResponsesTurnRole::User,
@@ -724,7 +768,9 @@ fn responses_role_for_value(value: &Value) -> ResponsesTurnRole {
             _ => ResponsesTurnRole::Other,
         };
     }
-    let kind = responses_kind_for_value(value);
+    if value.get("type").and_then(Value::as_str) == Some("output_text") {
+        return ResponsesTurnRole::Assistant;
+    }
     match kind {
         ResponsesTurnKind::Text | ResponsesTurnKind::Image => ResponsesTurnRole::User,
         ResponsesTurnKind::WebSearch
