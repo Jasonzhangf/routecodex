@@ -62,7 +62,7 @@ async fn serve(
         || (marker == "ping; reply pong" && !peer.ready.load(Ordering::SeqCst))
     {
         return (
-            StatusCode::FORBIDDEN,
+            StatusCode::UNAUTHORIZED,
             Json(json!({"error":{"message":"genuine fixture failure"}})),
         );
     }

@@ -473,7 +473,7 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
 
 fn relay_external_kind_label(kind: &V3ExternalErrorKind) -> &'static str {
     match kind {
-        V3ExternalErrorKind::Provider => "provider",
+        V3ExternalErrorKind::Provider | V3ExternalErrorKind::ProviderApplicationEvent => "provider",
         V3ExternalErrorKind::Upstream => "upstream",
         V3ExternalErrorKind::Client => "client",
         V3ExternalErrorKind::Transport => "transport",

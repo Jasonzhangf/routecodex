@@ -82,11 +82,18 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .external_error
         .as_ref()
         .and_then(|error| error.status);
+    let is_http_403 = classified
+        .source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.provider_http_status())
+        == Some(403);
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
-    // A confirmed typed account/auth/billing failure wins over the HTTP
-    // status. For example, a quota failure may arrive as HTTP 429 or 503.
-    if matches!(status, Some(401..=403))
-        || is_irrecoverable_provider_failure_code(&classified.source.code)
+    // HTTP 403 requires a consecutive streak even when its body reports a
+    // permission error. Other confirmed account failures remain immediate.
+    if !is_http_403
+        && (matches!(status, Some(401..=403))
+            || is_irrecoverable_provider_failure_code(&classified.source.code))
     {
         let cooldown_ms = crate::V3_PROVIDER_HEALTH_COOLDOWN_MS;
         return V3ProviderFailureAction {
@@ -178,8 +185,9 @@ pub fn build_v3_provider_global_error_fingerprint(
     status: u16,
 ) -> Result<Option<V3ProviderErrorFingerprint>, String> {
     let (class, normalized_status) = match status {
-        401 | 403 => ("account_auth", 401),
+        401 => ("account_auth", 401),
         402 => ("account_billing", 402),
+        403 => ("forbidden", 403),
         429 => ("recoverable_upstream", 429),
         // 保留真实上游状态作为身份的一部分：500 与 502 是两种可恢复错误，
         // 交替出现不会累计成同一条连续失败序列而误冷却 provider。
@@ -191,20 +199,19 @@ pub fn build_v3_provider_global_error_fingerprint(
 
 /// Provider health policy per upstream status.
 ///
-/// Account/billing classes (`401..=403`) are the typed irrecoverable group and
-/// still cool on their first occurrence. Classification alone does not cool
-/// HTTP 429 and other recoverable classes use the shared threshold for the
-/// exact identity. The Store owns the counter and recovery state.
+/// HTTP 401 and 402 cool on their first occurrence. HTTP 403 uses the
+/// consecutive-failure threshold for the exact identity. The Store owns
+/// the counter and recovery state.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
-        401..=403 => Some(V3ProviderGlobalFailurePolicy {
+        401 | 402 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 1,
             cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,
         }),
-        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
+        403 | 429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,
@@ -216,14 +223,15 @@ pub fn build_v3_provider_global_failure_policy(
 pub fn build_v3_provider_global_error_fingerprint_from_classified(
     classified: &V3Error02Classified,
 ) -> Result<Option<V3ProviderErrorFingerprint>, String> {
-    let Some(status) = classified
-        .source
-        .external_error
-        .as_ref()
-        .and_then(|error| error.status)
-    else {
+    let Some(external) = classified.source.external_error.as_ref() else {
         return Ok(None);
     };
+    let Some(status) = external.status else {
+        return Ok(None);
+    };
+    if status == 403 && external.kind == crate::V3ExternalErrorKind::ProviderApplicationEvent {
+        return build_v3_provider_global_error_fingerprint(401);
+    }
     if let Some(signature) = classified.provider_global_semantic_signature.as_deref() {
         return V3ProviderErrorFingerprint::new(
             "provider_semantic",
@@ -370,7 +378,7 @@ mod tests {
             10
         );
 
-        for (code, status) in [("account_disabled", 403)] {
+        for (code, status) in [("account_disabled", 401)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
                 "V3ProviderReqOutbound09TransportRequest",
                 code,
@@ -381,6 +389,17 @@ mod tests {
                 V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
             );
             assert_eq!(action.failure_threshold, 1);
+        }
+
+        for code in ["provider_http_403", "permission_error", "account_disabled"] {
+            let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+                "V3ProviderReqOutbound09TransportRequest",
+                code,
+                403,
+            ));
+            assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+            assert_eq!(action.failure_threshold, 10);
+            assert_eq!(action.failure_fingerprint.unwrap().http_status, 403);
         }
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(

@@ -12,7 +12,7 @@ use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::{
-    sync::{oneshot, Mutex},
+    sync::{oneshot, Mutex, Notify},
     time::{timeout, Duration},
 };
 
@@ -32,6 +32,8 @@ struct Upstream {
     /// different identity for the same request, so per-identity counting keeps
     /// "never retried the failed identity" provable.
     identity_receipts: Mutex<BTreeMap<String, usize>>,
+    held_forbidden_entered: Notify,
+    held_forbidden_release: Notify,
 }
 
 /// The independent provider mirrors the primary upstream contract on its own
@@ -74,6 +76,10 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
             .entry(format!("{input}@{model}"))
             .or_default() += 1;
     }
+    if input == "health-test:forbidden-held" {
+        state.held_forbidden_entered.notify_one();
+        state.held_forbidden_release.notified().await;
+    }
     upstream_response(&input)
 }
 
@@ -101,6 +107,15 @@ fn request_input_text(body: &Value) -> String {
 /// Shared upstream contract: auth/server/fail inputs are controlled failures,
 /// everything else is a real successful business response.
 fn upstream_response(input: &str) -> Response<Body> {
+    if input.starts_with("health-test:forbidden-invalid") {
+        return controlled_failure(StatusCode::FORBIDDEN, "invalid_request_error");
+    }
+    if input.starts_with("health-test:forbidden") {
+        return controlled_failure(StatusCode::FORBIDDEN, "permission_error");
+    }
+    if input.starts_with("health-test:invalid") {
+        return controlled_failure(StatusCode::BAD_REQUEST, "invalid_request_error");
+    }
     if input.starts_with("health-test:fail")
         || input.starts_with("health-test:auth")
         || input.starts_with("health-test:server")
@@ -145,8 +160,21 @@ fn manifest(
     upstream: &str,
     alias: &str,
     port: u16,
+    relay: bool,
+    include_fallback: bool,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let declaration = hub_v1_fixture::hub_v1_test_declaration();
+    let mut declaration = hub_v1_fixture::hub_v1_test_declaration();
+    if relay {
+        let direct = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+        let relay = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+        assert!(declaration.contains(direct));
+        declaration = declaration.replacen(direct, relay, 1);
+    }
+    let fallback_target = if include_fallback {
+        r#",{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }"#
+    } else {
+        ""
+    };
     let execution = hub_v1_fixture::hub_v1_server_execution("health");
     let source = format!(
         r#"
@@ -199,8 +227,7 @@ codex_samples = false
 [route_groups.health.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }},
-  {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
+  {{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }}{fallback_target}
 ]
 [route_groups.health.pools.other]
 match = {{ entry_protocol = "responses", required_capabilities = ["web_search"], precedence = 10 }}
@@ -417,10 +444,13 @@ async fn receipt_at(state: &Upstream, input: &str, model: &str) {
     );
 }
 
-#[tokio::test]
-async fn no_first_failure_cooldown_public_http() {
-    let (_home, _guard) = TEST_LOCK.lock().await;
-    std::env::set_var("V3_NO_FIRST_FAILURE_TEST_KEY", "controlled-test-key");
+async fn start_upstream() -> (
+    String,
+    String,
+    Arc<Upstream>,
+    oneshot::Sender<()>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("public blackbox requires loopback sockets");
@@ -441,15 +471,117 @@ async fn no_first_failure_cooldown_public_http() {
             .unwrap();
     });
     let alias = format!("key-{}", upstream_addr.port());
+    (
+        format!("http://{upstream_addr}"),
+        alias,
+        state,
+        shutdown,
+        upstream,
+    )
+}
+
+fn listener_port() -> u16 {
     let server_locator = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = server_locator.local_addr().unwrap().port();
-    drop(server_locator);
-    let handle =
-        spawn_v3_server_aggregate(manifest(&format!("http://{upstream_addr}"), &alias, port))
-            .await
-            .unwrap();
+    server_locator.local_addr().unwrap().port()
+}
+
+#[tokio::test]
+async fn no_first_failure_cooldown_public_http() {
+    let (_home, _guard) = TEST_LOCK.lock().await;
+    std::env::set_var("V3_NO_FIRST_FAILURE_TEST_KEY", "controlled-test-key");
+    let (upstream_url, alias, state, shutdown, upstream) = start_upstream().await;
+    let port = listener_port();
+    let mut active_manifest = manifest(&upstream_url, &alias, port, false, true);
+    // Keep the test listener's declared persistence identity stable while
+    // asking the OS for a fresh socket on each start.
+    active_manifest.servers.get_mut("health").unwrap().port = 0;
+    let handle = spawn_v3_server_aggregate(active_manifest.clone())
+        .await
+        .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+    for phase in 0..3 {
+        let attempts = if phase == 2 { 8 } else { 9 };
+        for attempt in 1..=attempts {
+            let marker = format!("health-test:forbidden-{phase}-{attempt}");
+            request(&client, &base, "main", &marker).await;
+            receipt(&state, &marker).await;
+            fallback_receipt(&state, &marker).await;
+            assert_identities(pool(&client, &base).await, &[]);
+        }
+        match phase {
+            0 => request(&client, &base, "main", "health-test:server-break").await,
+            1 => {
+                let concurrent_client = client.clone();
+                let concurrent_base = base.clone();
+                let held = tokio::spawn(async move {
+                    request(
+                        &concurrent_client,
+                        &concurrent_base,
+                        "main",
+                        "health-test:forbidden-held",
+                    )
+                    .await;
+                });
+                timeout(
+                    Duration::from_secs(8),
+                    state.held_forbidden_entered.notified(),
+                )
+                .await
+                .unwrap();
+                request(&client, &base, "main", "health-test:success-break").await;
+                state.held_forbidden_release.notify_one();
+                held.await.unwrap();
+                receipt(&state, "health-test:forbidden-held").await;
+                fallback_receipt(&state, "health-test:forbidden-held").await;
+                assert_identities(pool(&client, &base).await, &[]);
+            }
+            _ => {}
+        }
+    }
+    handle.shutdown().await;
+    let mut terminal_manifest = manifest(&upstream_url, &alias, port, false, false);
+    terminal_manifest.servers.get_mut("health").unwrap().port = 0;
+    let handle = spawn_v3_server_aggregate(terminal_manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let terminal = "health-test:forbidden-terminal";
+    let response = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"main","input":terminal,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(response
+        .text()
+        .await
+        .unwrap()
+        .contains("controlled real upstream failure"));
+    receipt(&state, terminal).await;
+    assert_identities(pool(&client, &base).await, &[]);
+    handle.shutdown().await;
+    let handle = spawn_v3_server_aggregate(active_manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let marker = "health-test:forbidden-2-10";
+    request(&client, &base, "main", marker).await;
+    receipt(&state, marker).await;
+    fallback_receipt(&state, marker).await;
+    assert_identities(
+        pool(&client, &base).await,
+        &[("primary", "default", &alias, "main")],
+    );
+    let marker = "health-test:after-forbidden-cooldown";
+    request(&client, &base, "main", marker).await;
+    fallback_receipt(&state, marker).await;
+    assert!(!state.receipts.lock().await.contains_key(marker));
+    let response = client
+        .post(format!("{base}/_routecodex/health/cooldown-pool"))
+        .json(&json!({"provider_id":"primary","interface_id":"default","auth_alias":alias,"model_id":"main","kind":"probe"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["removed"], true);
 
     request(&client, &base, "main", "health-test:fail-isolated").await;
     receipt(&state, "health-test:fail-isolated").await;
@@ -581,6 +713,49 @@ async fn no_first_failure_cooldown_public_http() {
         &[("independent", "default", "independent", "main")],
     );
 
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    upstream.await.unwrap();
+    std::env::remove_var("V3_NO_FIRST_FAILURE_TEST_KEY");
+}
+
+#[tokio::test]
+async fn relay_http_400_breaks_forbidden_streak_without_cooling() {
+    let (_home, _guard) = TEST_LOCK.lock().await;
+    std::env::set_var("V3_NO_FIRST_FAILURE_TEST_KEY", "controlled-test-key");
+    let (upstream_url, alias, state, shutdown, upstream) = start_upstream().await;
+    let handle =
+        spawn_v3_server_aggregate(manifest(&upstream_url, &alias, listener_port(), true, true))
+            .await
+            .unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    for attempt in 1..=9 {
+        let marker = format!("health-test:forbidden-before-invalid-{attempt}");
+        request(&client, &base, "main", &marker).await;
+        receipt(&state, &marker).await;
+    }
+    for marker in [
+        "health-test:invalid-break",
+        "health-test:forbidden-after-invalid",
+    ] {
+        request(&client, &base, "main", marker).await;
+        receipt(&state, marker).await;
+        fallback_receipt(&state, marker).await;
+        assert_identities(pool(&client, &base).await, &[]);
+    }
+    request(&client, &base, "main", "health-test:success-after-invalid").await;
+    for attempt in 1..=10 {
+        let marker = format!("health-test:forbidden-invalid-{attempt}");
+        request(&client, &base, "main", &marker).await;
+        receipt(&state, &marker).await;
+        fallback_receipt(&state, &marker).await;
+        let expected = [("primary", "default", alias.as_str(), "main")];
+        assert_identities(
+            pool(&client, &base).await,
+            if attempt == 10 { &expected } else { &[] },
+        );
+    }
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     upstream.await.unwrap();

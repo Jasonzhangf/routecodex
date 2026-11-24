@@ -91,7 +91,7 @@ async fn upstream(
         if refused {
             return (
                 axum::http::StatusCode::from_u16(peer.refusal_status).unwrap(),
-                Json(json!({"error":{"code":if peer.refusal_status == 429 { "rate_limit_exceeded" } else if peer.refusal_status == 403 { "permission_error" } else { "server_error" },"message":"controlled provider failure"}})),
+                Json(json!({"error":{"code":if peer.refusal_status == 429 { "rate_limit_exceeded" } else if peer.refusal_status == 401 { "invalid_api_key" } else { "server_error" },"message":"controlled provider failure"}})),
             )
                 .into_response();
         }
@@ -144,22 +144,22 @@ async fn in_flight_business_success_completes_without_reopening_429_backpressure
 
 #[tokio::test]
 async fn non429_hold_preserves_healthy_fallback_and_matching_success_cancels_cooling() {
-    recovery_with_refusal_status(true, false, 403).await;
+    recovery_with_refusal_status(true, false, 401).await;
 }
 
 #[tokio::test]
 async fn non429_business_success_supersedes_in_flight_observation_failure() {
-    recovery_with_observation_race(true, false, 403, true, false).await;
+    recovery_with_observation_race(true, false, 401, true, false).await;
 }
 
 #[tokio::test]
 async fn late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http() {
-    recovery_with_observation_race(true, false, 403, false, true).await;
+    recovery_with_observation_race(true, false, 401, false, true).await;
 }
 
 #[tokio::test]
 async fn zen_non_2xx_unfinished_probe_body_preserves_cooldown_and_allows_fallback() {
-    recovery_with_refusal_status(false, true, 403).await;
+    recovery_with_refusal_status(false, true, 401).await;
 }
 
 #[tokio::test]
@@ -315,7 +315,7 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     }
     let refused_count = *failures.lock().await;
     let fresh = business(&client, &managed).await;
-    if refusal_status == 403 {
+    if refusal_status == 401 {
         assert!(
             fresh.contains("spare-secret"),
             "an immediate unrecoverable cooldown must select the healthy fallback: {fresh}"

@@ -143,12 +143,13 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
             assert_eq!(record.cooldown_until_ms, None);
         }
         complete_due_precool_failures(&health, 101).await;
-        assert!(
-            !health
+        assert_eq!(
+            health
                 .store()
                 .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 200)
                 .expect("health projection")
-                .available
+                .available,
+            status == 403
         );
     }
 
@@ -337,7 +338,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
 }
 
 #[tokio::test]
-async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() {
+async fn account_http_403_policy_blocks_auth_key_on_tenth_failure_in_runtime_bridge() {
     let _guard = PRECOOL_OBSERVATION_TEST_LOCK.lock().await;
     let manifest = account_threshold_manifest();
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -359,6 +360,20 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     )
     .expect("matched 403 policy");
 
+    for attempt in 1..=9 {
+        let record = health
+            .record_provider_failure_record_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &account_http_source(403),
+                100,
+            )
+            .expect("the bridge must accept the captured HTTP 403 source");
+        assert_eq!(record.failure_count, attempt);
+        assert_eq!(record.cooldown_until_ms, None);
+    }
     let record = health
         .record_provider_failure_record_from_source(
             &session,
@@ -370,7 +385,7 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
         )
         .expect("the bridge must accept the captured HTTP 403 source");
     assert_eq!(record.state, "cooldown");
-    assert_eq!(record.failure_count, 1);
+    assert_eq!(record.failure_count, 10);
     assert_eq!(record.cooldown_until_ms, Some(3_600_100));
     assert_eq!(
         observed_cooldown_until_ms(
@@ -403,6 +418,89 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
             Some("gpt-test".to_string()),
         )]
     );
+}
+
+#[tokio::test]
+async fn matching_success_and_http_403_publish_only_complete_health_transitions() {
+    let _guard = PRECOOL_OBSERVATION_TEST_LOCK.lock().await;
+    let manifest = account_threshold_manifest();
+    let scope = test_provider_failure_scope(
+        "account_threshold",
+        "account_threshold",
+        "http-403-success-transaction",
+    )
+    .unwrap();
+    let receipt = crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
+    let success = |health: &V3ProviderFailureRuntimeHealth, now_ms| {
+        health
+            .record_provider_success_in_failure_scope(
+                &receipt,
+                &scope,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                now_ms,
+            )
+            .unwrap();
+    };
+    let failure = |health: &V3ProviderFailureRuntimeHealth, now_ms| {
+        health
+            .record_provider_failure_record_from_source(
+                &scope,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &account_http_source(403),
+                now_ms,
+            )
+            .unwrap()
+    };
+
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    for count in 1..=9 {
+        assert_eq!(
+            failure(&health, 100 + u64::from(count)).failure_count,
+            count
+        );
+    }
+    let store = health.store();
+    let before = store.availability_generation();
+    success(&health, 200);
+    assert_eq!(
+        store.availability_generation(),
+        before + 1,
+        "success publishes one state; the former split reset exposed an intermediate state"
+    );
+    for count in 1..=9 {
+        assert_eq!(
+            failure(&health, 210 + u64::from(count)).failure_count,
+            count
+        );
+    }
+
+    let start = std::sync::Barrier::new(2);
+    let observed = std::thread::scope(|threads| {
+        let failing = threads.spawn(|| {
+            start.wait();
+            failure(&health, 220)
+        });
+        start.wait();
+        success(&health, 220);
+        failing.join().unwrap()
+    });
+    match observed.failure_count {
+        10 => assert!(observed.cooldown_until_ms.is_some()),
+        1 => {
+            assert_eq!(observed.cooldown_until_ms, None);
+            let next = failure(&health, 221);
+            assert_eq!(
+                next.failure_count, 2,
+                "the contending 403 must survive success"
+            );
+            assert_eq!(next.cooldown_until_ms, None);
+        }
+        count => panic!("unexpected count from competing success and HTTP 403: {count}"),
+    }
 }
 
 #[tokio::test]
