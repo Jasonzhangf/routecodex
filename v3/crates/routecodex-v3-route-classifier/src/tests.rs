@@ -1191,6 +1191,214 @@ fn tool_call_category_matches_v2_command_semantics() {
 }
 
 #[test]
+fn shell_arguments_cannot_supply_executable_route_signals() {
+    for (cmd, expected) in [
+        ("rg -n touch README.md", "search"),
+        ("cat fixture/apply_patch", "thinking"),
+        ("rg -n 'literal ; touch x' README.md", "search"),
+        ("rg -n replace README.md", "search"),
+        ("cat fixture/rg | tee output.txt", "coding"),
+        ("cat< fixture/rg", "thinking"),
+        ("bash -lc 'cat file && touch output.txt'", "coding"),
+        ("cat file > output.txt", "coding"),
+        ("cat file 2>&1", "thinking"),
+        ("rg needle src > results.txt", "coding"),
+        ("cat fixture/rm", "thinking"),
+        ("mkdir -p fixture && cp source fixture/dest", "coding"),
+        ("sed -i '' 's/old/new/' file", "coding"),
+        ("sed -n 's/ -i /flag/p' file", "other"),
+        ("sed -n '1,20p' file", "thinking"),
+        ("env -i cat README.md", "thinking"),
+        ("env -u TRACK rg needle .", "search"),
+        ("rg a\\>b README.md", "search"),
+        (
+            "python -c 'print(1)' <<'EOF'\na.write_text('x')\nEOF",
+            "other",
+        ),
+        ("python - <<'EOF'\na.write_text('x')\nEOF", "other"),
+        ("cat file # ; touch output.txt", "thinking"),
+        ("cat <<'EOF'\ntouch output.txt\nEOF\n", "other"),
+        ("cat <<'EOF'\ntext\nEOF\ntouch output.txt", "coding"),
+        ("cat <<'EOF' > output.txt\ntext\nEOF", "coding"),
+    ] {
+        let tool = classify_tool_call("exec_command", Some(&json!({"cmd":cmd}))).unwrap();
+        assert_eq!(tool.category, expected, "{cmd}");
+    }
+}
+
+#[test]
+fn shell_argv_preserves_wrapper_values_and_interpreter_options() {
+    for (cmd, expected) in [
+        ("env -u 'A B' rg needle .", "search"),
+        ("env -u 'A B' cat README.md", "thinking"),
+        (
+            "'python' -c 'print(1)' <<'EOF'\na.write_text('x')\nEOF",
+            "other",
+        ),
+        (
+            "python -W ignore - <<'EOF'\na.write_text('x')\nEOF",
+            "other",
+        ),
+        ("node -e 'console.log(123)'", "other"),
+        ("awk '{print > \"out\"}' in", "other"),
+        ("cat file | python3 -c 'print(123)'", "thinking"),
+        ("cat \"$(printf file)\"", "other"),
+        ("cat file > \"$destination\"", "other"),
+        ("cat file 2>/dev/null", "thinking"),
+        ("find . -exec touch {} \\;", "other"),
+        ("rg --pre ./prepare needle .", "other"),
+        ("[[ left > right ]]", "other"),
+        ("env --help cat README.md", "other"),
+    ] {
+        let tool = classify_tool_call("exec_command", Some(&json!({"cmd":cmd}))).unwrap();
+        assert_eq!(tool.category, expected, "{cmd}");
+    }
+}
+
+#[test]
+fn shell_routes_explicit_complex_analysis_and_writes() {
+    for (command, expected) in [
+        ("rg needle src | wc -l", "thinking"),
+        ("rg needle src | head -n 1", "search"),
+        ("rg needle src | head -n 1 <&0", "search"),
+        ("printf 'needle\\n' | rg needle | head -- <&0", "search"),
+        ("python3 -c 'print(1)' >| report.txt", "coding"),
+        ("rg needle src && cat summary.txt", "thinking"),
+        (
+            "rg needle src && cat summary.txt && touch result.txt",
+            "coding",
+        ),
+        ("diff -u old.txt new.txt | sed -n '1,30p'", "thinking"),
+        ("jq '.items | length' fixture.json", "thinking"),
+        ("cat data.txt | wc -l > summary.txt", "coding"),
+        (
+            "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH",
+            "coding",
+        ),
+        ("tee result.txt <<'EOF'\nbody\nEOF", "coding"),
+        ("cat <<'EOF'\nwrite_text(ignored)\nEOF", "other"),
+        ("cat <<'END MARK'\nEND\ntouch report\nEND MARK", "other"),
+        ("cat <<EOF\nbody\\\nEOF\ntouch report\nEOF", "other"),
+        ("python - <<'PY'\nunknown_program()\nPY", "other"),
+    ] {
+        let tool = classify_tool_call("exec_command", Some(&json!({"cmd":command}))).unwrap();
+        assert_eq!(tool.category, expected, "{command}");
+    }
+}
+
+#[test]
+fn explicit_tool_semantics_keep_read_and_analysis_separate_from_operations() {
+    for (name, expected) in [
+        ("read_file", "thinking"),
+        ("read_document", "thinking"),
+        ("review_code", "thinking"),
+        ("compare_files", "thinking"),
+        ("analyze_document", "thinking"),
+        ("create_file", "coding"),
+        ("append_file", "coding"),
+        ("search_files", "search"),
+        ("open_tab", "other"),
+        ("preview_settings", "other"),
+        ("download_file", "other"),
+        ("plan_subscription", "other"),
+    ] {
+        let tool = classify_tool_call(name, Some(&json!({}))).unwrap();
+        assert_eq!(tool.category, expected, "{name}");
+    }
+}
+
+#[test]
+fn completed_tool_batches_do_not_classify_current_followups() {
+    for (body, expected) in [
+        (
+            json!({"input":[
+                {"role":"user","content":"work on this"},
+                {"type":"function_call","name":"exec_command","call_id":"old","arguments":{"cmd":"touch old"}},
+                {"type":"function_call_output","call_id":"old","output":[{"type":"input_image","file_id":"old-image"}]},
+                {"type":"function_call_output","call_id":"new","output":"independent current result"}
+            ]}),
+            "tools",
+        ),
+        (
+            json!({"input":[
+                {"role":"user","content":"work on this"},
+                {"type":"function_call","name":"exec_command","call_id":"old","arguments":{"cmd":"touch old"}},
+                {"type":"function_call_output","call_id":"old","output":"done"},
+                {"type":"output_text","text":"prior assistant answer"},
+                {"type":"function_call_output","call_id":"new","output":"independent current result"}
+            ]}),
+            "tools",
+        ),
+        (
+            json!({"messages":[
+                {"role":"user","content":"work on this"},
+                {"role":"assistant","tool_calls":[{"type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"touch old\"}"}}]},
+                {"role":"tool","content":"done"},
+                {"role":"assistant","tool_calls":[{"type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"rg needle src\"}"}}]},
+                {"role":"tool","content":"matches"}
+            ]}),
+            "search",
+        ),
+        (
+            json!({"contents":[
+                {"role":"user","parts":[{"text":"work on this"}]},
+                {"role":"model","parts":[{"functionCall":{"name":"exec_command","args":{"cmd":"touch old"}}}]},
+                {"role":"user","parts":[{"functionResponse":{"name":"exec_command","response":{"result":"done"}}}]},
+                {"role":"model","parts":[{"functionCall":{"name":"exec_command","args":{"cmd":"rg needle src"}}}]},
+                {"role":"user","parts":[{"functionResponse":{"name":"exec_command","response":{"result":"matches"}}}]}
+            ]}),
+            "search",
+        ),
+    ] {
+        let signals = build_v3_current_turn_route_facts_from_value(&body);
+        let route = classify_route(&route_facts_from_current_signals(&signals));
+        assert_eq!(route.route_name, expected, "{signals:?}");
+        assert!(signals.current_user_text.is_empty(), "{signals:?}");
+        assert!(!route
+            .candidates
+            .iter()
+            .any(|route| route == "coding" || route == "thinking" || route == "multimodal"));
+    }
+}
+
+#[test]
+fn tool_results_in_user_envelopes_are_continuations() {
+    for body in [
+        json!({"messages":[
+            {"role":"user","content":"work on this"},
+            {"role":"assistant","content":[{"type":"tool_use","id":"write","name":"exec_command","input":{"cmd":"touch fixture"}}]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":"write","content":"done"}]}
+        ]}),
+        json!({"input":[
+            {"role":"user","content":"work on this"},
+            {"type":"function_call","call_id":"write","name":"exec_command","arguments":{"cmd":"touch fixture"}},
+            {"role":"user","type":"function_call_output","call_id":"write","output":"done"}
+        ]}),
+    ] {
+        let signals = build_v3_current_turn_route_facts_from_value(&body);
+        assert!(!signals.latest_message_from_user, "{signals:?}");
+        let route = classify_route(&route_facts_from_current_signals(&signals));
+        assert_eq!(route.candidates, ["coding", "default"]);
+    }
+}
+
+#[test]
+fn consecutive_anthropic_assistant_messages_share_the_current_parallel_batch() {
+    let body = json!({"messages":[
+        {"role":"user","content":"work on this"},
+        {"role":"assistant","content":[{"type":"tool_use","id":"write","name":"exec_command","input":{"cmd":"touch fixture"}}]},
+        {"role":"assistant","content":[{"type":"tool_use","id":"search","name":"exec_command","input":{"cmd":"rg needle ."}}]},
+        {"role":"user","content":[
+            {"type":"tool_result","tool_use_id":"write","content":"done"},
+            {"type":"tool_result","tool_use_id":"search","content":"matches"}
+        ]}
+    ]});
+    let signals = build_v3_current_turn_route_facts_from_value(&body);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.candidates, ["coding", "search", "default"]);
+}
+
+#[test]
 fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_tools() {
     let thinking_request = json!({
         "input": [

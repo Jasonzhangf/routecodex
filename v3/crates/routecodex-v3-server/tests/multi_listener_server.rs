@@ -188,6 +188,279 @@ async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
+#[tokio::test]
+async fn responses_same_session_routes_only_current_shell_operation() {
+    let guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "current-shell-route-fixture");
+    let completion = serde_json::to_vec(&json!({
+        "id":"shell_response","object":"chat.completion","model":"wire-test",
+        "choices":[{"index":0,"message":{"role":"assistant","content":"current operation accepted"},
+                    "finish_reason":"stop"}]
+    }))
+    .unwrap();
+    let (thinking_url, mut thinking, thinking_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            completion.clone(),
+        )
+        .await;
+    let (coding_url, mut coding, coding_shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        completion.clone(),
+    )
+    .await;
+    let (tools_url, mut tools, tools_shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        completion.clone(),
+    )
+    .await;
+    let (default_url, mut default_hits, default_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            completion,
+        )
+        .await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        &thinking_url,
+        "openai_chat",
+        Some(&coding_url),
+    );
+    let fallback = manifest.providers.get_mut("fallback").unwrap();
+    fallback.provider_type = "openai_chat".into();
+    fallback
+        .interfaces
+        .get_mut("default")
+        .unwrap()
+        .provider_type = "openai_chat".into();
+    let mut tools_provider = fallback.clone();
+    tools_provider.id = "tools-test".into();
+    tools_provider.base_url = tools_url.clone();
+    tools_provider
+        .interfaces
+        .get_mut("default")
+        .unwrap()
+        .base_url = tools_url;
+    let mut default_provider = tools_provider.clone();
+    default_provider.id = "default-test".into();
+    default_provider.base_url = default_url.clone();
+    default_provider
+        .interfaces
+        .get_mut("default")
+        .unwrap()
+        .base_url = default_url;
+    manifest
+        .providers
+        .insert(default_provider.id.clone(), default_provider);
+    manifest
+        .providers
+        .insert(tools_provider.id.clone(), tools_provider);
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    group.pools.remove("client_test");
+    for (pool_id, provider) in [
+        ("thinking", "test"),
+        ("coding", "fallback"),
+        ("tools", "fallback"),
+    ] {
+        let mut pool = group.pools["default"].clone();
+        pool.id = pool_id.into();
+        pool.targets
+            .retain(|target| target.provider.as_deref() == Some(provider));
+        if pool_id == "tools" {
+            pool.targets[0].provider = Some("tools-test".into());
+        }
+        pool.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
+            precedence: 10,
+            entry_protocol: None,
+            models: Vec::new(),
+            required_capabilities: Vec::new(),
+            min_input_tokens: None,
+            max_input_tokens: None,
+        });
+        group.pools.insert(pool_id.into(), pool);
+    }
+    let default = group.pools.get_mut("default").unwrap();
+    default.targets.truncate(1);
+    default.targets[0].provider = Some("default-test".into());
+    manifest.debug.snapshots = false;
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let call = |id: &str, cmd: &str| {
+        json!({"type":"function_call","name":"exec_command","call_id":id,
+               "arguments":json!({"cmd":cmd}).to_string()})
+    };
+    let result = |id: &str, output: &str| json!({"type":"function_call_output","call_id":id,"output":output});
+    let fixture = &guard._home.path;
+    fs::create_dir(fixture.join("fixture")).unwrap();
+    let run = |command: &str| {
+        let output = std::process::Command::new("sh")
+            .args(["-c", command])
+            .current_dir(fixture)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{command}: {:?}", output.stderr);
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let mut input = vec![json!({"role":"user","content":"check the fixture file"})];
+    let mut outcomes = Vec::new();
+    let write_command = "cat <<'EOF' > fixture/apply_patch\nfixture contents\nEOF";
+    let complex = "python3 - <<'PY'\nprint('read_text(')\nPY";
+    let analysis_command = "grep fixture fixture/apply_patch | wc -l";
+    for expected in [
+        "fresh user",
+        "write",
+        "read",
+        "complex",
+        "review",
+        "analysis",
+    ] {
+        match expected {
+            "write" => {
+                run(write_command);
+                input.push(call("call_write", write_command));
+                input.push(result("call_write", "fixture created"));
+            }
+            "read" => {
+                let command = "cat fixture/apply_patch";
+                input.push(call("call_read", command));
+                input.push(result("call_read", &run(command)));
+            }
+            "complex" => {
+                input.push(call("call_complex", complex));
+                input.push(result("call_complex", &run(complex)));
+            }
+            "review" => {
+                input.push(
+                    json!({"type":"function_call", "name":"review_code", "call_id":"call_review",
+                    "arguments":json!({"path":"fixture/apply_patch"}).to_string()}),
+                );
+                let contents = fs::read_to_string(fixture.join("fixture/apply_patch")).unwrap();
+                input.push(result("call_review", &contents));
+            }
+            "analysis" => {
+                input.push(call("call_analysis", analysis_command));
+                input.push(result("call_analysis", run(analysis_command).trim()));
+            }
+            _ => {}
+        }
+        let response = client
+            .post(&endpoint)
+            .header("x-session-id", "current-shell-route")
+            .json(&json!({"model":"test","stream":false,"input":input}))
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .unwrap();
+        outcomes.push((expected, response.status(), response.text().await.unwrap()));
+    }
+    server.shutdown().await;
+    let _ = thinking_shutdown.send(());
+    let _ = coding_shutdown.send(());
+    let _ = tools_shutdown.send(());
+    let _ = default_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    for (stage, status, body) in outcomes {
+        assert_eq!(status, StatusCode::OK, "{stage}: {body}");
+        assert!(
+            body.contains("current operation accepted"),
+            "{stage}: {body}"
+        );
+    }
+    let user_request = thinking.try_recv().unwrap().body.to_string();
+    assert!(user_request.contains("check the fixture file"));
+    let assert_call_and_result =
+        |body: &Value, id: &str, name: &str, expected_args: Value, output: &str| {
+            let messages = body["messages"].as_array().unwrap();
+            let (call_index, call) = messages
+                .iter()
+                .enumerate()
+                .filter_map(|(index, message)| {
+                    message["tool_calls"].as_array().map(|calls| (index, calls))
+                })
+                .find_map(|(index, calls)| {
+                    calls
+                        .iter()
+                        .find(|call| call["id"] == id)
+                        .map(|call| (index, call))
+                })
+                .unwrap();
+            assert_eq!(call["function"]["name"], name);
+            let arguments: Value =
+                serde_json::from_str(call["function"]["arguments"].as_str().unwrap()).unwrap();
+            assert_eq!(arguments, expected_args);
+            let result = messages[call_index + 1..]
+                .iter()
+                .find(|message| message["role"] == "tool" && message["tool_call_id"] == id)
+                .unwrap();
+            assert_eq!(result["content"], output);
+        };
+    let write_request = coding.try_recv().unwrap().body;
+    let read_request = thinking.try_recv().unwrap().body;
+    for body in [&write_request, &read_request] {
+        assert_call_and_result(
+            body,
+            "call_write",
+            "exec_command",
+            json!({"cmd":write_command}),
+            "fixture created",
+        );
+    }
+    assert_call_and_result(
+        &read_request,
+        "call_read",
+        "exec_command",
+        json!({"cmd":"cat fixture/apply_patch"}),
+        "fixture contents\n",
+    );
+    let tools_request = tools.try_recv().unwrap().body;
+    assert_call_and_result(
+        &tools_request,
+        "call_complex",
+        "exec_command",
+        json!({"cmd":complex}),
+        "read_text(\n",
+    );
+    let review_request = thinking.try_recv().unwrap().body;
+    assert_call_and_result(
+        &review_request,
+        "call_review",
+        "review_code",
+        json!({"path":"fixture/apply_patch"}),
+        "fixture contents\n",
+    );
+    let analysis_request = thinking.try_recv().unwrap().body;
+    assert_call_and_result(
+        &analysis_request,
+        "call_analysis",
+        "exec_command",
+        json!({"cmd":analysis_command}),
+        "1",
+    );
+    assert!(
+        tools.try_recv().is_err(),
+        "only the ambiguous script must reach tools"
+    );
+    assert!(
+        default_hits.try_recv().is_err(),
+        "classified requests must not fall through to default"
+    );
+    assert!(
+        coding.try_recv().is_err(),
+        "read continuation must not contact coding"
+    );
+    assert!(
+        thinking.try_recv().is_err(),
+        "each request must complete on its first upstream"
+    );
+}
+
 #[path = "support/pool_empty_recovery_blackbox.rs"]
 mod pool_empty_recovery_blackbox;
 #[path = "support/sustained_429_window_blackbox.rs"]
