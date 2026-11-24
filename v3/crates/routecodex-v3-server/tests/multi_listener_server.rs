@@ -72,6 +72,95 @@ impl Drop for TestLockGuard<'_> {
 
 static TEST_LOCK: TestLock = TestLock::new();
 
+#[tokio::test]
+async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "latest-tool-batch-fixture");
+    let completion = serde_json::to_vec(&json!({
+        "id":"batch_response","object":"chat.completion","model":"tool-wire",
+        "choices":[{"index":0,"message":{"role":"assistant","content":"latest batch accepted"},
+                    "finish_reason":"stop"}]
+    })).unwrap();
+    let (tools_url, mut tool_captures, tools_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK, "application/json", completion.clone(),
+        ).await;
+    let (search_url, mut search_captures, search_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK, "application/json", completion,
+        ).await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(), free_port(), &tools_url, "openai_chat", Some(&search_url),
+    );
+    let fallback = manifest.providers.get_mut("fallback").unwrap();
+    fallback.provider_type = "openai_chat".into();
+    fallback.interfaces.get_mut("default").unwrap().provider_type = "openai_chat".into();
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    group.pools.remove("client_test");
+    let template = group.pools["default"].clone();
+    for (pool_id, provider) in [("tools", "test"), ("search", "fallback")] {
+        let mut pool = template.clone();
+        pool.id = pool_id.into();
+        pool.targets.retain(|target| target.provider.as_deref() == Some(provider));
+        pool.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
+            precedence: 10,
+            entry_protocol: None,
+            models: Vec::new(),
+            required_capabilities: Vec::new(),
+            min_input_tokens: None,
+            max_input_tokens: None,
+        });
+        group.pools.insert(pool_id.into(), pool);
+    }
+    manifest.debug.snapshots = false;
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"model":"test","stream":false,"input":[
+            {"role":"user","content":"check this"},
+            {"type":"function_call","name":"list_files","call_id":"call_old","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_old","output":"directory listing"},
+            {"type":"function_call","name":"tool_fresh","call_id":"call_fresh","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_fresh","output":"new tool result"}
+        ]}))
+        .timeout(Duration::from_secs(10))
+        .send().await.unwrap();
+    let status = response.status();
+    let output = response.text().await.unwrap();
+    let parallel = client
+        .post(&endpoint)
+        .json(&json!({"model":"test","stream":false,"input":[
+            {"role":"user","content":"check this"},
+            {"type":"function_call","name":"list_files","call_id":"call_search","arguments":"{}"},
+            {"type":"function_call_output","name":"standalone","output":"independent"},
+            {"type":"function_call","name":"tool_fresh","call_id":"call_fresh","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_search","output":"parallel directory listing"},
+            {"type":"function_call_output","call_id":"call_fresh","output":"parallel result"}
+        ]}))
+        .timeout(Duration::from_secs(10))
+        .send().await.unwrap();
+    let parallel_status = parallel.status();
+    let parallel_output = parallel.text().await.unwrap();
+    server.shutdown().await;
+    let _ = tools_shutdown.send(());
+    let _ = search_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{output}");
+    assert!(output.contains("latest batch accepted"));
+    assert_eq!(parallel_status, StatusCode::OK, "{parallel_output}");
+    assert!(parallel_output.contains("latest batch accepted"));
+    let parallel_wire = search_captures.try_recv().unwrap().body.to_string();
+    assert!(parallel_wire.contains("parallel directory listing"));
+    assert!(parallel_wire.contains("parallel result"));
+    assert!(search_captures.try_recv().is_err(), "only the parallel search case may select search");
+    let wire = tool_captures.try_recv().unwrap().body.to_string();
+    assert!(wire.contains("call_old") && wire.contains("directory listing"));
+    assert!(wire.contains("call_fresh") && wire.contains("new tool result"));
+    assert!(tool_captures.try_recv().is_err(), "the tools provider must succeed on its first attempt");
+}
+
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 

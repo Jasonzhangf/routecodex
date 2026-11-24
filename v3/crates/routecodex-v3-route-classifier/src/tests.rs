@@ -1242,6 +1242,38 @@ fn search_continuation_does_not_add_an_unmatched_tools_pool() {
 }
 
 #[test]
+fn responses_latest_tool_batch_does_not_inherit_completed_search() {
+    let request = json!({
+        "input": [
+            {"type":"message","role":"user","content":"check this"},
+            {"type":"function_call","name":"list_files","call_id":"old-search","arguments":"{}"},
+            {"type":"function_call_output","call_id":"old-search","output":"old directory list"},
+            {"type":"reasoning","summary":[]},
+            {"type":"function_call","name":"tool_fresh","call_id":"fresh","arguments":"{}"},
+            {"type":"function_call_output","call_id":"fresh","output":"new tool result"}
+        ]
+    });
+    let facts = build_v3_current_turn_route_facts_from_value(&request);
+    assert_eq!(facts.current_turn_tool_categories, vec!["other"]);
+    assert_eq!(classify_route(&route_facts_from_current_signals(&facts)).route_name, "tools");
+}
+
+#[test]
+fn responses_standalone_output_does_not_split_pending_parallel_calls() {
+    let request = json!({"input": [
+        {"role":"user","content":"check this"},
+        {"type":"function_call","name":"list_files","call_id":"search","arguments":"{}"},
+        {"type":"function_call_output","name":"standalone","output":"independent"},
+        {"type":"function_call","name":"tool_fresh","call_id":"fresh","arguments":"{}"},
+        {"type":"function_call_output","call_id":"search","output":"directory listing"},
+        {"type":"function_call_output","call_id":"fresh","output":"fresh result"}
+    ]});
+    let facts = build_v3_current_turn_route_facts_from_value(&request);
+    assert_eq!(facts.current_turn_tool_categories, vec!["search", "other"]);
+    assert_eq!(classify_route(&route_facts_from_current_signals(&facts)).route_name, "search");
+}
+
+#[test]
 fn route_candidates_are_unique() {
     let r = classify_route(&RouteClassifierInput {
         latest_message_from_user: false,

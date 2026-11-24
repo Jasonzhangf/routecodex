@@ -3311,6 +3311,7 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server file_read_tool_continuation_selects_thinking
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_latest_tool_batch_selects_tools_instead_of_stale_search
   - npm run verify:v3-module-boundaries
   - git diff --check
   completion_rule:
