@@ -374,6 +374,10 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 snap_flags.snap_stages.as_deref(),
                 debug,
             );
+            let restart_trace = std::env::var("ROUTECODEX_V3_RESTART_TRACE").as_deref() == Ok("1");
+            if restart_trace {
+                eprintln!("[RouteCodexV3] Restart phase: loading CLI configuration");
+            }
             let manifest = load_manifest(&config)?;
             let status = configure_v3_snapshot_flags(
                 V3ManagedLifecycle::new(config)?,
@@ -386,7 +390,14 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             .restart_with_observer(
                 &executable,
                 Duration::from_millis(timeout_ms),
-                emit_v3_cli_lifecycle_observation,
+                |observation| match observation {
+                    V3ManagedLifecycleObservation::RestartPhase { phase, elapsed } => {
+                        if restart_trace {
+                            eprintln!("[RouteCodexV3] Restart phase: {phase} elapsed={elapsed:?}");
+                        }
+                    }
+                    observation => emit_v3_cli_lifecycle_observation(observation),
+                },
             )
             .await?;
             emit_v3_cli_restart_completed_console_line(&status);
@@ -633,6 +644,7 @@ fn v3_cli_status_impact(state: &V3ManagedRunState) -> Option<&'static str> {
 
 fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation) {
     match observation {
+        V3ManagedLifecycleObservation::RestartPhase { .. } => {}
         V3ManagedLifecycleObservation::RestartTargetResolved {
             instance_id,
             control_instance_id,

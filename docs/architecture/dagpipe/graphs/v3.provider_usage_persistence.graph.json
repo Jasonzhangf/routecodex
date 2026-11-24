@@ -23,7 +23,8 @@
       "input_selector": {"include": [], "exclude": [], "predicate": null},
       "output_selector": {"include": [], "exclude": [], "predicate": null},
       "iterator": "Whole",
-      "resources": {"reads": ["v3.observability.provider_usage_facts"], "writes": ["v3.observability.provider_usage_facts"]}
+      "resources": {"reads": ["v3.observability.provider_usage_facts"], "writes": ["v3.observability.provider_usage_facts"]},
+      "notes": "重开账本时按稳定键合并，增量核算最新事实字节数，避免反复编码无关事实而阻塞写入。"
     },
     {
       "id": "按落盘结果追加与轮转明细",

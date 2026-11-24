@@ -1328,6 +1328,7 @@ fn read_provider_usage_facts_path(
 ) -> Result<(BTreeMap<String, V3ProviderUsageFact>, bool), V3WebuiObservabilityStoreError> {
     ensure_provider_usage_file_within_limit(path, limits.physical_fact_log_bytes)?;
     let mut latest = BTreeMap::<String, V3ProviderUsageFact>::new();
+    let mut latest_encoded_bytes = 0u64;
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1392,6 +1393,8 @@ fn read_provider_usage_facts_path(
         let mut fact = decode_provider_usage_fact_line(path, line_number - 1, line)?;
         let identity = fact.target_identity()?;
         if let Some(previous) = latest.remove(&identity) {
+            latest_encoded_bytes -=
+                encoded_provider_usage_fact_line_len(&provider_usage_fact_line(&previous)?);
             merge_provider_usage_fact(&previous, &mut fact);
         }
         if latest.len() + 1 > limits.max_facts {
@@ -1399,21 +1402,9 @@ fn read_provider_usage_facts_path(
                 reason: V3ProviderUsageCapacityReason::FactKeys,
             });
         }
-        let encoded_bytes =
-            encoded_provider_usage_fact_line_len(&provider_usage_fact_line(&fact).map_err(
-                |error| V3WebuiObservabilityStoreError::ProviderUsageFact(error.to_string()),
-            )?);
-        let next_latest_bytes = latest
-            .values()
-            .map(|fact| {
-                provider_usage_fact_line(fact)
-                    .map(|line| encoded_provider_usage_fact_line_len(&line))
-            })
-            .collect::<Result<Vec<_>, V3WebuiObservabilityStoreError>>()?
-            .into_iter()
-            .sum::<u64>()
-            .saturating_add(encoded_bytes);
-        if next_latest_bytes > limits.latest_encoded_fact_bytes {
+        let encoded_bytes = encoded_provider_usage_fact_line_len(&provider_usage_fact_line(&fact)?);
+        latest_encoded_bytes = latest_encoded_bytes.saturating_add(encoded_bytes);
+        if latest_encoded_bytes > limits.latest_encoded_fact_bytes {
             return Err(V3WebuiObservabilityStoreError::ProviderUsageCapacity {
                 reason: V3ProviderUsageCapacityReason::LatestFactBytes,
             });
@@ -3358,6 +3349,34 @@ mod tests {
         assert_eq!(fs::metadata(&coverage_path).unwrap().ino(), inode);
         store.close_generation().unwrap();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn usage_fact_ledger_reopens_within_restart_flush_budget() {
+        let dir = temp_dir("usage-reopen-restart-budget");
+        let path = dir.join("records.jsonl");
+        let facts_path = v3_provider_usage_facts_path(&path);
+        let mut file = BufWriter::new(fs::File::create(&facts_path).unwrap());
+        for index in 0..2048 {
+            let fact = usage_fact(
+                &format!("4444:restart-{index}"),
+                10,
+                V3ProviderUsageFactResult::Success,
+                Some("p1"),
+                Vec::new(),
+            );
+            file.write_all(&provider_usage_fact_line(&fact).unwrap())
+                .unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        file.flush().unwrap();
+        let start = std::time::Instant::now();
+        let store = V3ProviderUsagePersistenceStore::open(&path).unwrap();
+        let elapsed = start.elapsed();
+        std::fs::remove_dir_all(dir).unwrap();
+        eprintln!("usage ledger reopen took {elapsed:?}");
+        assert_eq!(store.facts.len(), 2048);
+        assert!(elapsed < std::time::Duration::from_secs(1));
     }
 
     #[test]

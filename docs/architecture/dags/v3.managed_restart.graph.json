@@ -21,6 +21,7 @@
     "生命周期端口可用性、陈旧发现、跨实例释放与残留 PID 扫描仅针对业务 listeners（server_id != \"admin_webui\"）；admin-only foreign PID 永远不进入被接管、收割或信号范围。",
     "run_managed_child_with_declaration 启动 Server aggregate 时，admin_webui 被视为可选附属监听：失败显式告警并跳过 admin router/background 注册，不回滚业务 listeners；业务 listener 真实端口冲突显式失败。",
     "declaration.listeners 完整保留 admin_webui 序列化，维护 instance.json 与 PreviousReleaseRestartTransfer 的跨版本精确匹配；不得删除该条目来绕开发现范围问题。",
+    "命令区分发送控制前预算耗尽、控制交换超时和接受后等待新代超时。",
     "显式 PID 端口范围守卫（guard_explicit_listener_pids_are_scoped_to_target_ports）原样保留，仅对业务目标端口集合允许显式 PID 信号收割。"
   ]
 }
