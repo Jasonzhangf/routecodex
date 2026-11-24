@@ -215,7 +215,23 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
         })?;
     match object.get("type").and_then(Value::as_str) {
         Some("thinking") => {
-            let thinking = require_nonempty_reasoning_string(object.get("thinking"), "thinking")?;
+            let signature = optional_reasoning_string(object, "signature")?;
+            let thinking = object
+                .get("thinking")
+                .and_then(Value::as_str)
+                .ok_or(V3AnthropicCodecError::MalformedField { field: "thinking" })?;
+            if thinking.trim().is_empty() && signature.is_some_and(|value| !value.trim().is_empty())
+            {
+                validate_anthropic_reasoning_summary_policy(summary_policy)?;
+                let mut item = json!({"type":"reasoning","summary":[]});
+                item["encrypted_content"] =
+                    Value::String(signature.unwrap_or_default().to_string());
+                preserve_anthropic_reasoning_extensions(object, &[], &mut item);
+                return Ok(item);
+            }
+            if thinking.trim().is_empty() {
+                return Err(V3AnthropicCodecError::MalformedField { field: "thinking" });
+            }
             let summary_text = match summary_policy {
                 None | Some("auto" | "concise" | "detailed") => thinking,
                 Some(_) => {
@@ -228,7 +244,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 "type":"reasoning",
                 "summary":[{"type":"summary_text","text":summary_text}]
             });
-            if let Some(signature) = optional_reasoning_string(object, "signature")? {
+            if let Some(signature) = signature {
                 item["encrypted_content"] = Value::String(signature.to_string());
             }
             preserve_anthropic_reasoning_extensions(
@@ -251,6 +267,17 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
             field: "reasoning content",
         }),
     }
+}
+
+fn validate_anthropic_reasoning_summary_policy(
+    summary_policy: Option<&str>,
+) -> Result<(), V3AnthropicCodecError> {
+    if matches!(summary_policy, None | Some("auto" | "concise" | "detailed")) {
+        return Ok(());
+    }
+    Err(V3AnthropicCodecError::MalformedField {
+        field: "reasoning_summary_policy",
+    })
 }
 
 /// Carry provider extension fields on a reasoning block forward as opaque data
@@ -297,6 +324,40 @@ fn require_nonempty_reasoning_string<'a>(
         return Err(V3AnthropicCodecError::MalformedField { field });
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_string_signed_thinking_is_malformed() {
+        let error = anthropic_reasoning_part_as_responses_reasoning(
+            &json!({
+                "type": "thinking",
+                "thinking": true,
+                "signature": "sig-non-string-thinking"
+            }),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "Anthropic codec malformed thinking");
+    }
+
+    #[test]
+    fn missing_signed_thinking_is_malformed() {
+        let error = anthropic_reasoning_part_as_responses_reasoning(
+            &json!({
+                "type": "thinking",
+                "signature": "sig-missing-thinking"
+            }),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "Anthropic codec malformed thinking");
+    }
 }
 
 fn optional_reasoning_string<'a>(
