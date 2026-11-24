@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 use crate::{classify_tool_call, RouteToolCallClassification};
 
@@ -68,6 +69,7 @@ pub struct ResponsesTurnEntry {
     pub has_web_search: bool,
     pub is_tool_output_error: bool,
     pub tool_call_category: Option<String>,
+    pub tool_call_id: Option<String>,
     pub text: String,
 }
 
@@ -250,6 +252,8 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     } else {
         latest_user_index.map(|index| index + 1).unwrap_or(0)
     };
+    let tool_entries = &entries[tool_start..];
+    let batch_start = latest_responses_tool_batch_start(tool_entries);
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_tool_execution_error = false;
     let mut is_compaction = false;
@@ -280,7 +284,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
             is_compaction = true;
         }
     }
-    for entry in &entries[tool_start..] {
+    for entry in &tool_entries[batch_start..] {
         if matches!(
             entry.kind,
             ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
@@ -325,6 +329,39 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
         last_assistant_tool,
         current_turn_tool_categories,
     }
+}
+
+fn latest_responses_tool_batch_start(entries: &[ResponsesTurnEntry]) -> usize {
+    let mut start = 0;
+    let mut pending = BTreeSet::new();
+    let mut has_unidentified_call = false;
+    let mut complete = false;
+    for (index, entry) in entries.iter().enumerate() {
+        match entry.kind {
+            ResponsesTurnKind::ToolCall => {
+                if complete {
+                    start = index;
+                    complete = false;
+                }
+                if let Some(call_id) = entry.tool_call_id.as_deref() {
+                    pending.insert(call_id);
+                } else {
+                    has_unidentified_call = true;
+                }
+            }
+            ResponsesTurnKind::ToolOutput => {
+                if entry
+                    .tool_call_id
+                    .as_deref()
+                    .is_some_and(|id| pending.remove(id))
+                {
+                    complete = pending.is_empty() && !has_unidentified_call;
+                }
+            }
+            _ => {}
+        }
+    }
+    start
 }
 
 fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
@@ -641,6 +678,17 @@ fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
     entry.role = role;
     let kind = responses_kind_for_value(value);
     entry.kind = kind;
+    if matches!(
+        kind,
+        ResponsesTurnKind::ToolCall | ResponsesTurnKind::ToolOutput
+    ) {
+        entry.tool_call_id = value
+            .get("call_id")
+            .or_else(|| value.get("tool_call_id"))
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
+    }
     entry.has_image = value_contains_image(value);
     entry.has_web_search = responses_entry_has_web_search(value);
     entry.is_tool_output_error =

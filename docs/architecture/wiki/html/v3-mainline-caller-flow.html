@@ -4536,7 +4536,7 @@ flowchart TD
         <span class="summary-sub">2 edges · <code>vr.current_turn_typed_route_facts</code> · V3HubReqExecution05Planned → V3CurrentTurnRouteFacts</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Typed current-turn route facts are produced before VR selection and cannot be reconstructed from request history or business text. Images, tools, search calls and their results only classify when they belong structurally to the current turn; earlier user/tool turns remain business history and never change the current classification.</p>
+        <p class="chain-summary">Typed current-turn route facts, including the latest Responses tool batch, are produced before VR selection and cannot be reconstructed from request history or business text. Images, tools, search calls and their results only classify when they belong structurally to the current turn; earlier user/tool turns remain business history and never change the current classification.</p>
         <div class="branch-meta">
           <span>owner: <code>vr.current_turn_typed_route_facts</code></span>
           <span>modules: <code>routecodex-v3-route-classifier · v3-runtime</code></span>

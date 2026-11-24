@@ -7336,7 +7336,7 @@ chains:
       side_channel_writes: []
 - chain_id: vr.current_turn_typed_route_facts
   owner_feature_id: vr.current_turn_typed_route_facts
-  summary: Typed current-turn route facts are produced before VR selection and
+  summary: Typed current-turn route facts, including the latest Responses tool batch, are produced before VR selection and
     cannot be reconstructed from request history or business text. Images, tools,
     search calls and their results only classify when they belong structurally to
     the current turn; earlier user/tool turns remain business history and never

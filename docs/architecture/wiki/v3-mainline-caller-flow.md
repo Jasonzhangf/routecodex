@@ -2819,7 +2819,7 @@ flowchart TD
 
 ## vr.current_turn_typed_route_facts
 
-Typed current-turn route facts are produced before VR selection and cannot be reconstructed from request history or business text. Images, tools, search calls and their results only classify when they belong structurally to the current turn; earlier user/tool turns remain business history and never change the current classification.
+Typed current-turn route facts, including the latest Responses tool batch, are produced before VR selection and cannot be reconstructed from request history or business text. Images, tools, search calls and their results only classify when they belong structurally to the current turn; earlier user/tool turns remain business history and never change the current classification.
 
 Owner feature: `vr.current_turn_typed_route_facts`
 Manifest: `docs/architecture/manifests/vr.route_classifier.mainline.yml`
