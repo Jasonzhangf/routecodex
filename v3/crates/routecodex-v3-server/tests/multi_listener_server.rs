@@ -14296,15 +14296,20 @@ async fn debug_response_dry_run_replays_anthropic_provider_json_through_relay_re
     let content = body["clientResponse"]["content"]
         .as_array()
         .expect("Anthropic client response content");
-    assert!(content.iter().any(|part| {
-        part.get("type").and_then(Value::as_str) == Some("text")
-            && part.get("text").and_then(Value::as_str) == Some("调用工具 probe：确认当前工作目录")
-    }));
+    assert!(
+        content
+            .iter()
+            .all(|part| part.get("type").and_then(Value::as_str) != Some("text")),
+        "retired projection must not synthesize client text: {content:?}"
+    );
     let tool_use = content
         .iter()
         .find(|part| part.get("type").and_then(Value::as_str) == Some("tool_use"))
         .expect("Anthropic tool_use must remain projected");
-    assert_eq!(tool_use["input"], json!({"cmd": "pwd"}));
+    assert_eq!(
+        tool_use["input"],
+        json!({"cmd": "pwd"})
+    );
 }
 
 #[tokio::test]
