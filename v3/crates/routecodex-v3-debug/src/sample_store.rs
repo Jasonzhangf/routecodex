@@ -4,8 +4,14 @@ use std::io::{BufWriter, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::SystemTime;
 
-use crate::sample_retention::enforce_v3_codex_sample_global_retention;
+use crate::sample_retention::{
+    admit_v3_codex_sample_failure, enforce_v3_codex_sample_global_retention,
+    enforce_v3_codex_sample_global_retention_at, read_v3_codex_sample_retention_kind,
+    write_v3_codex_sample_retention_marker, V3CodexSampleRetentionAdmission,
+    V3CodexSampleRetentionKind,
+};
 
 /// Error snapshots are retained by request-id directory.  A request may have
 /// client request/response plus provider request/response files, but those four
@@ -278,6 +284,32 @@ impl V3CodexSampleStore {
         force: bool,
         status: Option<u16>,
     ) -> Result<(), String> {
+        self.persist_at(
+            port,
+            entry_protocol,
+            endpoint,
+            request_id,
+            file_name,
+            payload,
+            force,
+            status,
+            SystemTime::now(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn persist_at(
+        &self,
+        port: u16,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        file_name: &str,
+        payload: &Value,
+        force: bool,
+        status: Option<u16>,
+        now: SystemTime,
+    ) -> Result<(), String> {
         if !self.should_persist(force, status) {
             return Ok(());
         }
@@ -285,6 +317,29 @@ impl V3CodexSampleStore {
         let _filesystem_guard = lock_v3_codex_sample_filesystem(&samples_root)?;
         let dir = v3_codex_sample_request_dir(port, entry_protocol, endpoint, request_id)?;
         let is_new_request_dir = !dir.is_dir();
+        let existing_kind = if is_new_request_dir {
+            V3CodexSampleRetentionKind::Success {
+                first_persisted: None,
+            }
+        } else {
+            read_v3_codex_sample_retention_kind(&dir)
+        };
+        let starts_failure_record =
+            force && !matches!(existing_kind, V3CodexSampleRetentionKind::Failure { .. });
+        if starts_failure_record {
+            if matches!(
+                admit_v3_codex_sample_failure(&samples_root, None, now)?,
+                V3CodexSampleRetentionAdmission::FailureReserveFull
+            ) {
+                self.record_persist_failure(
+                    request_id.to_string(),
+                    file_name.to_string(),
+                    "diagnostic overflow: 256-directory failure reserve full; persistence skipped"
+                        .to_string(),
+                );
+                return Ok(());
+            }
+        }
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
@@ -296,12 +351,27 @@ impl V3CodexSampleStore {
         serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
         file.flush().map_err(|error| error.to_string())?;
+        let retention_marker = match existing_kind {
+            V3CodexSampleRetentionKind::Failure { .. } => None,
+            V3CodexSampleRetentionKind::Success {
+                first_persisted: Some(_),
+            } if !force => None,
+            V3CodexSampleRetentionKind::Success { .. } => Some(now),
+        };
+        if let Some(first_persisted) = retention_marker {
+            write_v3_codex_sample_retention_marker(&dir, force, first_persisted)?;
+        }
         // Retention counts request directories, so the full-tree sweep only needs
         // to run when this write created one. Re-scanning the whole samples root
         // for every file of a request multiplied the Debug worker cost by the
         // per-request file count.
         if is_new_request_dir {
-            enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
+            enforce_v3_codex_sample_global_retention_at(
+                &samples_root,
+                Some(&dir),
+                self.retention,
+                now,
+            )?;
         }
         Ok(())
     }
@@ -335,6 +405,21 @@ impl V3CodexSampleStore {
                 error.into_inner()
             })
             .snapshot()
+    }
+
+    fn record_persist_failure(&self, request_id: String, file_name: String, reason: String) {
+        let mut failures = self.persist_failures.lock().unwrap_or_else(|error| {
+            eprintln!("codex sample persist failure ledger lock poisoned: {error}");
+            error.into_inner()
+        });
+        let failure = V3CodexSamplePersistFailure {
+            request_id,
+            file_name,
+            reason,
+        };
+        if failures.record(failure.clone()) {
+            eprintln!("codex sample persist failed: {failure}");
+        }
     }
 
     /// Spawn the single async owner for sample persistence.
