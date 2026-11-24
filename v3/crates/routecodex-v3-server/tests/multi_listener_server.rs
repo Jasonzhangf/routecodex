@@ -5001,15 +5001,42 @@ fn anthropic_sse_malformed_reasoning_fixture() -> Vec<u8> {
     ])
 }
 
+fn anthropic_sse_empty_signed_reasoning_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_empty_signed","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":9}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-empty-thinking"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Visible answer"}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
+fn anthropic_json_empty_signed_reasoning_fixture() -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "id":"msg_empty_signed",
+        "type":"message",
+        "role":"assistant",
+        "model":"wire-test",
+        "content":[
+            {"type":"thinking","thinking":"","signature":"sig-empty-thinking"},
+            {"type":"text","text":"Visible answer"}
+        ],
+        "stop_reason":"end_turn",
+        "stop_sequence":null,
+        "usage":{"input_tokens":9,"output_tokens":4}
+    }))
+    .unwrap()
+}
+
 async fn controlled_anthropic_reasoning_upstream(
     State(state): State<Arc<ControlledAnthropicReasoningState>>,
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
-    assert_eq!(
-        body["stream"], true,
-        "the controlled SSE provider requires an SSE request: {body}"
-    );
+    let provider_stream = body["stream"].as_bool().unwrap_or(false);
     assert_eq!(
         header_text(&headers, "x-api-key").as_deref(),
         Some("reasoning-controlled-key")
@@ -5036,7 +5063,12 @@ async fn controlled_anthropic_reasoning_upstream(
     });
     let redacted_reasoning_association = control("redacted-reasoning-association");
     let mixed_reasoning_order = control("mixed-reasoning-order");
-    let bytes = if control("malformed-reasoning-control") {
+    let empty_signed_reasoning = control("empty-signed-reasoning-control");
+    let bytes = if empty_signed_reasoning && provider_stream {
+        anthropic_sse_empty_signed_reasoning_fixture()
+    } else if empty_signed_reasoning {
+        anthropic_json_empty_signed_reasoning_fixture()
+    } else if control("malformed-reasoning-control") {
         anthropic_sse_malformed_reasoning_fixture()
     } else if followup {
         anthropic_sse_final_fixture()
@@ -5049,7 +5081,14 @@ async fn controlled_anthropic_reasoning_upstream(
     };
     Response::builder()
         .status(StatusCode::OK)
-        .header("content-type", "text/event-stream")
+        .header(
+            "content-type",
+            if empty_signed_reasoning && !provider_stream {
+                "application/json"
+            } else {
+                "text/event-stream"
+            },
+        )
         .body(Body::from(bytes))
         .unwrap()
 }
@@ -5847,6 +5886,89 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
         );
     }
 
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_empty_signed_thinking_completes_json_and_sse_without_reselection(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    for stream in [false, true] {
+        let response = client
+            .post(&endpoint)
+            .json(&json!({
+                "model":"client-test",
+                "input":"empty-signed-reasoning-control",
+                "stream":stream
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.text().await.unwrap();
+        let completed = if stream {
+            reasoning_client_completed_response(&body)
+        } else {
+            serde_json::from_str::<Value>(&body).unwrap_or_else(|error| {
+                panic!("JSON client response must be complete JSON: {error}; {body}")
+            })
+        };
+        assert_eq!(completed["status"], "completed", "{completed}");
+        let output = completed["output"].as_array().expect("output array");
+        let reasoning = output
+            .iter()
+            .find(|item| item["type"] == "reasoning")
+            .unwrap_or_else(|| panic!("missing reasoning item: {completed}"));
+        assert_eq!(reasoning["summary"], json!([]), "{completed}");
+        assert_eq!(reasoning["encrypted_content"], "sig-empty-thinking");
+        assert_eq!(
+            reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["thinking"],
+            ""
+        );
+        assert_eq!(
+            reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["signature"],
+            "sig-empty-thinking"
+        );
+        assert_eq!(completed["usage"]["input_tokens"], 9, "{completed}");
+        assert_eq!(completed["usage"]["output_tokens"], 4, "{completed}");
+        let text = output
+            .iter()
+            .find(|item| item["type"] == "message")
+            .and_then(|item| item["content"][0]["text"].as_str())
+            .unwrap_or_else(|| panic!("missing visible text: {completed}"));
+        assert_eq!(text, "Visible answer");
+
+        let capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(capture.body["model"], "wire-test");
+        assert_eq!(capture.body["stream"], stream);
+    }
+
+    assert!(
+        captures.try_recv().is_err(),
+        "each public request must use its first selected provider exactly once"
+    );
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
