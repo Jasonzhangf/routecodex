@@ -1136,6 +1136,21 @@ fn tool_call_category_matches_v2_command_semantics() {
         category("exec_command", Some(&read)).as_deref(),
         Some("thinking")
     );
+    for command in ["cat ./rg", "cat src/lib.rs | rg -n route", "cat< src/lib.rs | rg -n route"] {
+        assert_eq!(
+            category("exec_command", Some(&json!({"cmd": command}))).as_deref(),
+            Some("thinking"),
+            "{command}"
+        );
+    }
+    assert_eq!(
+        category("exec_command", Some(&json!({"cmd": "rg -n route src | head"}))).as_deref(),
+        Some("search")
+    );
+    assert_eq!(
+        category("exec_command", Some(&json!({"cmd": "cat src/lib.rs && bd create task"}))).as_deref(),
+        Some("coding")
+    );
     assert_eq!(
         category("exec_command", Some(&search)).as_deref(),
         Some("search")

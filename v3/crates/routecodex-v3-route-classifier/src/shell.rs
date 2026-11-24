@@ -33,6 +33,25 @@ pub(crate) fn classify_shell_command(command: &str) -> String {
     {
         return "coding".to_string();
     }
+    let bd_command = contains_command(&normalized, "bd");
+    let bd_read_only = [" search", " list", " show"]
+        .iter()
+        .any(|subcommand| normalized.contains(subcommand));
+    if normalized
+        .split(|ch: char| ch.is_whitespace() || "<>|;&".contains(ch))
+        .find(|token| !token.is_empty())
+        .is_some_and(|binary| {
+            let binary = normalize_binary_name(binary);
+            SHELL_THINKING_COMMANDS.contains(&binary.as_str())
+                || matches!(binary.as_str(), "sed" | "awk")
+        })
+    {
+        return if bd_command && !bd_read_only {
+            "coding".to_string()
+        } else {
+            "thinking".to_string()
+        };
+    }
     if SHELL_SEARCH_COMMANDS
         .iter()
         .any(|cmd| contains_command(&normalized, cmd))
@@ -62,14 +81,8 @@ pub(crate) fn classify_shell_command(command: &str) -> String {
         }
         return "other".to_string();
     }
-    if contains_command(&normalized, "bd") {
-        if normalized.contains(" search")
-            || normalized.contains(" list")
-            || normalized.contains(" show")
-        {
-            return "search".to_string();
-        }
-        return "coding".to_string();
+    if bd_command {
+        return if bd_read_only { "search" } else { "coding" }.to_string();
     }
     if contains_command(&normalized, "sed") || contains_command(&normalized, "awk") {
         return "thinking".to_string();

@@ -1958,6 +1958,7 @@ async fn run_thinking_pool_history_size_case(
     history_text: &str,
     current_text: &str,
     expect_thinking: bool,
+    read_command: Option<&str>,
 ) {
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let gemini = path.contains("generateContent");
@@ -2060,7 +2061,7 @@ async fn run_thinking_pool_history_size_case(
         .retain(|target| target.provider.as_deref() == Some("fallback"));
 
     std::env::set_var("V3_P6_TEST_KEY", "local-thinking-history-fixture");
-    let body = if path == "/v1/responses" {
+    let mut body = if path == "/v1/responses" {
         json!({
             "model": "test",
             "stream": false,
@@ -2088,6 +2089,13 @@ async fn run_thinking_pool_history_size_case(
             ]
         })
     };
+    if let Some(command) = read_command {
+        body["input"].as_array_mut().unwrap().extend([
+            json!({"type":"function_call","name":"exec_command","call_id":"read_file",
+                   "arguments":json!({"cmd":command}).to_string()}),
+            json!({"type":"function_call_output","call_id":"read_file","output":"read completed"}),
+        ]);
+    }
 
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let result = reqwest::Client::new()
@@ -2163,17 +2171,31 @@ async fn run_thinking_pool_history_size_case(
 async fn thinking_pool_token_threshold_uses_current_turn_not_history_size() {
     let _guard = TEST_LOCK.lock().await;
     for path in ["/v1/responses", "/v1/chat/completions"] {
-        run_thinking_pool_history_size_case(path, "short history", "hello", true).await;
+        run_thinking_pool_history_size_case(path, "short history", "hello", true, None).await;
         let long_history = "history filler sentence about the current turn. ".repeat(240);
-        run_thinking_pool_history_size_case(path, &long_history, "hello", true).await;
+        run_thinking_pool_history_size_case(path, &long_history, "hello", true, None).await;
     }
     let path = "/v1beta/models/test:generateContent";
-    run_thinking_pool_history_size_case(path, &"old history ".repeat(3000), "hello", true).await;
+    run_thinking_pool_history_size_case(path, &"old history ".repeat(3000), "hello", true, None).await;
     run_thinking_pool_history_size_case(
         path,
         "short history",
         &"current request ".repeat(2000),
         false,
+        None,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn file_read_tool_continuation_selects_thinking() {
+    let _guard = TEST_LOCK.lock().await;
+    run_thinking_pool_history_size_case(
+        "/v1/responses",
+        "previous answer",
+        "read this file",
+        true,
+        Some("cat< src/lib.rs | rg -n route"),
     )
     .await;
 }
