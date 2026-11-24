@@ -9,13 +9,6 @@ pub(crate) fn v3_tool_thinking_enabled_for_server(
     v3_feature_enabled_for_server(manifest, server_id, "tool_thinking", false)
 }
 
-pub(crate) fn v3_toolreason_client_projection_enabled_for_server(
-    _manifest: &V3Config05ManifestPublished,
-    _server_id: &str,
-) -> bool {
-    false
-}
-
 pub(crate) fn v3_feature_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,

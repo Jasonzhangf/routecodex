@@ -1,8 +1,8 @@
 schema_version: 1
 lifecycle_id: v3.hub_pipeline.v1.response
 owner_feature_id: v3.hub_pipeline_static_skeleton
-summary: Fixed Hub v1 response topology. Direct/Relay/JSON/SSE/servertool
-  outcomes merge before the sole client projection and Server frame exit.
+summary: Fixed Hub v1 response topology. Direct/Relay/JSON/SSE outcomes merge
+  before the sole client projection and Server frame exit.
 entrypoint:
   node_id: V3ProviderRespInbound01Raw
   symbol: build_v3_provider_resp_inbound_01_raw

@@ -254,7 +254,6 @@ fn mixed_pool_input(
             concat!(module_path!(), ":", line!()),
         )
         .expect("test provider failure session scope"),
-        toolreason_observation_session_id: None,
         request_id: request_id.into(),
         payload: json!({
             "model":"gpt-5.5",

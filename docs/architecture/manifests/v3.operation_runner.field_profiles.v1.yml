@@ -9445,7 +9445,6 @@ operator_registry:
       params:
         execution_mode: resource
         tool_pairing: typed
-        servertool_policy: typed
         tool_thinking_turn_context: resource
     - operator: routecodex.v3.operation.project_standard_provider_request
       operator_version: "1"
@@ -9491,7 +9490,6 @@ operator_registry:
       params:
         attempt_declaration_map: resource
         explicit_history_pairing: resource
-        servertool_policy: resource
         tool_thinking_turn_context: resource
     - operator: routecodex.v3.operation.project_completed_function_call_response
       operator_version: "2"

@@ -18,7 +18,6 @@ skeleton = "hub_v1"
 
 [features]
 tool_thinking = false
-toolreason_client_projection = false
 responses_direct = true
 debug_events = true
 strip_client_response_id = true

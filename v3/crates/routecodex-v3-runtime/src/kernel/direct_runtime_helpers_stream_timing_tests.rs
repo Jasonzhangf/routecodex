@@ -61,11 +61,7 @@ async fn compact_direct_projected_stream_reaches_collector_without_loopback() {
         None,
         V3DirectSseTypedHookCatalog::default(),
         false,
-        false,
         None,
-        None,
-        None,
-        true,
         std::collections::HashMap::new(),
     );
     let result = collect_direct_sse_attempt_after_terminal(
@@ -468,119 +464,6 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_dir
         "keepalive frame must be consumed"
     );
     assert!(bytes.contains("response.completed"));
-}
-
-#[tokio::test]
-async fn direct_sse_toolreason_records_typed_observation_at_resp03() {
-    let request_id = format!("{}-request-live-observation", module_path!());
-    let observation = V3RuntimeStreamObservation::default();
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let source = V3ProviderAttemptSseStream::new(Box::pin(stream::iter(vec![Ok(
-            r#"event: response.output_item.added
-data: {"type":"response.output_item.added","output_index":0,"item":{"id":"call_live_observation","type":"function_call","name":"pwd","call_id":"call_live_observation","arguments":""}}
-
-event: response.function_call_arguments.done
-data: {"type":"response.function_call_arguments.done","output_index":0,"item_id":"call_live_observation","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"}
-
-event: response.output_item.done
-data: {"type":"response.output_item.done","output_index":0,"item":{"id":"call_live_observation","type":"function_call","name":"pwd","call_id":"call_live_observation","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"}}
-
-event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_live_observation","status":"completed","output":[{"id":"call_live_observation","type":"function_call","name":"pwd","call_id":"call_live_observation","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\"}"}]}}
-
-"#
-            .as_bytes()
-            .to_vec(),
-        )])));
-    let mut projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-        source,
-        observation.clone(),
-        runtime_timing,
-        false,
-        false,
-        V3HubProviderWireProtocol::Responses,
-        false,
-        false,
-        None,
-        None,
-        crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
-        false,
-        false,
-        Some("session-live-observation".to_string()),
-        Some(request_id.clone()),
-        Some("gpt-5.6-sol".to_string()),
-        true,
-        std::collections::HashMap::new(),
-    );
-
-    while let Some(chunk) = projected.next().await {
-        chunk.expect("live-equivalent Direct Toolreason SSE must project");
-    }
-
-    let snapshot = observation.snapshot().expect("observation snapshot");
-    assert!(snapshot.toolreason.is_none());
-}
-
-#[tokio::test]
-async fn direct_sse_toolreason_missing_records_typed_observation_without_projection() {
-    let request_id = format!("{}-request-live-missing", module_path!());
-    let observation = V3RuntimeStreamObservation::default();
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let source = V3ProviderAttemptSseStream::new(Box::pin(stream::iter(vec![Ok(
-            r#"event: response.output_item.added
-data: {"type":"response.output_item.added","output_index":0,"item":{"id":"call_live_missing","type":"function_call","name":"pwd","call_id":"call_live_missing","arguments":""}}
-
-event: response.output_item.done
-data: {"type":"response.output_item.done","output_index":0,"item":{"id":"call_live_missing","type":"function_call","name":"pwd","call_id":"call_live_missing","arguments":"{\"cmd\":\"pwd\"}"}}
-
-event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_live_missing","status":"completed","output":[{"id":"call_live_missing","type":"function_call","name":"pwd","call_id":"call_live_missing","arguments":"{\"cmd\":\"pwd\"}"}]}}
-
-"#
-            .as_bytes()
-            .to_vec(),
-        )])));
-    let mut projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-        source,
-        observation.clone(),
-        runtime_timing,
-        false,
-        false,
-        V3HubProviderWireProtocol::Responses,
-        false,
-        false,
-        None,
-        None,
-        crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
-        false,
-        false,
-        Some("session-live-missing".to_string()),
-        Some(request_id.clone()),
-        Some("gpt-5.6-sol".to_string()),
-        true,
-        std::collections::HashMap::new(),
-    );
-    let mut client_sse = Vec::new();
-    while let Some(chunk) = projected.next().await {
-        client_sse.extend_from_slice(
-            chunk
-                .expect("missing Toolreason must preserve the native call")
-                .as_ref(),
-        );
-    }
-
-    let client_sse = String::from_utf8(client_sse).unwrap();
-    assert!(!client_sse.contains("rcc_reason_"));
-    assert!(!client_sse.contains("response.output_text.delta"));
-    assert!(client_sse.contains("call_live_missing"));
-    assert!(client_sse.contains(r#"{\"cmd\":\"pwd\"}"#));
-    assert!(observation
-        .snapshot()
-        .expect("observation snapshot")
-        .toolreason
-        .is_none());
 }
 
 #[tokio::test]

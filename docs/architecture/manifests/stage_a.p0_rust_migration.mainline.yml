@@ -1,9 +1,8 @@
 lifecycle_id: stage_a.p0_rust_migration.mainline
 summary: "Stage A locks P0 Rust migration owner boundaries before
-  implementation: servertool followup orchestration, Anthropic conversion,
-  Responses continuation store, and request/response Chat Process tool
-  governance."
-owner_feature_id: servertool.followup_orchestration
+  implementation: Anthropic conversion, Responses continuation store, and
+  request/response Chat Process tool governance."
+owner_feature_id: conversion.shared.anthropic
 entrypoint:
   node_id: HubRespChatProcess03Governed
   wiki_page: null
@@ -17,25 +16,7 @@ node_ids:
   - OpenAiChatCanonical
   - ResponsesContinuationStore
   - ResponsesRequestInbound
-  - ServertoolOutcome
 edges:
-  - step_id: stage-a-p0-01
-    from_node: HubRespChatProcess03Governed
-    to_node: ServertoolOutcome
-    status: anchored
-    owner_feature_id: servertool.followup_orchestration
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes:
-        - response.hub_semantic
-        - servertool.followup_state
-      produces:
-        - stage_a.servertool_outcome_plan
-      side_channel_reads:
-        - servertool.followup_state
-      side_channel_writes:
-        - stage_a.servertool_outcome_plan
   - step_id: stage-a-p0-02
     from_node: AnthropicChatInbound
     to_node: OpenAiChatCanonical

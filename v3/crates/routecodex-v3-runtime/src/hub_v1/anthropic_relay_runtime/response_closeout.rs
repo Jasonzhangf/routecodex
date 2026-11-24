@@ -79,14 +79,6 @@ where
         return Err(V3AnthropicRelayRuntimeError::ProviderResponseEmpty);
     }
     let stream_observation = V3RuntimeStreamObservation::default();
-    crate::hub_v1::record_v3_toolreason_observation_at_resp03(
-        &resp02_payload,
-        &stream_observation,
-        response_hook_profile.toolreason_observation_session_id(),
-        response_hook_profile.toolreason_observation_request_id(),
-        response_hook_profile.toolreason_expected_model_id(),
-    )
-    .map_err(V3AnthropicRelayRuntimeError::Target)?;
     // 续杯只看源显式 summary：必须在 govern 可能合成 summary 之前取自归一化后的
     // 原生 payload，否则合成 summary 会被误判成源显式。
     let has_source_summary = refill.is_some()

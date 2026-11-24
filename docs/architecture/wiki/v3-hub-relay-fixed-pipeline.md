@@ -29,8 +29,8 @@ flowchart TD
   S5 --> S6[V3ServerRespOutbound06ClientFrame]
 ~~~
 
-Relay, Direct, servertool followup, Dry Run, JSON, and SSE are typed branches or hook profiles
-inside this lifecycle. Responses continuation is retired and is not a branch or lifecycle.
+Relay, Direct, Dry Run, JSON, and SSE are typed branches or hook profiles inside this lifecycle.
+Responses continuation is retired and is not a branch or lifecycle.
 
 ## Worker split
 
@@ -38,7 +38,7 @@ inside this lifecycle. Responses continuation is retired and is not a branch or 
 | --- | --- | --- | --- |
 | A | `feature_id:v3.hub_relay_request_semantics` | Req01-Req07 request semantics and provider-facing request shape | no request shortcut, fail-fast continuation boundary, provider request blackbox |
 | B | `feature_id:v3.hub_relay_response_semantics` | Resp01-Resp06 response semantics and client projection | one response exit, no continuation save, client JSON/SSE blackbox |
-| C | `feature_id:v3.hub_relay_runtime_resources_hooks` | Config Manifest resources, static entry/exit hooks, servertool hook profile | no dynamic hooks, Runtime consumes Manifest only, resource isolation |
+| C | `feature_id:v3.hub_relay_runtime_resources_hooks` | Config Manifest resources and static entry/exit hooks | no dynamic hooks, Runtime consumes Manifest only, resource isolation |
 | D | `feature_id:v3.hub_relay_gate_review_surface` | maps, wiki, verification gates, red fixtures, migration control | queryable owners/gates, shortcut red tests, P6 freeze |
 
 ## Continuation retirement
@@ -91,7 +91,7 @@ Relay is borrow-first and move-at-boundary:
   generic Responses transport, fixed Resp01-Resp06, Error01-06, and JSON/SSE client projection are
   connected and verified against the controlled loopback upstream.
 - Hub Relay runtime closeout: `v3.hub_relay_runtime_closeout` binds controlled JSON/SSE E2E,
-  servertool response hook profile, Error01-06, side-channel isolation, copy-budget probes,
+  the complete-response hook profile, Error01-06, side-channel isolation, copy-budget probes,
   Responses Relay source server entry, and one `V3ServerRespOutbound06ClientFrame` response exit.
 - Responses Relay transport split: provider request transport intent, provider response body kind,
   and client response projection intent are separate; `stream=true` asks upstream for SSE but still
@@ -124,8 +124,8 @@ Relay is borrow-first and move-at-boundary:
   SSE, Server, store, second exit, or post-governance semantic repair. Run response focused
   test/verifier/red fixture plus shared architecture gates.
 - C resources/hooks: Config declares all fixed node entry/exit hooks and resource access; Manifest
-  compiles deterministic `priority -> order -> hook_id`; Runtime consumes Manifest only; servertool
-  remains Req04/Resp03. Run static-hook/resource/config/compile-fail gates.
+  compiles deterministic `priority -> order -> hook_id`; Runtime consumes Manifest only; ordinary
+  tool governance remains Req04/Resp03. Run static-hook/resource/config/compile-fail gates.
 - Integration: preserve existing node IDs and P6 freeze, run all D gates, then review copy budget,
   immutable interval, Error chain, provider/client payload isolation, and forbidden completion
   claims. No worker slice alone proves live Relay.
@@ -138,8 +138,7 @@ Relay is borrow-first and move-at-boundary:
 - `v3-hub-relay-copy-probe-02` proves SSE keeps its transport intent, one shared canonical response
   payload, and the sole Server response exit; the gate rejects stream collection/materialization.
 - `v3-hub-relay-copy-probe-03` binds the response compat-to-normalized leg for the same SSE probe.
-- These are test/source gates only. They do not establish live Relay or servertool runtime
-  execution.
+- These are test/source gates only. They do not establish live Relay runtime execution.
 
 ## Hub Relay runtime closeout
 
@@ -154,8 +153,6 @@ Relay is borrow-first and move-at-boundary:
   provider request.
 - Live 5555 evidence proves POST `/v1/responses` Relay JSON/SSE returns exact provider markers with
   the fixed Req01-Req09/Resp01-Resp06 trace and no Direct/P6 markers.
-- The servertool case proves a `servertool.exec` response hook profile is consumed by Runtime
-  response governance without creating a second response exit or continuation store.
 - The provider-error case proves Error01-06 projection without Resp01 success projection.
 - OpenAI Chat SSE provider-event decoding is an internal block on
   `V3ProviderRespInbound01Raw -> ProviderRespCompat02ProviderCompat`. A wire index identifies only
@@ -170,46 +167,16 @@ Relay is borrow-first and move-at-boundary:
   live cutover, global install, restart, release, real-provider compatibility, or production
   replacement.
 
-## Relay tool/servertool multiturn parity closeout
+## Retired relay tool/servertool multiturn parity closeout
 
-- Feature: `v3.relay_tool_servertool_multiturn_parity_closeout`.
-- Machine lifecycle: `v3.hub_relay.tool_servertool_multiturn_parity`.
-- Manifest:
-  [v3.hub_relay.tool_servertool_multiturn_parity](../manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml).
-- Edges: `v3-relay-tool-parity-01`, `v3-relay-tool-parity-02`, and `v3-relay-tool-parity-04` through `v3-relay-tool-parity-06`.
-- Owner boundary: Req04 request Chat Process governs current-turn tool outputs and the servertool
-  request hook profile; Resp03 response Chat Process harvests tool calls and classifies
-  servertool/apply_patch/MCP/native/custom/function tools.
-- apply_patch boundary: Resp03 projects model-emitted `function_call apply_patch` arguments into
-  client-facing freeform `custom_tool_call.input`; Req04 pairs the returned tool output by
-  `call_id` and preserves the exact client executor output in the next provider request. This remains a Chat Process tool governance
-  hook block, not an apply_patch lifecycle, servertool lifecycle, handler repair, or SSE repair.
-- Positive matrix:
-  - ordinary function/tool output;
-  - Responses Relay JSON preserves the current request's tool output and `tools` declaration;
-  - custom tool output;
-  - servertool hook profile;
-  - apply_patch freeform client projection and exact next-turn failure or success feedback;
-  - MCP and native tool families;
-  - historical image/attachment placeholder with current-turn payload preserved;
-  - JSON and SSE arbitrary chunk ordering through the one `V3ServerRespOutbound06ClientFrame` exit.
-- Negative matrix:
-  - orphan tool output;
-  - wrong Responses Relay `call_id` fails before provider send without continuation state;
-  - missing `call_id`;
-  - custom/function output kind mismatch;
-  - malformed attachment resource;
-  - provider/client payload `metadata_center`/RouteCodex control leakage;
-  - Server/handler/provider/runtime/SSE repair or full materialization.
-- Completion boundary: this is controlled Rust Runtime parity only. It does not change provider
-  transport socket/cache, inbound WebSocket proxy, live config, P6, global install/restart/release,
-  or production cutover.
+- Retired: the `v3.hub_relay.tool_servertool_multiturn_parity` lifecycle, its feature binding, and
+  its manifest are retired and must not be restored.
+- Replaced by: ordinary tool governance in Req04/Resp03, bounded refill, and Direct/Relay protocol
+  projection.
+- Historical evidence remains in Git. This page is not an active owner, config, or gate surface.
 
 ## Required gates
 
-- `npm run test:v3-relay-tool-servertool-multiturn-parity-closeout`
-- `npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout`
-- `npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures`
 - `npm run test:v3-anthropic-codec-characterization`
 - `npm run test:v3-openai-chat-codec-characterization`
 - `npm run test:v3-gemini-codec-characterization`

@@ -15,8 +15,8 @@ metadata_center:
   kind: typed_identity_and_field_provenance_control_not_protocol_metadata_or_business_payload
   slots: [inbound_inverse_context, attempt_projection_context, attempt_declaration_map, explicit_history_pairing, response_field_provenance, response_tool_call_binding]
   writer_policy: each_slot_has_the_single_node_writer_declared_below
-  attempt_policy: failed_attempt_slots_are_released_by_typed_attempt_cleanup_before_next_candidate; successful_attempt_slots_are_released_after_final_client_projection_or_after_servertool_sidecar_execution; terminal_client_error_cancel_or_disconnect_release_attempt_slots_before_request_finalizer; request_inverse_context_and_explicit_history_pairing_remain_until_runtime_request_finalizer
-  finalizer: runtime_request_finalizer_is_the_sole_request_cleanup_owner_and_runs_only_on_final_client_commit_terminal_client_error_cancel_or_disconnect; terminal_client_error_cancel_and_disconnect_run_attempt_cleanup_before_request_finalizer; retry_and_servertool_followup_do_not_trigger_request_scope_release
+  attempt_policy: failed_attempt_slots_are_released_by_typed_attempt_cleanup_before_next_candidate; successful_attempt_slots_are_released_after_final_client_projection_or_after_refill_requested_attempt_cleanup; terminal_client_error_cancel_or_disconnect_release_attempt_slots_before_request_finalizer; request_inverse_context_and_explicit_history_pairing_remain_until_runtime_request_finalizer
+  finalizer: runtime_request_finalizer_is_the_sole_request_cleanup_owner_and_runs_only_on_final_client_commit_terminal_client_error_cancel_or_disconnect; terminal_client_error_cancel_and_disconnect_run_attempt_cleanup_before_request_finalizer; retry_and_refill_requested_do_not_trigger_request_scope_release
   forbidden: [request_body, response_body, provider_wire, protocol_metadata, history_values, debug_snapshot, cross_request_tool_binding]
 last_provider_failure_policy:
   requirement: routecodex-last-provider-failure-terminal-policy@1
@@ -73,12 +73,12 @@ lifecycle_terminals:
   condition: error_execution_decision=retry and the error chain admits a bounded action with remaining attempt budget
   consumes: [error-execution-decision]
   release: failed attempt contexts, response buffers, and provider permits through typed attempt_cleanup before the next candidate; request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer; never reuses graph cycles or response-graph backedges
-- name: servertool_followup
-  owner: RuntimeInternalFollowup
-  condition: execution_disposition=servertool_followup
-  consumes: [execution-disposition, servertool_sidecar_plan]
-  effect: the fixed response graph returns an empty client stage; Runtime discards it, executes the declared sidecar, then re-enters the request graph with internal origin
-  release: servertool_sidecar_plan and successful-attempt contexts are released through typed attempt_cleanup after sidecar execution before request re-entry; intermediate response never reaches client SSE commit; same runner re-enters the request graph before any client commit; request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer
+- name: refill_requested
+  owner: RuntimeRefillExecution
+  condition: execution_disposition=refill_requested
+  consumes: [execution-disposition, refill_continuation_signal]
+  effect: the fixed response graph returns an empty client stage; Runtime discards it, releases the completed attempt scope, and launches a new request execution through the normal Runtime request mainline without client commit
+  release: refill_continuation_signal and successful-attempt contexts are released through typed attempt_cleanup before the new request execution; intermediate response never reaches client SSE commit; request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer
 - name: cancel
   owner: RuntimeCancellation
   condition: cancellation observed after a DAG wave drain before later wave starts
@@ -104,10 +104,10 @@ lifecycle_terminals:
 typed_cleanup_events:
   attempt_cleanup:
     owner: RuntimeAttemptCleanup (same Runtime runner)
-    condition: retry launch, servertool follow-up, final successful client_commit, terminal_client_error, cancel, or disconnect; terminal_client_error cleanup runs after Server/SSE transport termination without client commit and before RuntimeRequestFinalizer; cancel and disconnect cleanup runs before RuntimeRequestFinalizer
+    condition: retry launch, refill requested, final successful client_commit, terminal_client_error, cancel, or disconnect; terminal_client_error cleanup runs after Server/SSE transport termination without client commit and before RuntimeRequestFinalizer; cancel and disconnect cleanup runs before RuntimeRequestFinalizer
     consumes:
       retry: [attempt_id, error_execution_decision]
-      servertool_followup: [attempt_id, execution_disposition, servertool_sidecar_plan]
+      refill_requested: [attempt_id, execution_disposition, refill_continuation_signal]
       client_commit: [attempt_id, execution_disposition]
       terminal_client_error: [attempt_id, error_execution_decision, error_client_projected_candidate]
       cancel: [attempt_id, cancellation]
@@ -115,23 +115,23 @@ typed_cleanup_events:
     releases: attempt_projection_context, attempt_declaration_map, response_provenance, response_tool_binding, client_frame_candidate, provider/response buffers, provider permits
     never: request_inverse_context, explicit_history_pairing, execution_mode, metadata_center request-scoped slots
     effect: finite typed release between graph invocations or before final request cleanup; no second runner, no graph backedge, no local continuation store; attempt-scoped resources are never released again by RuntimeRequestFinalizer
-servertool_hop:
-  owner: RuntimeInternalFollowup
-  condition: execution_disposition=servertool_followup
-  consumes: [execution-disposition, servertool_sidecar_plan]
-  release: servertool_sidecar_plan and successful-attempt contexts through attempt_cleanup after sidecar execution before request re-entry; request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer; intermediate response never reaches client SSE commit; same runner re-enters the request graph with internal origin before client commit
+refill_hop:
+  owner: RuntimeRefillExecution
+  condition: execution_disposition=refill_requested
+  consumes: [execution-disposition, refill_continuation_signal]
+  release: refill_continuation_signal and successful-attempt contexts through attempt_cleanup before the new request execution; request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer; intermediate response never reaches client SSE commit; Runtime launches a new request execution without client commit
 execution_disposition:
   owner: govern_v3_operation_runner_chat_response
   producer: govern_v3_operation_runner_chat_response
-  consumers: [runtime_client_commit, RuntimeInternalFollowup, RuntimeRequestFinalizer]
-  legal_values: [client_commit, servertool_followup]
+  consumers: [runtime_client_commit, RuntimeRefillExecution, RuntimeRequestFinalizer]
+  legal_values: [client_commit, refill_requested]
   client_commit_effect: every response node runs in fixed order; after all declared Direct/Relay rewrites, the complete attempt must retain deliverable business content; RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
   empty_attempt_effect: if all declared rewrites complete and only a deliberately removed non-client control envelope remains, emit no committed frame; project ProviderFailure/provider_response_empty as internal 502 into Error01
   processing_failure_effect: if a declared rewrite, inverse projection, or framing step loses, corrupts, or fails representable business content, project RuntimeFailure/internal 599 into Error01 instead of blaming upstream or committing partial output
-  servertool_effect: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it, executes the declared typed sidecar plan, runs typed attempt_cleanup, and re-enters the request graph without client commit
-  finalizer_rule: RuntimeRequestFinalizer consumes this disposition only after client_commit or terminal no-commit outcome; retry and servertool_followup never trigger request-scoped cleanup
+  refill_effect: RespOutbound and frame staging return an empty candidate for refill_requested; Runtime discards it, runs typed attempt_cleanup, and launches a new request execution without client commit
+  finalizer_rule: RuntimeRequestFinalizer consumes this disposition only after client_commit or terminal no-commit outcome; retry and refill_requested never trigger request-scoped cleanup
   cancel_effect: cancellation is Runtime-owned; it is not produced by Resp03
-  release: runtime_request_finalizer for terminal outcomes; servertool_followup disposition is released by attempt_cleanup before request re-entry
+  release: runtime_request_finalizer for terminal outcomes; refill_requested disposition is released by attempt_cleanup before the new request execution
 error_execution_decision:
   owner: ErrorErr05ExecutionDecision
   producer: ErrorErr05ExecutionDecision
@@ -160,7 +160,7 @@ typed_resources:
     storage: metadata_center.inbound_inverse_context
     producer: normalize_v3_operation_runner_request_losslessly
     readers: [normalize_v3_operation_runner_request_losslessly, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
-    content: immutable original client entry-protocol field provenance and actual current request tool identities with source paths and encoding; remains valid across retry and internal servertool follow-up
+    content: immutable original client entry-protocol field provenance and actual current request tool identities with source paths and encoding; remains valid across retry and internal refill re-entry
     internal_origin_rule: never rebuilt from an internal follow-up payload; request graph re-entry reads the preserved slot and does not replace it
     client_entry_rule: initialized only when request_origin_kind=client_entry
     retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
@@ -172,7 +172,7 @@ typed_resources:
     producer: project_v3_operation_runner_standard_provider_request
     readers: [normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]
     identity: [requestId, attemptId, selectedProviderProtocol, modelCapabilityRevision]
-    release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup
+    release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_refill_requested_attempt_cleanup
   attempt_declaration_map:
     resource: v3.operation_runner.attempt_declaration_map
     storage: metadata_center.attempt_declaration_map
@@ -183,7 +183,7 @@ typed_resources:
     - inverse_project_v3_operation_runner_client_response
     content: collision-safe bijection for tools actually emitted for this successful attempt
     payload_rule: arguments and inputs remain opaque business payload; only identity, namespace, kind, encoding, and call/output references are typed control state
-    release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup
+    release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_refill_requested_attempt_cleanup
   explicit_history_pairing:
     resource: v3.operation_runner.explicit_history_pairing
     storage: metadata_center.explicit_history_pairing
@@ -204,7 +204,7 @@ typed_resources:
     - inverse_project_v3_operation_runner_client_response
     content: successful attempt provider response source and canonical-path provenance
     payload_rule: provenance is typed control metadata and is never reconstructed from response payload fields
-    release: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_runtime_request_finalizer
+    release: after_final_client_inverse_projection_or_after_refill_requested_attempt_cleanup_or_runtime_request_finalizer
   response_tool_binding:
     resource: v3.operation_runner.response_tool_binding
     storage: metadata_center.response_tool_call_binding
@@ -212,7 +212,7 @@ typed_resources:
     readers:
     - inverse_project_v3_operation_runner_client_response
     content: new provider call returned in this successful attempt, bound to response provenance and the attempt declaration map
-    release: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_runtime_request_finalizer
+    release: after_final_client_inverse_projection_or_after_refill_requested_attempt_cleanup_or_runtime_request_finalizer
   execution_disposition:
     resource: v3.operation_runner.execution_disposition
     producer: govern_v3_operation_runner_chat_response
@@ -220,16 +220,16 @@ typed_resources:
     - inverse_project_v3_operation_runner_client_response
     - frame_v3_operation_runner_committed_client_response
     - runtime_client_commit
-    - RuntimeInternalFollowup
+    - RuntimeRefillExecution
     - RuntimeRequestFinalizer
-    legal_values: [client_commit, servertool_followup]
+    legal_values: [client_commit, refill_requested]
     graph_rule: every response node runs once in fixed order; the disposition never changes graph topology or skips a node
     client_commit_effect: after every declared Direct/Relay rewrite, the complete attempt must retain deliverable business content; RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
     empty_attempt_effect: if only a deliberately removed non-client envelope remains after declared rewrites, no frame is committed and ProviderFailure/provider_response_empty enters Error01 as internal 502
     processing_failure_effect: loss or failure of representable business content during rewrite, projection, or framing enters Error01 as RuntimeFailure/internal 599
-    servertool_effect: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it, executes the declared sidecar, and re-enters the request graph without client commit
-    finalizer_rule: RuntimeRequestFinalizer reads this disposition only after client_commit or terminal no-commit outcome; not on servertool_followup or retry
-    release: runtime_request_finalizer for terminal outcomes; servertool_followup disposition is released by attempt_cleanup before request re-entry
+    refill_effect: RespOutbound and frame staging return an empty candidate for refill_requested; Runtime discards it, runs typed attempt_cleanup, and launches a new request execution without client commit
+    finalizer_rule: RuntimeRequestFinalizer reads this disposition only after client_commit or terminal no-commit outcome; not on refill_requested or retry
+    release: runtime_request_finalizer for terminal outcomes; refill_requested disposition is released by attempt_cleanup before the new request execution
   error_execution_decision:
     resource: v3.error.execution_decision
     producer: ErrorErr05ExecutionDecision
@@ -253,17 +253,17 @@ typed_resources:
     deliverable_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are business results; usage and the last frame alone are not evidence of deliverability
     empty_attempt_rule: no candidate is committed when a complete attempt is empty after declared non-client envelope removal; internal 502 enters Error01
     processing_failure_rule: a lost or failed representable business result enters Error01 as internal 599, not as upstream failure or partial success
-    servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it before servertool re-entry
-    release: runtime_client_commit; empty servertool candidate is released by attempt_cleanup before request re-entry
-  servertool_sidecar_plan:
-    resource: v3.operation_runner.servertool_sidecar_plan
+    refill_rule: RespOutbound and frame staging return an empty candidate for refill_requested; Runtime discards it before the new request execution
+    release: runtime_client_commit; empty refill candidate is released by attempt_cleanup before the new request execution
+  refill_continuation_signal:
+    resource: v3.operation_runner.refill_continuation_signal
     producer: govern_v3_operation_runner_chat_response
     readers:
-    - RuntimeInternalFollowup
-    condition: emitted only when execution_disposition=servertool_followup
-    content: declared sidecar identity and execution plan for the servertool follow-up
-    payload_rule: sidecar plan is typed control state and never serialized into client or provider body
-    release: after_sidecar_execution_before_request_reentry
+    - RuntimeRefillExecution
+    condition: emitted only when execution_disposition=refill_requested
+    content: typed refill continuation signal for the new Runtime request execution
+    payload_rule: refill signal is typed control state and never serialized into client or provider body
+    release: refill_requested_disposition_released_by_attempt_cleanup_before_new_execution
   error_client_projected_candidate:
     resource: v3.error.client_projection_candidate
     producer: ErrorErr06ClientProjected
