@@ -855,14 +855,19 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     let rate_limited = observed_status == 429;
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&source);
+    let provider_http_status = source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.provider_http_status());
     let is_health_neutral_failure = is_response_processing_failure
-        || crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
-            source.source_stage,
-            source
-                .external_error
-                .as_ref()
-                .and_then(|error| error.code.as_deref()),
-        );
+        || (provider_http_status != Some(403)
+            && crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
+                source.source_stage,
+                source
+                    .external_error
+                    .as_ref()
+                    .and_then(|error| error.code.as_deref()),
+            ));
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
@@ -970,6 +975,23 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             .map(|alternative| candidate_key(&alternative.candidate));
     }
     let final_eligible = remaining == 0 && next_provider_key.is_none();
+    if is_health_neutral_failure
+        && !final_eligible
+        && matches!(provider_http_status, Some(400..=402 | 404..=599))
+    {
+        context
+            .provider_health
+            .store()
+            .interrupt_http_403_streak(
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                &selected.candidate.auth_alias,
+                &selected.candidate.model_id,
+            )
+            .map_err(|error| {
+                direct_policy_failure(&source, "V3ProviderHealthStateMutated", error)
+            })?;
+    }
     // Health changes are allowed only after the captured target proves that
     // another eligible, untried identity can take this request.
     let health_record = if is_health_neutral_failure || final_eligible {
@@ -1030,8 +1052,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .extend(V3_ERROR_CHAIN_NODE_IDS.iter().take(5).copied());
     if matches!(
         decision.action,
-        V3Error05ExecutionAction::Reselect
-            | V3Error05ExecutionAction::ReevaluateTarget
+        V3Error05ExecutionAction::Reselect | V3Error05ExecutionAction::ReevaluateTarget
     ) {
         state.trace.push("V3TargetLocalReselected");
         let event = Some(build_v3_direct_provider_failure_observation(
@@ -1183,7 +1204,7 @@ pub(crate) fn publish_v3_direct_provider_failure_event(
 
 fn external_kind_label(kind: &V3ExternalErrorKind) -> &'static str {
     match kind {
-        V3ExternalErrorKind::Provider => "provider",
+        V3ExternalErrorKind::Provider | V3ExternalErrorKind::ProviderApplicationEvent => "provider",
         V3ExternalErrorKind::Upstream => "upstream",
         V3ExternalErrorKind::Client => "client",
         V3ExternalErrorKind::Transport => "transport",

@@ -44,6 +44,8 @@ pub struct V3ProviderRateLimitEpisode {
     #[serde(default)]
     pub failure_count: u32,
     #[serde(default)]
+    pub failure_streak_is_http_403: bool,
+    #[serde(default)]
     pub last_failure_at_ms: Option<u64>,
 }
 

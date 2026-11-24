@@ -21,6 +21,31 @@ fn provider_error_source_for_test(
     source
 }
 
+#[test]
+fn websocket_provider_event_403_keeps_its_account_classification() {
+    let source = provider_error_source_for_test(
+        "V3Transport13ResponsesHttpRequest",
+        V3ProviderError::WebSocketProviderEvent {
+            request_id: "request-ws".to_owned(),
+            provider_id: "provider-ws".to_owned(),
+            status: Some(403),
+            code: Some("account_disabled".to_owned()),
+            message: "account disabled".to_owned(),
+        },
+    );
+    let external = source.external_error.as_ref().unwrap();
+    assert_eq!(external.status, Some(403));
+    assert_eq!(external.provider_http_status(), None);
+    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source);
+    let action =
+        routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified);
+    assert_eq!(
+        action.recovery,
+        routecodex_v3_error::V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+    );
+    assert_ne!(action.failure_fingerprint.unwrap().http_status, 403);
+}
+
 fn direct_system_wire_mount(
     _view: &V3DirectRequestKeyView,
     edits: &mut V3DirectRequestKeyEdits,
