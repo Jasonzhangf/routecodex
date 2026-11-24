@@ -293,6 +293,13 @@ impl V3TargetInterpreter {
                 .pools
                 .get(&entry.pool_id)
                 .ok_or(V3TargetError::SelectedPoolMissing)?;
+            let requires_vision = entry.pool_id != "default"
+                && (entry.pool_id == "multimodal"
+                    || pool.match_rule.as_ref().is_some_and(|rule| {
+                        rule.required_capabilities
+                            .iter()
+                            .any(|capability| capability == "multimodal")
+                    }));
             let target = pool.targets.get(entry.target_index);
             let Some(target) = target else {
                 last_error = Some(V3TargetError::OpaqueTargetMissing);
@@ -324,6 +331,9 @@ impl V3TargetInterpreter {
             ) {
                 Ok(expanded) => {
                     for candidate in expanded {
+                        if requires_vision && !candidate.supports_vision() {
+                            continue;
+                        }
                         let key = (
                             candidate.provider_id.clone(),
                             candidate.interface_id.clone(),
@@ -1164,6 +1174,14 @@ impl V3TargetInterpreter {
             }
         }
         order
+    }
+}
+
+impl V3TargetCandidate {
+    pub fn supports_vision(&self) -> bool {
+        self.model_capabilities
+            .iter()
+            .any(|value| value == "vision")
     }
 }
 

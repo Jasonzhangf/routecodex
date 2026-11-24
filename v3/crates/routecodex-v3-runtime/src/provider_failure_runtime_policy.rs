@@ -1504,6 +1504,27 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
     endpoint_path: &str,
     body: &Value,
     deterministic_sample: u64,
+) -> Result<V3Router07OpaqueTargetHitOnce, Result<V3Error01SourceRaised, V3RelayErrorOperatorFault>>
+{
+    resolve_v3_relay_opaque_target_with_history_images(
+        manifest,
+        server_id,
+        entry_kind,
+        endpoint_path,
+        body,
+        deterministic_sample,
+        false,
+    )
+}
+
+pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    entry_kind: &str,
+    endpoint_path: &str,
+    body: &Value,
+    deterministic_sample: u64,
+    has_unprojected_history_images: bool,
 ) -> Result<
     V3Router07OpaqueTargetHitOnce,
     Result<
@@ -1528,7 +1549,11 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
             )
         })?;
     let plan = router
-        .resolve_route_pool_plan(manifest, classified)
+        .resolve_route_pool_plan_with_history_images(
+            manifest,
+            classified,
+            has_unprojected_history_images,
+        )
         .map_err(|error| {
             crate::shared::v3_route_plan_error_source(
                 "V3Router06RoutePoolResolved",

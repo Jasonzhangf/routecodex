@@ -286,7 +286,7 @@ type = "apikey"
 entries = [{{alias="key",apiKey="test-only-key"}}]
 [provider.models.model]
 wireName = "peer-model"
-capabilities = ["text","tools"]
+capabilities = ["text","tools","vision"]
 maxTokens = 4096
 maxContextTokens = 128000
 "#

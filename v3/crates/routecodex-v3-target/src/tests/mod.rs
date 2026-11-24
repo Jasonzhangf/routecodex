@@ -2049,7 +2049,7 @@ targets = [
 }
 
 #[test]
-fn image_bearing_longcontext_route_keeps_request_multimodal_as_target_requirement() {
+fn image_bearing_longcontext_request_uses_default_when_multimodal_is_absent() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2112,23 +2112,16 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-    assert_eq!(hit.pool_id, "longcontext");
+    assert_eq!(hit.pool_id, "default");
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected = target
-        .select_available(
-            expanded,
-            &Availability {
-                blocked: BTreeSet::new(),
-            },
-            0,
-        )
-        .expect("image-bearing longcontext request retains its declared candidates");
-
-    assert_eq!(selected.candidate.provider_id, "vision");
-    assert!(selected.unavailable_candidates.is_empty());
+    assert_eq!(expanded.candidates.len(), 2);
+    assert!(expanded
+        .candidates
+        .iter()
+        .all(|candidate| candidate.default_pool_member));
 }
 
 #[test]

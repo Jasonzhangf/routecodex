@@ -222,12 +222,22 @@ impl V3VirtualRouter {
         manifest: &V3Config05ManifestPublished,
         classified: V3Router05RequestClassified,
     ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
+        self.resolve_route_pool_plan_with_history_images(manifest, classified, false)
+    }
+
+    pub fn resolve_route_pool_plan_with_history_images(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        classified: V3Router05RequestClassified,
+        has_unprojected_history_images: bool,
+    ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
         let is_compaction = classified.facts.route_classification.route_name == "compact"
             || classified
                 .endpoint
                 .trim_end_matches('/')
                 .ends_with("/responses/compact");
-        if !is_compaction {
+        let has_image = classified.facts.capabilities.contains("vision");
+        if !is_compaction && !has_image && !has_unprojected_history_images {
             if let Some(route_pool_id) = classified.route_policy_pool.as_deref() {
                 let group = manifest
                     .route_groups
@@ -333,7 +343,10 @@ impl V3VirtualRouter {
         // other classification pool.
         let mut selected_pool: Option<&V3RoutePoolManifest> = None;
         for candidate in &classified.facts.route_classification.candidates {
-            if candidate == DEFAULT_ROUTE {
+            if candidate == DEFAULT_ROUTE
+                || (has_image && candidate != "multimodal")
+                || (!has_image && has_unprojected_history_images)
+            {
                 continue;
             }
             if let Some(pool) = select_best_matching_pool(

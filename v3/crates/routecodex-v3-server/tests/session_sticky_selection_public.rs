@@ -146,7 +146,7 @@ targets = [
         if isolated {
             for provider in manifest.providers.values_mut() {
                 for model in provider.models.values_mut() {
-                    model.capabilities.push("multimodal".into());
+                    model.capabilities.push("vision".into());
                 }
             }
             let group = manifest.route_groups.get_mut("sticky_pool").unwrap();

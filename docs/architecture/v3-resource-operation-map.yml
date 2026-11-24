@@ -3096,10 +3096,10 @@ resources:
     identity: [requestId, attemptId, providerRuntimeIdentity, protocolTerminalGeneration]
     semantic_contract:
       issuance_condition: Protocol-valid terminal observed and bounded attempt payload sealed successfully.
-      consumers: [provider_health_success, route_policy_success_commit, client_semantic_commit]
+      consumers: [provider_health_success, route_policy_success_commit, client_semantic_commit, V3ImageHistoryView::record_success]
       non_receipts: [HTTP_2xx_headers, stream_object_constructed, first_business_frame, clean_transport_accept]
     allowed_writers: [runtime_response_semantic_owner]
-    allowed_readers: [provider_health_success, route_policy_success_commit, client_semantic_commit]
+    allowed_readers: [provider_health_success, route_policy_success_commit, client_semantic_commit, V3ImageHistoryView::record_success]
     forbidden_writers: [ProviderTransport, SSE_stream_wrapper, routecodex-v3-server, observability, payload]
     may_enter_provider_body: false
     may_enter_client_body: false

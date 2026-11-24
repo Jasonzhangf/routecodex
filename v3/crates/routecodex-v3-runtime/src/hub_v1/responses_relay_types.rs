@@ -99,6 +99,7 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    pub image_history: Option<crate::V3ImageHistoryView>,
     pub request_local_busy_candidates: BTreeSet<String>,
 }
 

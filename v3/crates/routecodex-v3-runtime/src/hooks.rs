@@ -466,7 +466,11 @@ pub(crate) fn responses_direct_prepare_before_send(
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
     server_id: &str,
     standardized: &mut V3Req04StandardizedResponses,
+    image_history: Option<&crate::image_history::V3ImageHistoryView>,
 ) -> V3DirectSourceResult<bool> {
+    if let Some(history) = image_history {
+        history.project_responses(&mut standardized.body);
+    }
     let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
     let memory_enabled = manifest.memory_raw_capture.enabled;
     if memory_enabled && !standardized.memory_raw_capture_guidance_injected {

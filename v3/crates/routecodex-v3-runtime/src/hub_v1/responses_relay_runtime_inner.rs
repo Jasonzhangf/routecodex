@@ -219,9 +219,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             },
         };
         let (target_resolved_request, resolved_target) =
-            match crate::operation_runner::run_v3_resolve_target_operator(
+            match crate::operation_runner::run_v3_resolve_target_operator_with_history_images(
                 req02.payload().clone(),
                 resolve_mode,
+                crate::image_history::has_unprojected_history_images(
+                    req02.payload(),
+                    initial_relay_seeds
+                        .request_execution_control
+                        .as_ref()
+                        .and_then(|control| control.image_history.as_ref()),
+                ),
             ) {
                 Ok(resolved) => resolved,
                 Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
@@ -369,8 +376,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let mut req02 = req02;
         req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
         let request_outcome = {
-            compile_v3_hub_relay_request_hooks()
-                .run_from_normalized(req02, &request_hook_profile)?
+            compile_v3_hub_relay_request_hooks().run_from_normalized_with_image_history(
+                req02,
+                &request_hook_profile,
+                request_execution_control.image_history.clone(),
+            )?
         };
         trace.push("V3HubReqChatProcess04Governed");
         let provider_semantic_body = std::sync::Arc::clone(request_outcome.payload_arc());
@@ -705,6 +715,12 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
+            let attempt_images = request_execution_control
+                .image_history
+                .as_ref()
+                .map(|history| {
+                    history.capture_attempt(transport_request.body(), provider_wire_protocol)
+                });
             provider_send_attempts =
                 handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
                     |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
@@ -1102,6 +1118,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
                             })?;
                     }
+                    if let (Some(history), Some(images)) =
+                        (&request_execution_control.image_history, attempt_images)
+                    {
+                        history.record_success(&attempt_success_receipt, images);
+                    }
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,
                         terminal_disposition: None,
@@ -1381,6 +1402,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             .map_err(|error| {
                                 V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
                             })?;
+                    }
+                    if let (Some(history), Some(images)) =
+                        (&request_execution_control.image_history, attempt_images)
+                    {
+                        history.record_success(&attempt_success_receipt, images);
                     }
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,

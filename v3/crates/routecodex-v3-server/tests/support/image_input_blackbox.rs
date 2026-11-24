@@ -156,6 +156,8 @@ enum PoolState {
     MultimodalAvailable,
     /// The optional `multimodal` pool is not configured at all.
     MultimodalAbsent,
+    /// No multimodal pool, but the default model explicitly supports vision.
+    DefaultVision,
     /// The `multimodal` pool is configured but its vision provider is disabled.
     MultimodalDisabled,
     /// The `multimodal` pool holds two vision tiers with different declared
@@ -168,6 +170,7 @@ enum Expect {
     Vision,
     SecondVision,
     Text,
+    DefaultVision,
 }
 
 /// The `request` fixture places images inside the current user run only when
@@ -178,6 +181,7 @@ fn expected_route(pool: PoolState, tool: bool) -> Expect {
     let current_turn_image = !tool;
     match pool {
         PoolState::MultimodalAbsent => Expect::Text,
+        PoolState::DefaultVision => Expect::DefaultVision,
         PoolState::MultimodalAvailable => {
             if current_turn_image {
                 Expect::Vision
@@ -341,10 +345,20 @@ async fn run_case_shape(
             response.clone(),
         )
         .await;
-    let (text_url, mut text_rx, text_shutdown) = start_controlled_terminal_upstream_with_body(
+    let accepts_default: fn(&Value) -> bool = if expect == Expect::DefaultVision {
+        |_| true
+    } else {
+        |body| {
+            let mut images = Vec::new();
+            image_references(body, &mut images);
+            images.is_empty()
+        }
+    };
+    let (text_url, mut text_rx, text_shutdown) = start_controlled_terminal_upstream_with_body_when(
         StatusCode::OK,
         "application/json",
         text_response,
+        accepts_default,
     )
     .await;
     let mut manifest = responses_relay_provider_protocol_manifest(
@@ -368,13 +382,13 @@ async fn run_case_shape(
         vision.interfaces.get_mut("default").unwrap().base_url = vision.base_url.clone();
     }
     vision.models.get_mut("test").unwrap().wire_name = "vision-wire".into();
-    if !matches!(pool, PoolState::MultimodalAbsent) {
+    if !matches!(pool, PoolState::MultimodalAbsent | PoolState::DefaultVision) {
         vision
             .models
             .get_mut("test")
             .unwrap()
             .capabilities
-            .push("multimodal".into());
+            .push("vision".into());
     }
     if matches!(pool, PoolState::MultimodalDisabled) {
         vision.enabled = false;
@@ -387,6 +401,13 @@ async fn run_case_shape(
         text.interfaces.get_mut("default").unwrap().base_url = text.base_url.clone();
     }
     text.models.get_mut("test").unwrap().wire_name = "text-wire".into();
+    if matches!(pool, PoolState::DefaultVision) {
+        text.models
+            .get_mut("test")
+            .unwrap()
+            .capabilities
+            .push("vision".into());
+    }
     // A second vision provider used only by the same-pool tier-recovery case.
     let mut second = manifest.providers.get("test").unwrap().clone();
     second.id = "second".into();
@@ -402,7 +423,7 @@ async fn run_case_shape(
     let group = manifest.route_groups.get_mut("default").unwrap();
     group.pools.remove("client_test");
     let default_pool = group.pools.get("default").unwrap().clone();
-    if !matches!(pool, PoolState::MultimodalAbsent) {
+    if !matches!(pool, PoolState::MultimodalAbsent | PoolState::DefaultVision) {
         let mut mixed = default_pool.clone();
         mixed.id = "multimodal".into();
         mixed.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
@@ -427,6 +448,19 @@ async fn run_case_shape(
             second_target.provider = Some("second".into());
             second_target.priority = Some(1);
             targets.push(second_target);
+        }
+        if matches!(
+            pool,
+            PoolState::MultimodalAvailable | PoolState::MultimodalDisabled
+        ) {
+            let mut text_target = default_pool
+                .targets
+                .iter()
+                .find(|target| target.provider.as_deref() == Some("fallback"))
+                .unwrap()
+                .clone();
+            text_target.priority = Some(100);
+            targets.insert(0, text_target);
         }
         mixed.targets = targets;
         group.pools.insert("multimodal".into(), mixed);
@@ -559,7 +593,10 @@ async fn run_case_shape(
             .map(|text| serde_json::from_str::<Value>(text).unwrap());
         let parts = parsed.as_ref().unwrap_or(output).as_array().unwrap();
         for part in parts {
-            if part.get("file_id").is_some() || part["type"] == "vendor_part" {
+            if (part.get("file_id").is_some()
+                && !(expect == Expect::Text && part["type"] == "input_image"))
+                || part["type"] == "vendor_part"
+            {
                 assert!(
                     contains_opaque_value(&wire, part),
                     "complete opaque tool output must survive {protocol}: {part}"
@@ -616,6 +653,14 @@ async fn run_case_shape(
     }
     let mut images = Vec::new();
     image_references(&wire, &mut images);
+    if expect == Expect::Text {
+        assert!(
+            images.is_empty(),
+            "text-only default must receive placeholders"
+        );
+        assert!(wire_text.contains("[Image]"));
+        return;
+    }
     assert!(
         !wire_text.contains("[Image]"),
         "history and current images must reach the selected provider intact, not as placeholders: {path} tool={tool} protocol={protocol} {wire_text}"
@@ -654,6 +699,729 @@ fn earlier_turn_image_routes_to_default_pool_without_multimodal() {
             }
         }
     });
+}
+
+#[test]
+fn vision_default_provider_receives_original_images() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for protocol in ["openai_chat", "responses", "anthropic"] {
+            run_case("/v1/responses", true, PoolState::DefaultVision, protocol).await;
+        }
+    });
+}
+
+#[tokio::test]
+async fn completed_image_in_same_session_becomes_a_history_placeholder() {
+    let _guard = TEST_LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    for direct in [false, true] {
+        for stream in [false, true] {
+            run_completed_image_history_case(direct, stream).await;
+        }
+    }
+}
+
+async fn run_completed_image_history_case(direct: bool, stream: bool) {
+    let response = json!({
+        "id":"resp_image_success","object":"response","status":"completed",
+        "output":[{"type":"message","role":"assistant","status":"completed",
+            "content":[{"type":"output_text","text":"image accepted"}]}]
+    });
+    let (content_type, body) = if stream {
+        let terminal = json!({"type":"response.completed","response":response});
+        (
+            "text/event-stream",
+            format!("event: response.completed\ndata: {terminal}\n\ndata: [DONE]\n\n").into_bytes(),
+        )
+    } else {
+        ("application/json", serde_json::to_vec(&response).unwrap())
+    };
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body_when(
+        StatusCode::OK,
+        content_type,
+        body.clone(),
+        |request| {
+            let wire = request.to_string();
+            if request["input"]
+                .as_array()
+                .and_then(|items| items.last())
+                .is_some_and(|item| item.to_string().contains("reject this attempt"))
+            {
+                return false;
+            }
+            if wire.contains("accept only text") {
+                let mut references = Vec::new();
+                image_references(request, &mut references);
+                return references.is_empty();
+            }
+            true
+        },
+    )
+    .await;
+    let (fallback_url, mut fallback_captures, fallback_shutdown) =
+        start_controlled_terminal_upstream_with_body_when(
+            StatusCode::OK,
+            content_type,
+            body.clone(),
+            |request| {
+                let mut references = Vec::new();
+                image_references(request, &mut references);
+                references.is_empty()
+            },
+        )
+        .await;
+    let (thinking_url, mut thinking_captures, thinking_shutdown) =
+        start_controlled_terminal_upstream_with_body_when(
+            StatusCode::OK,
+            content_type,
+            body,
+            |request| {
+                let mut references = Vec::new();
+                image_references(request, &mut references);
+                references.is_empty()
+            },
+        )
+        .await;
+    let mut manifest = if direct {
+        responses_direct_binding_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            "responses",
+            &provider_url,
+            r#""direct""#,
+        )
+    } else {
+        responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            &provider_url,
+            "responses",
+            None,
+        )
+    };
+    manifest
+        .providers
+        .values_mut()
+        .next()
+        .unwrap()
+        .models
+        .values_mut()
+        .next()
+        .unwrap()
+        .capabilities
+        .push("vision".into());
+    let mut fallback = manifest.providers.values().next().unwrap().clone();
+    fallback.id = "text_fallback".into();
+    fallback.base_url = fallback_url.clone();
+    fallback.interfaces.get_mut("default").unwrap().base_url = fallback_url;
+    fallback
+        .models
+        .values_mut()
+        .next()
+        .unwrap()
+        .capabilities
+        .retain(|capability| capability != "vision");
+    let mut thinking = fallback.clone();
+    thinking.id = "history_thinking".into();
+    thinking.base_url = thinking_url.clone();
+    thinking.interfaces.get_mut("default").unwrap().base_url = thinking_url;
+    manifest.providers.insert(thinking.id.clone(), thinking);
+    manifest.providers.insert(fallback.id.clone(), fallback);
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    group.pools.remove("client_test");
+    let targets = &mut group.pools.get_mut("default").unwrap().targets;
+    targets[0].priority = Some(2);
+    let mut fallback_target = targets[0].clone();
+    fallback_target.provider = Some("text_fallback".into());
+    fallback_target.priority = Some(1);
+    targets.push(fallback_target);
+    let mut thinking_pool = group.pools["default"].clone();
+    thinking_pool.id = "thinking".into();
+    thinking_pool.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
+        precedence: 10,
+        entry_protocol: None,
+        models: Vec::new(),
+        required_capabilities: Vec::new(),
+        min_input_tokens: None,
+        max_input_tokens: None,
+    });
+    thinking_pool.targets.truncate(1);
+    thinking_pool.targets[0].provider = Some("history_thinking".into());
+    group.pools.insert("thinking".into(), thinking_pool);
+    manifest.debug.snapshots = false;
+    std::env::set_var("V3_P6_TEST_KEY", "image-history-control-key");
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "image-history-control-key");
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let image = json!({"type":"message","id":"msg_history_test","role":"user",
+        "content":[{"type":"input_text","text":"inspect image"},{"type":"input_image","image_url":PNG}]
+    });
+    let followup = json!({"type":"message","role":"user",
+        "content":[{"type":"input_text","text":"continue in text"}]});
+    let strict_followup = json!({"type":"message","role":"user",
+        "content":[{"type":"input_text","text":"accept only text"}]});
+    let prior_answer = json!({"type":"message","role":"assistant",
+        "content":[{"type":"output_text","text":"image accepted"}]});
+    let failed_image = json!({"role":"user",
+        "content":[{"type":"input_text","text":"reject this attempt"},{"type":"input_image","image_url":PNG}]});
+    // Keep the failed image in history, while the controlled provider rejects
+    // the original current-turn request only.
+    for (listener, session, input, expected_references) in [
+        (
+            0,
+            Some("cold-image-history"),
+            json!([image, prior_answer, followup]),
+            vec![PNG],
+        ),
+        (
+            0,
+            Some("completed-image-history"),
+            json!([image]),
+            vec![PNG],
+        ),
+        (
+            0,
+            Some("completed-image-history"),
+            json!([image, prior_answer, strict_followup]),
+            vec![],
+        ),
+        (
+            0,
+            Some("completed-image-history"),
+            json!([image, prior_answer, {"role":"user","content":[{"type":"input_image","image_url":PNG}]}]),
+            vec![PNG],
+        ),
+        (
+            1,
+            Some("completed-image-history"),
+            json!([image, prior_answer, followup]),
+            vec![PNG],
+        ),
+        (
+            0,
+            Some("unrelated-image-history"),
+            json!([image, prior_answer, followup]),
+            vec![PNG],
+        ),
+        (0, None, json!([image, prior_answer, followup]), vec![PNG]),
+        (
+            0,
+            Some("failed-image-history"),
+            json!([failed_image]),
+            vec![PNG],
+        ),
+        (
+            0,
+            Some("failed-image-history"),
+            json!([failed_image, prior_answer, followup]),
+            vec![PNG],
+        ),
+    ] {
+        let url = format!("http://{}/v1/responses", server.listeners[listener].addr);
+        let mut request = client
+            .post(url)
+            .json(&json!({"model":"test","stream":stream,"input":input}));
+        if let Some(session) = session {
+            request = request.header("session_id", session);
+        }
+        let switches_to_text_fallback = input == json!([failed_image]);
+        let thinking_expected = expected_references.is_empty();
+        let response = request
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let response = response.text().await.unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "direct={direct} stream={stream}: {response}"
+        );
+        assert!(response.contains("image accepted"), "{response}");
+        let wire = if thinking_expected {
+            thinking_captures.try_recv().unwrap().body
+        } else {
+            assert!(
+                thinking_captures.try_recv().is_err(),
+                "thinking must never receive an unrecorded historical image"
+            );
+            captures.try_recv().unwrap().body
+        };
+        let mut references = Vec::new();
+        image_references(&wire, &mut references);
+        assert_eq!(
+            references, expected_references,
+            "direct={direct} stream={stream} session={session:?}"
+        );
+        if expected_references.is_empty() {
+            assert!(wire.to_string().contains("[Image]"));
+        }
+        assert!(
+            captures.try_recv().is_err(),
+            "request must use a single upstream attempt"
+        );
+        if switches_to_text_fallback {
+            let fallback = fallback_captures.try_recv().unwrap().body;
+            assert!(fallback.to_string().contains("[Image]"));
+        }
+        assert!(
+            fallback_captures.try_recv().is_err(),
+            "unexpected text fallback attempt"
+        );
+    }
+    if stream {
+        let mut request = format!("ws://{}/v1/responses", server.listeners[0].addr)
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            "openai-beta",
+            HeaderValue::from_static("responses_websockets=2026-02-06"),
+        );
+        request
+            .headers_mut()
+            .insert("session_id", HeaderValue::from_static("ws-image-history"));
+        let (mut socket, _) = connect_async(request).await.unwrap();
+        for (input, expected_references) in [
+            (json!([image]), vec![PNG]),
+            (json!([image, prior_answer, strict_followup]), vec![]),
+        ] {
+            socket
+                .send(Message::Text(
+                    json!({"type":"response.create","model":"test","stream":true,"input":input})
+                        .to_string(),
+                ))
+                .await
+                .unwrap();
+            loop {
+                let frame = timeout(Duration::from_secs(5), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                let event: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+                assert_ne!(event["type"], "error", "{event}");
+                if event["type"] == "response.completed" {
+                    assert!(event.to_string().contains("image accepted"));
+                    break;
+                }
+            }
+            let mut references = Vec::new();
+            let wire = if expected_references.is_empty() {
+                thinking_captures.try_recv().unwrap().body
+            } else {
+                captures.try_recv().unwrap().body
+            };
+            image_references(&wire, &mut references);
+            assert_eq!(references, expected_references, "WebSocket direct={direct}");
+            assert!(
+                fallback_captures.try_recv().is_err(),
+                "WebSocket must succeed on the first attempt"
+            );
+        }
+        socket.close(None).await.unwrap();
+    }
+    if !stream {
+        let mut tool_input = json!([
+            {"role":"user","content":"Use the image tool"},
+            {"type":"function_call","name":"read_image","call_id":"call_receipt_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_receipt_image","output":[
+                {"type":"input_image","image_url":PNG},
+                {"type":"input_text","text":"paired tool payload"}
+            ]}
+        ]);
+        if direct {
+            tool_input[2]["output"].as_array_mut().unwrap().insert(
+                1,
+                json!({"type":"input_image","file_id":"file-history-receipt"}),
+            );
+        }
+        let mut next = tool_input.as_array().unwrap().clone();
+        next.push(prior_answer.clone());
+        next.push(followup.clone());
+        let url = format!("http://{}/v1/responses", server.listeners[0].addr);
+        for (input, first) in [(tool_input, true), (json!(next), false)] {
+            let reply = client
+                .post(&url)
+                .header("session_id", "paired-tool-image-history")
+                .json(&json!({"model":"test","input":input,"stream":false}))
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::OK);
+            assert!(reply.text().await.unwrap().contains("image accepted"));
+            let wire = if first {
+                captures.try_recv().unwrap().body
+            } else {
+                thinking_captures
+                    .try_recv()
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "direct={direct}, thinking: {error}, default: {:?}",
+                            captures.try_recv().map(|capture| capture.body)
+                        )
+                    })
+                    .body
+            };
+            let items = wire["input"].as_array().unwrap();
+            let call = items
+                .iter()
+                .find(|item| {
+                    item["type"] == "function_call" && item["call_id"] == "call_receipt_image"
+                })
+                .unwrap();
+            assert_eq!(call["name"], "read_image");
+            let output = items
+                .iter()
+                .find(|item| {
+                    item["type"] == "function_call_output" && item["call_id"] == call["call_id"]
+                })
+                .unwrap();
+            let output = output["output"].to_string();
+            assert!(output.contains("paired tool payload"));
+            assert_eq!(
+                output.contains("file-history-receipt"),
+                first && direct,
+                "direct={direct}: {output}"
+            );
+            assert_eq!(output.contains(PNG), first, "direct={direct}: {output}");
+            assert_eq!(
+                output.matches("[Image]").count(),
+                if first { 0 } else { 1 + usize::from(direct) }
+            );
+        }
+    }
+    if direct && !stream {
+        let tool_text = json!([
+            {"type":"input_image","image_url":OTHER},
+            {"type":"input_image","file_id":"file-opaque-tool-text"}
+        ])
+        .to_string();
+        let url = format!("http://{}/v1/responses", server.listeners[0].addr);
+        let first = client.post(&url)
+            .header("session_id", "opaque-tool-text")
+            .json(&json!({"model":"test","stream":false,"input":[
+                {"role":"user","content":"Return the description as text"},
+                {"type":"function_call","name":"describe","call_id":"call_opaque_image","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_opaque_image","output":tool_text}
+            ]}))
+            .timeout(Duration::from_secs(10)).send().await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert!(first.text().await.unwrap().contains("image accepted"));
+        let first_wire = captures.try_recv().unwrap().body;
+        assert_eq!(first_wire["input"][2]["output"], tool_text);
+        let next = client
+            .post(&url)
+            .header("session_id", "opaque-tool-text")
+            .json(&json!({"model":"test","stream":false,"input":[
+                {"role":"user","content":[{"type":"input_image","image_url":OTHER},
+                    {"type":"input_image","file_id":"file-opaque-tool-text"}]},
+                prior_answer, followup
+            ]}))
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(next.status(), StatusCode::OK);
+        assert!(next.text().await.unwrap().contains("image accepted"));
+        assert!(
+            thinking_captures.try_recv().is_err(),
+            "successful tool text is not an image receipt"
+        );
+        let wire = captures.try_recv().unwrap().body;
+        assert_eq!(wire["input"][0]["content"][0]["image_url"], OTHER);
+        assert_eq!(
+            wire["input"][0]["content"][1]["file_id"],
+            "file-opaque-tool-text"
+        );
+    }
+    server.shutdown().await;
+    let _ = shutdown.send(());
+    let _ = fallback_shutdown.send(());
+    let _ = thinking_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
+async fn gemini_tool_result_images_follow_the_selected_model_vision_contract() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "image-history-gemini-fixture");
+    let completion = serde_json::to_vec(&json!({
+        "candidates":[{"content":{"role":"model","parts":[{"text":"gemini image result accepted"}]},
+            "finishReason":"STOP"}]
+    }))
+    .unwrap();
+    let image_data = PNG.split_once(',').unwrap().1;
+    for vision in [false, true] {
+        let accepts = if vision {
+            (|_: &Value| true) as fn(&Value) -> bool
+        } else {
+            |body: &Value| !body.to_string().contains(PNG.split_once(',').unwrap().1)
+        };
+        let (upstream_url, mut captures, shutdown) =
+            start_controlled_terminal_upstream_with_body_when(
+                StatusCode::OK,
+                "application/json",
+                completion.clone(),
+                accepts,
+            )
+            .await;
+        let upstream_beta = format!("{}/v1beta", upstream_url.trim_end_matches("/v1"));
+        let mut manifest = responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            &upstream_beta,
+            "gemini",
+            None,
+        );
+        for listener in manifest.servers.values_mut() {
+            listener.endpoints.push("gemini".into());
+        }
+        if vision {
+            manifest
+                .providers
+                .get_mut("test")
+                .unwrap()
+                .models
+                .get_mut("test")
+                .unwrap()
+                .capabilities
+                .push("vision".into());
+        }
+        manifest
+            .route_groups
+            .get_mut("default")
+            .unwrap()
+            .pools
+            .remove("client_test");
+        manifest.debug.snapshots = false;
+        let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let url = format!("http://{}/v1/responses", server.listeners[0].addr);
+        let initial = json!([
+            {"role":"user","content":"Read the image"},
+            {"type":"function_call","name":"read_image","call_id":"call_gemini_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_gemini_image","output":[
+                {"type":"input_image","image_url":PNG},
+                {"type":"input_text","text":"tool companion text"}
+            ]}
+        ]);
+        let mut followup = initial.as_array().unwrap().clone();
+        followup.push(json!({"role":"user","content":"Continue with text"}));
+        let client = reqwest::Client::new();
+        for (input, first) in [(initial, true), (json!(followup), false)] {
+            let reply = client
+                .post(&url)
+                .header("session_id", "gemini-image-history")
+                .json(&json!({"model":"test","input":input,"stream":false}))
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::OK);
+            assert!(reply
+                .text()
+                .await
+                .unwrap()
+                .contains("gemini image result accepted"));
+            let wire = captures.try_recv().unwrap().body;
+            assert!(contains_opaque_value(
+                &wire,
+                &json!({"functionCall":{"name":"read_image","id":"call_gemini_image","args":{}}})
+            ));
+            let result = wire["contents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|content| content["parts"].as_array().into_iter().flatten())
+                .find_map(|part| part.get("functionResponse"))
+                .unwrap();
+            assert_eq!(result["id"], "call_gemini_image");
+            assert_eq!(result["name"], "read_image");
+            let output = result["response"]["output"].to_string();
+            assert!(output.contains("tool companion text"));
+            assert_eq!(output.contains(image_data), first && vision, "{output}");
+            assert_eq!(output.contains("[Image]"), !first || !vision, "{output}");
+            assert!(captures.try_recv().is_err());
+        }
+        if !vision {
+            let native = json!({"contents":[
+                {"role":"user","parts":[{"text":"Read the image"}]},
+                {"role":"model","parts":[{"functionCall":{"name":"read_image","id":"call_native_image","args":{}}}]},
+                {"role":"user","parts":[{"functionResponse":{
+                    "name":"read_image","id":"call_native_image","response":{"output":"native companion text"},
+                    "parts":[{"inlineData":{"mimeType":"image/png","data":image_data}}]
+                }}]}
+            ]});
+            let reply = client
+                .post(format!(
+                    "http://{}/v1beta/models/test:generateContent",
+                    server.listeners[0].addr
+                ))
+                .json(&native)
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::OK);
+            let wire = captures.try_recv().unwrap().body;
+            let wire_text = wire.to_string();
+            assert!(wire_text.contains("[Image]"));
+            assert!(!wire_text.contains(image_data));
+            assert!(contains_opaque_value(
+                &wire,
+                &json!({
+                    "id":"call_native_image","name":"read_image","response":{"output":"native companion text"}
+                })
+            ));
+        }
+        server.shutdown().await;
+        let _ = shutdown.send(());
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn history_receipts_require_complete_success_and_stay_stable_during_retry() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "image-history-concurrent-fixture");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    let (captured, mut captures) = mpsc::unbounded_channel();
+    let release_retry = Arc::new(Semaphore::new(0));
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let app = Router::new().route(
+        "/:provider/v1/responses",
+        post({
+            let release_retry = release_retry.clone();
+            move |axum::extract::Path(provider): axum::extract::Path<String>,
+                  axum::Json(body): axum::Json<Value>| {
+                let captured = captured.clone();
+                let release_retry = release_retry.clone();
+                async move {
+                    let text = body.to_string();
+                    captured.send((provider.clone(), body)).unwrap();
+                    if text.contains("delay-before-reselection") && provider == "primary" {
+                        release_retry.acquire().await.unwrap().forget();
+                        return (StatusCode::BAD_REQUEST, axum::Json(json!({"error":{"message":"retry fixture"}})));
+                    }
+                    if text.contains("terminal-fixture-http-error") {
+                        return (StatusCode::BAD_REQUEST, axum::Json(json!({"error":{"message":"terminal fixture"}})));
+                    }
+                    if text.contains("terminal-fixture-empty-business") {
+                        return (StatusCode::OK, axum::Json(json!({"id":"empty","object":"response","status":"completed","output":[]})));
+                    }
+                    (StatusCode::OK, axum::Json(json!({
+                        "id":"ok","object":"response","status":"completed",
+                        "output":[{"type":"message","role":"assistant","status":"completed",
+                            "content":[{"type":"output_text","text":"receipt fixture ok"}]}]
+                    })))
+                }
+            }
+        }),
+    );
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stop_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        &format!("http://{upstream}/primary/v1"),
+        "responses",
+        Some(&format!("http://{upstream}/secondary/v1")),
+    );
+    for provider in manifest.providers.values_mut() {
+        provider
+            .models
+            .get_mut("test")
+            .unwrap()
+            .capabilities
+            .push("vision".into());
+    }
+    manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    manifest.debug.snapshots = false;
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let send = |session: &'static str, input: Value| {
+        client
+            .post(&endpoint)
+            .header("session_id", session)
+            .json(&json!({"model":"test","stream":false,"input":input}))
+            .timeout(Duration::from_secs(8))
+            .send()
+    };
+    let photo = json!({"role":"user","content":[{"type":"input_image","image_url":PNG}]});
+    let followup = |marker| {
+        json!([photo,
+            {"role":"assistant","content":[{"type":"output_text","text":"fixture history"}]},
+            {"role":"user","content":marker}
+        ])
+    };
+    for (session, marker) in [
+        ("terminal-http-error", "terminal-fixture-http-error"),
+        ("terminal-business-error", "terminal-fixture-empty-business"),
+    ] {
+        if let Ok(response) = send(session, followup(marker)).await {
+            assert!(!response.status().is_success());
+        }
+        let mut count = 0;
+        while let Ok((_, body)) = captures.try_recv() {
+            assert!(body.to_string().contains(PNG));
+            count += 1;
+        }
+        assert!(count > 0);
+        let reply = send(session, followup("recover after failure"))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::OK);
+        assert!(captures.try_recv().unwrap().1.to_string().contains(PNG));
+    }
+
+    let pending = tokio::spawn(send(
+        "overlapping-image-history",
+        followup("delay-before-reselection"),
+    ));
+    let (provider, first_attempt) = timeout(Duration::from_secs(4), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(provider, "primary");
+    assert!(first_attempt.to_string().contains(PNG));
+    let successful = send("overlapping-image-history", json!([photo]))
+        .await
+        .unwrap();
+    assert_eq!(successful.status(), StatusCode::OK);
+    assert!(captures.try_recv().unwrap().1.to_string().contains(PNG));
+    release_retry.add_permits(1);
+    assert_eq!(pending.await.unwrap().unwrap().status(), StatusCode::OK);
+    let (provider, retried) = captures.try_recv().unwrap();
+    assert_eq!(provider, "secondary");
+    assert!(retried.to_string().contains(PNG));
+
+    let settled = send("overlapping-image-history", followup("read after both"))
+        .await
+        .unwrap();
+    assert_eq!(settled.status(), StatusCode::OK);
+    let (_, wire) = captures.try_recv().unwrap();
+    assert!(wire.to_string().contains("[Image]"));
+    assert!(!wire.to_string().contains(PNG));
+    server.shutdown().await;
+    let _ = stop_tx.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[test]
@@ -723,7 +1491,7 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, earlier_imag
         .models
         .get_mut("test")
         .unwrap();
-    vision.capabilities.push("multimodal".into());
+    vision.capabilities.push("vision".into());
     vision.wire_name = "vision-wire".into();
     let text = manifest.providers.get_mut("fallback").unwrap();
     text.provider_type = "openai_chat".into();
@@ -835,11 +1603,11 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, earlier_imag
     let mut refs = Vec::new();
     image_references(&wire, &mut refs);
     if earlier_image {
-        assert_eq!(
-            refs,
-            vec![PNG],
-            "earlier-turn image must stay in forwarded history: {path}"
+        assert!(
+            refs.is_empty(),
+            "text-only default must receive placeholders"
         );
+        assert!(wire.to_string().contains("[Image]"));
         assert!(wire
             .to_string()
             .contains("a later ordinary text-only user turn"));
@@ -921,7 +1689,7 @@ fn pool_target(provider: &str) -> routecodex_v3_config::V3RoutePoolTargetManifes
     }
 }
 
-async fn run_consecutive_user_turn_search_case(path: &str) {
+async fn run_consecutive_user_turn_image_case(path: &str) {
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let completion = chat_completion_bytes("search-wire");
     let (search_url, mut search_rx, search_shutdown) =
@@ -987,8 +1755,7 @@ async fn run_consecutive_user_turn_search_case(path: &str) {
         .unwrap()
         .capabilities
         .push("web_search".into());
-    // The selected web_search candidate still has to preserve the current-turn
-    // image bytes, so this fixture's search provider is multimodal-capable too.
+    // A vision-capable search candidate is still outside the image route.
     manifest
         .providers
         .get_mut("test")
@@ -997,7 +1764,7 @@ async fn run_consecutive_user_turn_search_case(path: &str) {
         .get_mut("test")
         .unwrap()
         .capabilities
-        .push("multimodal".into());
+        .push("vision".into());
     let fallback = manifest.providers.get_mut("fallback").unwrap();
     fallback.provider_type = "openai_chat".into();
     fallback
@@ -1017,7 +1784,7 @@ async fn run_consecutive_user_turn_search_case(path: &str) {
         .get_mut("test")
         .unwrap()
         .capabilities
-        .push("multimodal".into());
+        .push("vision".into());
     manifest.providers.insert("vision".into(), vision);
 
     let mut think = manifest.providers.get("test").unwrap().clone();
@@ -1135,17 +1902,15 @@ async fn run_consecutive_user_turn_search_case(path: &str) {
         "{path}"
     );
 
-    let search_body = search_rx
+    let image_body = vision_rx
         .try_recv()
         .map(|capture| capture.body)
         .unwrap_or_else(|_| {
-            panic!(
-                "the web_search pool must be selected for consecutive user search intent: {path}"
-            )
+            panic!("the multimodal pool must be selected for consecutive user image input: {path}")
         });
     assert!(
-        vision_rx.try_recv().is_err(),
-        "multimodal must not shadow hosted search for consecutive user turns: {path}"
+        search_rx.try_recv().is_err(),
+        "the web_search pool must not receive image requests: {path}"
     );
     assert!(
         think_rx.try_recv().is_err(),
@@ -1153,9 +1918,9 @@ async fn run_consecutive_user_turn_search_case(path: &str) {
     );
     assert!(
         default_rx.try_recv().is_err(),
-        "default must not be consulted when web_search matches: {path}"
+        "default must not be consulted while the multimodal target succeeds: {path}"
     );
-    let wire_text = search_body.to_string();
+    let wire_text = image_body.to_string();
     assert!(
         wire_text.contains("请搜索今天的新闻"),
         "first user text must survive: {path}"
@@ -1169,22 +1934,22 @@ async fn run_consecutive_user_turn_search_case(path: &str) {
         "current-turn image must not be placeholderized: {path}"
     );
     let mut refs = Vec::new();
-    image_references(&search_body, &mut refs);
+    image_references(&image_body, &mut refs);
     assert!(
         refs.iter().any(|reference| reference == CONSECUTIVE_IMAGE),
-        "current-turn image must reach the search provider: {path} {wire_text}"
+        "current-turn image must reach the vision provider: {path} {wire_text}"
     );
 }
 
 #[tokio::test]
-async fn responses_and_chat_consecutive_user_turns_select_search_and_preserve_images() {
+async fn consecutive_user_turns_with_search_and_images_select_multimodal() {
     let _guard = TEST_LOCK.lock().await;
     for path in [
         "/v1/responses",
         "/v1/chat/completions",
         "/v1beta/models/test:generateContent",
     ] {
-        run_consecutive_user_turn_search_case(path).await;
+        run_consecutive_user_turn_image_case(path).await;
     }
 }
 

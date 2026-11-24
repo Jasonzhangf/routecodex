@@ -4,6 +4,8 @@ mod execution_control;
 pub mod foundation;
 pub mod hooks;
 pub mod hub_v1;
+mod image_history;
+pub use image_history::{V3ImageHistoryView, V3SuccessfulImageHistory};
 mod internal;
 pub mod kernel;
 pub mod nodes;

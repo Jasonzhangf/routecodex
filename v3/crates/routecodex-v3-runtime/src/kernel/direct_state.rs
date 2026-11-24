@@ -71,6 +71,7 @@ enum V3DirectDebugNodePublication {
 
 pub struct V3ResponsesDirectRuntimeSharedState {
     client_identity_headers: Vec<(String, String)>,
+    image_history: Option<crate::V3ImageHistoryView>,
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
@@ -84,6 +85,7 @@ impl V3ResponsesDirectRuntimeSharedState {
     {
         Self {
             client_identity_headers: Vec::new(),
+            image_history: None,
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
@@ -93,6 +95,11 @@ impl V3ResponsesDirectRuntimeSharedState {
 
     pub fn with_client_identity_headers(mut self, headers: Vec<(String, String)>) -> Self {
         self.client_identity_headers = headers;
+        self
+    }
+
+    pub fn with_image_history(mut self, image_history: Option<crate::V3ImageHistoryView>) -> Self {
+        self.image_history = image_history;
         self
     }
 
