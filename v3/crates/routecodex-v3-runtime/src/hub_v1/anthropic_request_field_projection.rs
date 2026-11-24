@@ -102,16 +102,12 @@ pub(super) fn project_responses_text_as_anthropic_output_config(
             Some("json_schema") => {
                 reject_unmapped_anthropic_text_format_fields(
                     format,
-                    // Responses uses `name` to identify the source schema. Anthropic's
-                    // output_config.format has no equivalent wire field; consume this
-                    // source-only identity while projecting the exact target shape below.
+                    // Responses uses `name` to identify the source schema and `strict`
+                    // to select a validation mode. Anthropic's output_config.format has
+                    // no equivalent wire fields; consume both source-only values while
+                    // projecting the exact target shape below.
                     &["type", "name", "schema", "strict"],
                 )?;
-                if format.get("strict").and_then(Value::as_bool) == Some(false) {
-                    return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-                        paths: "$.request.text.output_config.format.strict".to_string(),
-                    });
-                }
                 if format
                     .get("strict")
                     .is_some_and(|strict| !strict.is_boolean())
