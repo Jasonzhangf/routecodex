@@ -374,7 +374,7 @@ function renderProviderFile({
     [
       `[provider.models."${model}"]`,
       `wireName = "${wireModel}"`,
-      'capabilities = ["text", "tools", "reasoning", "multimodal"]',
+      'capabilities = ["text", "tools", "reasoning", "multimodal", "vision"]',
       'supportsStreaming = true',
     ].join('\n'),
   );

@@ -113,6 +113,7 @@ pub(crate) struct V3AttemptBudget {
 pub struct V3RequestExecutionControl {
     attempt_budget: V3AttemptBudget,
     refill_excluded_candidates: Arc<Mutex<BTreeSet<String>>>,
+    pub(crate) image_history: Option<crate::image_history::V3ImageHistoryView>,
 }
 
 impl fmt::Debug for V3RequestExecutionControl {
@@ -129,7 +130,13 @@ impl V3RequestExecutionControl {
         Ok(Self {
             attempt_budget: V3AttemptBudget::from_manifest(manifest, server_id)?,
             refill_excluded_candidates: Arc::default(),
+            image_history: None,
         })
+    }
+
+    pub fn with_image_history(mut self, image_history: Option<crate::V3ImageHistoryView>) -> Self {
+        self.image_history = image_history;
+        self
     }
 
     pub(crate) fn take_refill_excluded_candidates(

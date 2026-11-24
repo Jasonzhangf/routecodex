@@ -340,11 +340,15 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             Some(request_identity.pipeline_id.clone()),
             payload.clone(),
         );
+        let image_history = state
+            .image_history
+            .for_request(&provider_failure_session_scope);
         let plan_result = plan_v3_responses_protocol_execution_with_recovery(
             &state.manifest,
             raw,
             state.provider_health.runtime_health(),
             current_epoch_ms(),
+            image_history,
         )
         .await;
         let plan = match plan_result {

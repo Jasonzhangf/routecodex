@@ -919,7 +919,7 @@ targets = [
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn capability_labels_choose_pool_without_filtering_provider() {
+async fn multimodal_pool_skips_higher_priority_candidate_without_vision() {
     let (_home, _lock) = TEST_LOCK.lock().await;
     let _environment = TestEnvironment::install();
     let search = spawn_peer("search").await;
@@ -940,7 +940,7 @@ targets = [
 ]
 [route_groups.owned.pools.default]
 selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "fallback", model = "model", key = "key", priority = 1 }]
+targets = [{ kind = "provider_model", provider = "search", model = "model", key = "key", priority = 1 }]
 "#,
     );
     compiled
@@ -972,17 +972,17 @@ targets = [{ kind = "provider_model", provider = "fallback", model = "model", ke
     let captures = search.captures.lock().await.clone();
     let fallback_captures = fallback.captures.lock().await.clone();
     stop_all(handle, vec![search, fallback]).await;
-    assert_eq!(captures.len(), 1, "selected multimodal pool must send to its declared text provider; fallback={fallback_captures:?}");
     assert!(
-        fallback_captures.is_empty(),
-        "capability must select multimodal pool: {fallback_captures:?}"
+        captures.is_empty(),
+        "the higher priority candidate has no declared vision capability"
     );
+    assert_eq!(fallback_captures.len(), 1);
     assert_eq!(
-        captures[0].input_value, input,
+        fallback_captures[0].input_value, input,
         "image request must reach provider unchanged"
     );
     assert_business_sse(
-        &outcome.expect("capability labels must not create exhaustion waiting"),
-        "search-business-ok",
+        &outcome.expect("vision filtering must leave the eligible candidate available"),
+        "fallback-business-ok",
     );
 }

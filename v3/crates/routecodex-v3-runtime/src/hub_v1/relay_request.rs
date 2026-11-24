@@ -210,6 +210,7 @@ enum GovernChatRequestOperatorSideOutput {
 struct GovernChatRequestOperator {
     normalized: V3HubReqInbound02Normalized,
     profile: V3HubRequestHookProfile,
+    image_history: Option<crate::image_history::V3ImageHistoryView>,
     events: Vec<V3HubRelayRequestHookEvent>,
     side_output: Arc<Mutex<Option<GovernChatRequestOperatorSideOutput>>>,
 }
@@ -235,6 +236,9 @@ impl Operator for GovernChatRequestOperator {
         let mut normalized = self.normalized.clone();
         normalized.previous.payload.0 = Arc::new(payload);
         let mut events = self.events.clone();
+        if let Some(history) = &self.image_history {
+            history.project_canonical_chat(Arc::make_mut(&mut normalized.previous.payload.0));
+        }
         match govern_chat_request_at_req04(&mut normalized, &self.profile, &mut events) {
             Ok(mut side_output) => {
                 side_output.events = events;
@@ -311,6 +315,7 @@ fn run_govern_chat_request_through_sdk(
     normalized: V3HubReqInbound02Normalized,
     profile: &V3HubRequestHookProfile,
     events: Vec<V3HubRelayRequestHookEvent>,
+    image_history: Option<crate::image_history::V3ImageHistoryView>,
 ) -> Result<
     (
         V3HubReqInbound02Normalized,
@@ -327,6 +332,7 @@ fn run_govern_chat_request_through_sdk(
         GovernChatRequestOperator {
             normalized,
             profile: profile.clone(),
+            image_history,
             events,
             side_output: side_output.clone(),
         },
@@ -378,7 +384,7 @@ impl V3HubRelayRequestHooks {
         let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
             .map_err(|reason| V3HubRelayRequestError::ReqInboundInvalid { reason })?;
         events.push(V3HubRelayRequestHookEvent::Req02Exit);
-        self.run_from_normalized_with_events(normalized, profile, events)
+        self.run_from_normalized_with_events(normalized, profile, events, None)
     }
 
     pub fn run_from_normalized(
@@ -386,7 +392,16 @@ impl V3HubRelayRequestHooks {
         normalized: V3HubReqInbound02Normalized,
         profile: &V3HubRequestHookProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
-        self.run_from_normalized_with_events(normalized, profile, Vec::new())
+        self.run_from_normalized_with_image_history(normalized, profile, None)
+    }
+
+    pub(crate) fn run_from_normalized_with_image_history(
+        &self,
+        normalized: V3HubReqInbound02Normalized,
+        profile: &V3HubRequestHookProfile,
+        image_history: Option<crate::image_history::V3ImageHistoryView>,
+    ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
+        self.run_from_normalized_with_events(normalized, profile, Vec::new(), image_history)
     }
 
     fn run_from_normalized_with_events(
@@ -394,9 +409,10 @@ impl V3HubRelayRequestHooks {
         normalized: V3HubReqInbound02Normalized,
         profile: &V3HubRequestHookProfile,
         events: Vec<V3HubRelayRequestHookEvent>,
+        image_history: Option<crate::image_history::V3ImageHistoryView>,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let (normalized, side_output) =
-            run_govern_chat_request_through_sdk(normalized, profile, events)?;
+            run_govern_chat_request_through_sdk(normalized, profile, events, image_history)?;
         let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(normalized);
         Ok(V3HubRelayRequestOutcome {
             governed,
@@ -809,6 +825,7 @@ mod tests {
             GovernChatRequestOperator {
                 normalized: captured,
                 profile,
+                image_history: None,
                 events: Vec::new(),
                 side_output: side_output.clone(),
             },
@@ -889,6 +906,7 @@ mod tests {
             GovernChatRequestOperator {
                 normalized: captured,
                 profile: V3HubRequestHookProfile::enabled(),
+                image_history: None,
                 events: Vec::new(),
                 side_output: side_output.clone(),
             },

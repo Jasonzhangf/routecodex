@@ -1939,6 +1939,7 @@ mod direct_sse_observability_none_tests {
                 V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest),
             ),
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
+            image_history: Default::default(),
             request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
             front_transport_broker: V3FrontTransportBroker::new(1),
             webui_observability: V3WebuiObservability::new(),

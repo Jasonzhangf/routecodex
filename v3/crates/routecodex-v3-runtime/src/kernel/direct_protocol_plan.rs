@@ -4,6 +4,7 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
     raw: V3Server03HttpRequestRaw,
     provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
     now_epoch_ms: u64,
+    image_history: Option<crate::V3ImageHistoryView>,
 ) -> Result<
     (V3ResponsesProtocolExecutionPlan, V3RequestExecutionControl),
     V3ResponsesProtocolExecutionPlanFailure,
@@ -14,9 +15,10 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
                 runtime_source("V3RequestExecutionControl", error.to_string()),
                 vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
             )
-        })?;
-    let plan = plan_v3_responses_protocol_execution_with_provider_health(
-        manifest, raw, provider_health, now_epoch_ms,
+        })?
+        .with_image_history(image_history);
+    let plan = plan_v3_responses_protocol_execution_with_captured_target(
+        manifest, raw, provider_health, now_epoch_ms, &mut None, control.image_history.as_ref(),
     )?;
     Ok((plan, control))
 }
@@ -33,6 +35,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         provider_health,
         now_epoch_ms,
         &mut None,
+        None,
     )
 }
 
@@ -42,6 +45,7 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
     now_epoch_ms: u64,
     captured_target: &mut Option<crate::operation_runner::V3ResolveTargetSideOutput>,
+    image_history: Option<&crate::V3ImageHistoryView>,
 ) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     let standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
@@ -100,7 +104,7 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     let (resolved_request, resolved_target) = if let Some(target) = captured_target.take() {
         (standardized.body.clone(), target)
     } else {
-        match crate::operation_runner::run_v3_resolve_target_operator(
+        match crate::operation_runner::run_v3_resolve_target_operator_with_history_images(
             standardized.body.clone(),
             crate::operation_runner::V3ResolveTargetExecutionMode::DirectFresh {
                 manifest: std::sync::Arc::new(manifest.clone()),
@@ -118,6 +122,10 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
                 is_compaction: request_is_compaction,
                 now_epoch_ms,
             },
+            entry_protocol == "responses"
+                && crate::image_history::has_unprojected_history_images(
+                    &standardized.body, image_history,
+                ),
         ) {
             Ok(value) => value,
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {

@@ -59,7 +59,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
         Some(control) => control,
         None => {
             match crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &raw.server_id) {
-                Ok(control) => control,
+                Ok(control) => control.with_image_history(shared_state.image_history.clone()),
                 Err(error) => {
                     return direct_runtime_helpers_stream::source_failure_output(
                         direct_runtime_helpers_stream::runtime_source(
