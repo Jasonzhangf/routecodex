@@ -1,6 +1,7 @@
 {
   "id": "v3.provider_usage_persistence_closeout",
   "version": "1",
+  "description": "终结入口只封闭一次；异步调用者不在 runtime 线程等待队列、回执或 join。调用者停止等待不转移或取消唯一关闭所有权；持久化未完成时受管控制面保持 Stopping 并拒绝冲突操作。成功回执必须晚于真实 generation close 与 writer exit。Drop 只保全关闭工作，不发布成功回执。",
   "inputs": [{"id": "aggregate消费式终结关闭请求", "schema": "Object"}],
   "nodes": [
     {

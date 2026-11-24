@@ -378,6 +378,9 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     let mut seeds = protocol_plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
         plan.relay_runtime_seeds()
     });
+    seeds.image_history = state
+        .image_history
+        .for_request(&provider_failure_session_scope);
     seeds.client_identity_headers = responses_client_identity_headers(headers);
     let output = match protocol_plan {
         Some(plan) => {

@@ -190,6 +190,7 @@ struct V3ListenerState {
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    image_history: routecodex_v3_runtime::V3SuccessfulImageHistory,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
@@ -285,7 +286,28 @@ impl V3ServerAggregateHandle {
     pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
         let maintenance_guard = self.request_activity_gate.pause_dispatch().await;
         let probe_quiescence_guard = self.probe_lifecycle.quiesce(maintenance_guard).await?;
-        self.flush_runtime_persistence();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            for provider_health in &self.provider_health {
+                provider_health
+                    .store()
+                    .flush_persistence_for_exec()
+                    .await
+                    .map_err(|error| {
+                        format!("provider health persistence preparation failed: {error}")
+                    })?;
+            }
+            for observability in &self.observability_writers {
+                observability
+                    .flush_persistence_for_exec()
+                    .await
+                    .map_err(|error| {
+                        format!("observability persistence preparation failed: {error}")
+                    })?;
+            }
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|_| "runtime persistence preparation timed out; owner retained".to_string())??;
         let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
             Some(worker) => match tokio::time::timeout(
                 std::time::Duration::from_secs(1),
@@ -336,7 +358,7 @@ impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
         self.probe_lifecycle.terminate();
         self.probe_lifecycle.join().await;
-        self.close_runtime_persistence();
+        let mut persistence_failures = self.close_runtime_persistence().await;
         let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
             Some(mut worker) => worker.shutdown().await,
             None => Vec::new(),
@@ -346,7 +368,8 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
-        codex_sample_persist_failures
+        persistence_failures.extend(codex_sample_persist_failures);
+        persistence_failures
     }
 
     /// Stop new business dispatch, wait for accepted requests to finish, then
@@ -366,11 +389,11 @@ impl V3ServerAggregateHandle {
         // the process; otherwise the replacement can restore a lease with no
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
-        self.close_runtime_persistence();
-        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
+        let mut codex_sample_persist_failures = self.close_runtime_persistence().await;
+        codex_sample_persist_failures.extend(match self.codex_sample_persist_worker.take() {
             Some(mut worker) => worker.shutdown().await,
             None => Vec::new(),
-        };
+        });
         V3ServerExecPreparation {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
@@ -380,30 +403,32 @@ impl V3ServerAggregateHandle {
         }
     }
 
-    fn flush_runtime_persistence(&self) {
+    async fn close_runtime_persistence(
+        &self,
+    ) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
+        let mut failures = Vec::new();
         for provider_health in &self.provider_health {
-            if let Err(error) = provider_health.flush_persistence() {
-                eprintln!("V3 provider health persistence flush failed: {error}");
+            let provider_health = provider_health.clone();
+            let result =
+                tokio::task::spawn_blocking(move || provider_health.flush_persistence()).await;
+            if let Err(error) = result.unwrap_or_else(|error| Err(error.to_string())) {
+                failures.push(routecodex_v3_debug::V3CodexSamplePersistFailure {
+                    request_id: "runtime-closeout".into(),
+                    file_name: "provider-health".into(),
+                    reason: error,
+                });
             }
         }
         for observability in &self.observability_writers {
-            if let Err(error) = observability.flush_persistence() {
-                eprintln!("V3 observability persistence flush failed: {error}");
+            if let Err(error) = observability.close_persistence_async().await {
+                failures.push(routecodex_v3_debug::V3CodexSamplePersistFailure {
+                    request_id: "runtime-closeout".into(),
+                    file_name: "observability".into(),
+                    reason: error,
+                });
             }
         }
-    }
-
-    fn close_runtime_persistence(&self) {
-        for provider_health in &self.provider_health {
-            if let Err(error) = provider_health.flush_persistence() {
-                eprintln!("V3 provider health persistence flush failed: {error}");
-            }
-        }
-        for observability in &self.observability_writers {
-            if let Err(error) = observability.close_persistence() {
-                eprintln!("V3 observability persistence close failed: {error}");
-            }
-        }
+        failures
     }
 
     pub fn restore_front_checkpoints(
@@ -687,6 +712,7 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 request_counter: Arc::clone(&request_counter),
                 codex_sample_store: codex_sample_store.clone(),
                 provider_health: listener_provider_health,
+                image_history: Default::default(),
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),

@@ -201,7 +201,8 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     let control = match initial_relay_seeds.request_execution_control.clone() {
         Some(control) => control,
         None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
-            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
+            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?
+            .with_image_history(initial_relay_seeds.image_history.clone()),
     };
     let max_refills = v3_chat_process_refill_max_consecutive();
     let mut relay_seeds = initial_relay_seeds.clone();

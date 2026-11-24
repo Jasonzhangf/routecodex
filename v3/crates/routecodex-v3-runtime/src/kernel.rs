@@ -242,7 +242,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 .endpoint
                 .trim_end_matches('/')
                 .ends_with("/responses/compact");
-        let resolved = crate::operation_runner::run_v3_resolve_target_operator(
+        let resolved = crate::operation_runner::run_v3_resolve_target_operator_with_history_images(
             standardized.body.clone(),
             crate::operation_runner::V3ResolveTargetExecutionMode::DirectFresh {
                 manifest: std::sync::Arc::new(manifest.clone()),
@@ -260,6 +260,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 is_compaction: request_is_compaction,
                 now_epoch_ms,
             },
+            crate::image_history::has_unprojected_history_images(
+                &standardized.body,
+                request_execution_control.image_history.as_ref(),
+            ),
         );
         let (resolved_request, resolved_target) = match resolved {
             Ok(value) => value,
@@ -659,6 +663,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             manifest,
             &standardized_server_id,
             &mut standardized,
+            request_execution_control.image_history.as_ref(),
         ) {
             return direct_runtime_helpers_stream::source_failure_output(
                 source,
@@ -757,6 +762,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
+        let attempt_images = request_execution_control
+            .image_history
+            .as_ref()
+            .map(|history| {
+                history.capture_attempt(
+                    transport_request.body(),
+                    crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                )
+            });
 
         send_attempts = match attempt_budget.admit_transport_attempt() {
             Ok(attempts) => attempts,
@@ -1626,6 +1640,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 trace,
                 &hook_registry,
             );
+        }
+        if !live_client_sse {
+            if let (Some(history), Some(images)) =
+                (&request_execution_control.image_history, attempt_images)
+            {
+                history.record_success(&attempt_success_receipt, images);
+            }
         }
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),

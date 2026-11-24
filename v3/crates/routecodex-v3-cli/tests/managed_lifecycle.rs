@@ -3571,6 +3571,437 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
 }
 
 #[test]
+fn f8c64a9_restart_slow_observability_retains_responsive_owner() {
+    use std::os::unix::ffi::OsStrExt;
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let admin = free_port();
+    let config = write_config(&root, ports);
+    let logs = home.join(".rcc").join("logs");
+    fs::create_dir_all(&logs).unwrap();
+    let fifo = logs.join(format!(
+        "server-v3-{}.request-records.provider-usage.facts.jsonl",
+        ports[0]
+    ));
+    let fifo_name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let admin_bind = format!("127.0.0.1:{admin}");
+    let command = |operation: &str| {
+        let mut command = managed_test_command(binary, &state);
+        command
+            .arg(operation)
+            .args(["--config"])
+            .arg(&config)
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state)
+            .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+            .env("V3_MANAGED_TEST_KEY", SECRET);
+        command
+    };
+    let mut child = command("start")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for port in ports {
+            wait_port(port, true);
+        }
+        let owner = single_instance_dir(&state);
+        wait_status_file_state(&owner, "running");
+        let original_pid = fs::read(owner.join("pid.cache")).unwrap();
+        let restart = command("restart")
+            .args(["--timeout-ms", "2500"])
+            .output()
+            .unwrap();
+        assert!(
+            !restart.status.success(),
+            "a stalled persistence writer must reject restart"
+        );
+        assert!(
+            String::from_utf8_lossy(&restart.stderr).contains("persistence"),
+            "{}",
+            String::from_utf8_lossy(&restart.stderr)
+        );
+        let status = command("status").arg("--json").output().unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert_eq!(fs::read(owner.join("pid.cache")).unwrap(), original_pid);
+        assert_eq!(http_get_json(ports[0], "/health")["status"], "ok");
+    }));
+    let fifo_fd = unsafe { libc::open(fifo_name.as_ptr(), libc::O_RDWR | libc::O_NONBLOCK) };
+    let _ = fs::remove_file(&fifo);
+    if fifo_fd >= 0 {
+        unsafe { libc::close(fifo_fd) };
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Err(error) = outcome {
+        std::panic::resume_unwind(error);
+    }
+}
+
+#[test]
+fn f8c64a9_shutdown_slow_writer_remains_pending_until_exit() {
+    use std::os::unix::ffi::OsStrExt;
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let home = root.path().join("home");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let logs = home.join(".rcc/logs");
+    fs::create_dir_all(&logs).unwrap();
+    let fifo = logs.join(format!(
+        "server-v3-{}.request-records.provider-usage.facts.jsonl",
+        ports[0]
+    ));
+    let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    let admin_bind = format!("127.0.0.1:{}", free_port());
+    let command = |operation: &str| {
+        let mut command = managed_test_command(env!("CARGO_BIN_EXE_rccv3"), &state);
+        command
+            .arg(operation)
+            .arg("--config")
+            .arg(&config)
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state)
+            .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+            .env("V3_MANAGED_TEST_KEY", SECRET);
+        command
+    };
+    let original_config = fs::read_to_string(&config).unwrap();
+    let mut previous = command("start")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let previous_ready = std::panic::catch_unwind(|| {
+        for port in ports {
+            wait_port(port, true);
+        }
+        let owner = single_instance_dir(&state);
+        wait_status_file_state(&owner, "running");
+        owner
+    });
+    let _ = previous.kill();
+    let _ = previous.wait();
+    let previous_owner = previous_ready.unwrap_or_else(|error| std::panic::resume_unwind(error));
+    assert!(previous_owner.join("pid.cache").is_file());
+    let previous_control: Value =
+        serde_json::from_slice(&fs::read(previous_owner.join("control.json")).unwrap()).unwrap();
+    let previous_socket = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(previous_control["socket_path"].as_str().unwrap());
+    wait_port(ports[0], false);
+    wait_port(ports[1], false);
+    if fifo.exists() {
+        fs::remove_file(&fifo).unwrap();
+    }
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    fs::write(&config, format!("{original_config}\n# second owner\n")).unwrap();
+    let mut child = command("start")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for port in ports {
+            wait_port(port, true);
+        }
+        let owner = fs::read_dir(state.join("instances"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path != &previous_owner)
+            .expect("second instance directory");
+        wait_status_file_state(&owner, "running");
+        let identity = fs::read(owner.join("pid.cache")).unwrap();
+        let stopped = command("stop")
+            .args(["--timeout-ms", "100"])
+            .output()
+            .unwrap();
+        assert!(
+            !stopped.status.success(),
+            "held writer cannot report completed stop"
+        );
+        assert!(
+            String::from_utf8_lossy(&stopped.stderr).contains("pending"),
+            "{}",
+            String::from_utf8_lossy(&stopped.stderr)
+        );
+        assert!(child.try_wait().unwrap().is_none());
+        let records = logs.join(format!("server-v3-{}.request-records.jsonl", ports[0]));
+        assert!(
+            routecodex_v3_debug::v3_provider_usage_read_generation(&records)
+                .unwrap()
+                .last_normal_end_epoch_ms
+                .is_none()
+        );
+        assert_eq!(fs::read(owner.join("pid.cache")).unwrap(), identity);
+        let status = command("status").arg("--json").output().unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert!(String::from_utf8_lossy(&status.stdout).contains("stopping"));
+        let restart = command("restart")
+            .args(["--timeout-ms", "500"])
+            .output()
+            .unwrap();
+        assert!(!restart.status.success());
+        let assert_start_preserves_owner = || {
+            let mut start = command("start")
+                .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "100")
+                .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "1000")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let start_exited = wait_for_child_exit(&mut start, Duration::from_secs(5));
+            if !start_exited {
+                let _ = start.kill();
+            }
+            let start = start.wait_with_output().unwrap();
+            assert!(
+                start_exited,
+                "start replaced the owner while closeout was pending"
+            );
+            assert!(!start.status.success());
+            assert!(
+                String::from_utf8_lossy(&start.stderr).contains("shutdown is still pending"),
+                "{}",
+                String::from_utf8_lossy(&start.stderr)
+            );
+            assert_eq!(fs::read(owner.join("pid.cache")).unwrap(), identity);
+        };
+        assert_start_preserves_owner();
+        let previous_pid_cache = previous_owner.join("pid.cache");
+        let mut stale_identity: Value =
+            serde_json::from_slice(&fs::read(&previous_pid_cache).unwrap()).unwrap();
+        let live_identity: Value = serde_json::from_slice(&identity).unwrap();
+        assert_ne!(
+            stale_identity["process_start_token"],
+            live_identity["process_start_token"]
+        );
+        stale_identity["pid"] = live_identity["pid"].clone();
+        fs::write(
+            &previous_pid_cache,
+            serde_json::to_vec(&stale_identity).unwrap(),
+        )
+        .unwrap();
+        fs::write(&config, &original_config).unwrap();
+        assert_start_preserves_owner();
+        let mut assert_stop_preserves_owner = || {
+            let stop_after_drift = command("stop")
+                .args(["--timeout-ms", "100"])
+                .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "1000")
+                .output()
+                .unwrap();
+            assert!(!stop_after_drift.status.success());
+            assert!(
+                String::from_utf8_lossy(&stop_after_drift.stderr)
+                    .contains("shutdown is still pending"),
+                "{}",
+                String::from_utf8_lossy(&stop_after_drift.stderr)
+            );
+            assert!(child.try_wait().unwrap().is_none());
+            assert_eq!(fs::read(owner.join("pid.cache")).unwrap(), identity);
+        };
+        assert_stop_preserves_owner();
+        stale_identity
+            .as_object_mut()
+            .unwrap()
+            .remove("process_start_token");
+        fs::write(
+            &previous_pid_cache,
+            serde_json::to_vec(&stale_identity).unwrap(),
+        )
+        .unwrap();
+        assert_stop_preserves_owner();
+        assert_eq!(http_get_json(ports[0], "/health")["status"], "ok");
+        owner
+    }));
+    // Release the real filesystem hold even if any assertion failed.
+    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NONBLOCK) };
+    let _ = fs::remove_file(&fifo);
+    if fd >= 0 {
+        unsafe { libc::close(fd) };
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let exited = child.try_wait().unwrap().is_some();
+    if !exited {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    if previous_socket.exists() {
+        fs::remove_file(previous_socket).unwrap();
+    }
+    let owner = outcome.unwrap_or_else(|error| std::panic::resume_unwind(error));
+    assert!(exited, "writer release must permit actual managed shutdown");
+    wait_status_file_state(&owner, "stopped");
+    assert!(!owner.join("pid.cache").exists());
+    assert!(!owner.join("control.json").exists());
+    for port in ports {
+        let records = logs.join(format!("server-v3-{port}.request-records.jsonl"));
+        let generation = routecodex_v3_debug::v3_provider_usage_read_generation(&records).unwrap();
+        assert!(!generation.open);
+        assert!(generation.last_normal_end_epoch_ms.is_some());
+    }
+}
+
+#[test]
+fn issue36df127_stop_unresponsive_aggregate_with_attached_admin() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let admin_port = free_port();
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let admin_bind = format!("127.0.0.1:{admin_port}");
+    let command = || {
+        let mut command = managed_test_command(binary, &state_root);
+        command
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+            .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+            .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "200")
+            .env("V3_MANAGED_TEST_KEY", SECRET);
+        command
+    };
+    let mut child = command()
+        .arg("start")
+        .args(["--config"])
+        .arg(&config)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = child.id() as libc::pid_t;
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for port in ports.into_iter().chain([admin_port]) {
+            wait_port(port, true);
+        }
+        let instance_dir = single_instance_dir(&state_root);
+        wait_status_file_state(&instance_dir, "running");
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        let output = command()
+            .arg("stop")
+            .args(["--config"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_stop_stdout(&output, "stop exact aggregate with attached admin");
+        assert!(wait_for_child_exit(&mut child, Duration::from_secs(3)));
+        for port in ports.into_iter().chain([admin_port]) {
+            wait_port(port, false);
+        }
+    }));
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Err(error) = outcome {
+        std::panic::resume_unwind(error);
+    }
+}
+
+#[test]
+fn issue36df127_start_replaces_unresponsive_aggregate_with_attached_admin() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let admin_port = free_port();
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let admin_bind = format!("127.0.0.1:{admin_port}");
+    let command = || {
+        let mut command = managed_test_command(binary, &state_root);
+        command
+            .args(["start", "--snapall", "--config"])
+            .arg(&config)
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+            .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+            .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
+            .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "300")
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    };
+    let mut original = command().spawn().unwrap();
+    let mut replacement = None;
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for port in ports.into_iter().chain([admin_port]) {
+            wait_port(port, true);
+        }
+        let instance_dir = single_instance_dir(&state_root);
+        wait_status_file_state(&instance_dir, "running");
+        assert_eq!(
+            unsafe { libc::kill(original.id() as libc::pid_t, libc::SIGSTOP) },
+            0
+        );
+        replacement = Some(command().spawn().unwrap());
+        assert!(wait_for_child_exit(&mut original, Duration::from_secs(15)));
+        let replacement = replacement.as_mut().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            assert!(
+                replacement.try_wait().unwrap().is_none(),
+                "replacement exited before ready"
+            );
+            let current = fs::read(instance_dir.join("pid.cache"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            if current.as_ref().and_then(|value| value["pid"].as_u64())
+                == Some(u64::from(replacement.id()))
+                && ports
+                    .iter()
+                    .all(|port| TcpStream::connect(("127.0.0.1", *port)).is_ok())
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "replacement never became ready");
+            sleep(Duration::from_millis(50));
+        }
+        for port in ports {
+            assert_eq!(http_get_json(port, "/health")["status"], "ok");
+        }
+    }));
+    let _ = original.kill();
+    let _ = original.wait();
+    if let Some(mut replacement) = replacement {
+        let _ = replacement.kill();
+        let _ = replacement.wait();
+    }
+    if let Err(error) = outcome {
+        std::panic::resume_unwind(error);
+    }
+}
+
+#[test]
 fn start_preserves_occupied_admin_webui_port_and_serves_business() {
     struct TestChild {
         child: Option<Child>,
@@ -3908,6 +4339,15 @@ fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
         .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "200")
         .output()
         .unwrap();
+    let foreground_start = managed_test_command(binary, &state_root)
+        .args(["start", "--snapall", "--config"])
+        .arg(&single_port_config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
+        .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "200")
+        .output()
+        .unwrap();
     let target_still_open = TcpStream::connect(("127.0.0.1", target_port)).is_ok();
     let sibling_still_open = TcpStream::connect(("127.0.0.1", sibling_port)).is_ok();
     let stderr = String::from_utf8_lossy(&start.stderr).to_string();
@@ -3920,6 +4360,11 @@ fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
     assert!(
         !start.status.success(),
         "start must fail explicitly instead of killing an unmanaged multi-port PID"
+    );
+    assert!(!foreground_start.status.success());
+    assert!(
+        !String::from_utf8_lossy(&foreground_start.stdout).contains("Server started"),
+        "foreground start must report success only after binding listeners"
     );
     assert!(
         stderr.contains("refusing to signal listener PID")

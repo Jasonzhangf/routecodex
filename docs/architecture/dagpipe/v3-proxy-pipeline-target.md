@@ -41,6 +41,8 @@ RouteCodex 的业务目标是透明代理：在不同客户端和上游协议之
 
 本条采用 2026-11-10 用户明确的请求准入要求，覆盖旧容量、并发上限、许可排队及 Deferred 等待描述。精确身份健康隔离和真实响应语义继续由原 owner 保持。
 
+图片请求使用 `multimodal` 池及其声明的 `default` 后继，或直接使用 `default`。Target 在展开 `multimodal` 候选时排除未声明 `vision` 的模型，仍允许同一身份在 `default` 中按该池的规则参与。选中 `default` 的无 `vision` 模型时，Provider Req Compat 仅在该次发包中使用图片占位。原请求和工具调用配对保留，Vision 尝试仍取得原图。以上行为沿既有 D、E、I 节点执行，未改变出口、健康和请求错误边界。
+
 ```mermaid
 flowchart LR
   A[收到客户端请求] --> B[识别入口协议并接收完整请求]
@@ -193,3 +195,7 @@ flowchart TD
 | G6 | 取消、提交后流中断与资源释放 | 当前 map 主要记录请求/响应/错误调用边，也有提交后 SSE 观测与 EOF/error/drop 的局部合同；本轮未绑定 DAGPipe 状态机与每终点资源收据。 | 明确连接断开、上游尝试取消、SSE 关闭的 owner、事件与验收；核对提交前完整缓冲与现有提交后观测的关系，补同入口取消/流中断回放。 |
 
 **审计结论：三张静态图已登记，Node01 切片已接入；整条请求、响应、错误图仍未运行。** 后续沿 G2–G6 逐节点核对图、Operator、调用边和真实入口证据，不以静态校验或 Node01 证据推断全图完成。修改项目锁定骨架节点、边、owner 或资源流之前，先遵守 `docs/architecture/wiki/v3-mainline-skeleton-sop.md` 的授权边界。
+
+Responses 历史图片使用入口捕获的监听器与会话成功记录视图。Direct Req04 和 Relay Chat Process Req04 在工作副本中把已成功发送的历史图投影成文本。尝试完整成功后，Runtime 从本次实际发送的 Provider 请求记录图片引用。失败尝试无写入。不同请求之间通过记录传递状态，请求图无回边。
+
+Responses 请求在 Router06 选择前携带仍须发送历史图片的类型化事实。无当前图片但有待发送历史图时，只展开已声明的 default；当前图仍使用 multimodal 及声明的 default 后继。冷运行和缺少会话的请求也沿同一约束，不从旧日志推断成功。

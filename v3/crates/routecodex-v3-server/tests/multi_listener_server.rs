@@ -2529,6 +2529,7 @@ struct ControlledTerminalState {
     status: StatusCode,
     content_type: &'static str,
     response_body: Vec<u8>,
+    accepts: fn(&Value) -> bool,
 }
 
 async fn controlled_terminal_upstream(
@@ -2536,10 +2537,20 @@ async fn controlled_terminal_upstream(
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    let accepted = (state.accepts)(&body);
     state
         .captures
         .send(ProviderCapture::from_http(&headers, body))
         .unwrap();
+    if !accepted {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"code":"1210","message":"fixture accepts text only"}}"#,
+            ))
+            .unwrap();
+    }
     Response::builder()
         .status(state.status)
         .header("content-type", state.content_type)
@@ -2573,6 +2584,20 @@ async fn start_controlled_terminal_upstream_with_body(
     mpsc::UnboundedReceiver<ProviderCapture>,
     oneshot::Sender<()>,
 ) {
+    start_controlled_terminal_upstream_with_body_when(status, content_type, response_body, |_| true)
+        .await
+}
+
+async fn start_controlled_terminal_upstream_with_body_when(
+    status: StatusCode,
+    content_type: &'static str,
+    response_body: Vec<u8>,
+    accepts: fn(&Value) -> bool,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
@@ -2591,6 +2616,7 @@ async fn start_controlled_terminal_upstream_with_body(
             status,
             content_type,
             response_body,
+            accepts,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)

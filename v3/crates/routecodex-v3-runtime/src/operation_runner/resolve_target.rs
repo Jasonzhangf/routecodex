@@ -71,6 +71,7 @@ impl std::error::Error for V3ResolveTargetOperatorError {}
 
 struct ResolveTargetOperator {
     mode: V3ResolveTargetExecutionMode,
+    has_unprojected_history_images: bool,
     side_output: Arc<
         Mutex<
             Option<
@@ -104,7 +105,8 @@ impl Operator for ResolveTargetOperator {
     }
 
     fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
-        let resolved = resolve_target_from_value(&input, &self.mode);
+        let resolved =
+            resolve_target_from_value(&input, &self.mode, self.has_unprojected_history_images);
         let mut holder = self
             .side_output
             .lock()
@@ -128,6 +130,7 @@ impl Operator for ResolveTargetOperator {
 fn resolve_target_from_value(
     input: &Value,
     mode: &V3ResolveTargetExecutionMode,
+    has_unprojected_history_images: bool,
 ) -> Result<
     V3ResolveTargetSideOutput,
     Result<
@@ -146,13 +149,14 @@ fn resolve_target_from_value(
         } => {
             let routing_view = routing_view_with_requested_model(input, requested_model.as_deref());
             let opaque_hit =
-                crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+                crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_with_history_images(
                     manifest,
                     server_id,
                     entry_kind,
                     endpoint_path,
                     routing_view.as_ref(),
                     *deterministic_sample,
+                    has_unprojected_history_images,
                 )?;
             Ok(V3ResolveTargetSideOutput {
                 opaque_hit,
@@ -217,7 +221,11 @@ fn resolve_target_from_value(
                     )
                 })?;
             let plan = router
-                .resolve_route_pool_plan(manifest, classified)
+                .resolve_route_pool_plan_with_history_images(
+                    manifest,
+                    classified,
+                    has_unprojected_history_images,
+                )
                 .map_err(|error| {
                     crate::shared::v3_route_plan_error_source(
                         "V3Router06RoutePoolResolved",
@@ -268,9 +276,18 @@ pub(crate) fn run_v3_resolve_target_operator(
     canonical_request: Value,
     mode: V3ResolveTargetExecutionMode,
 ) -> Result<(Value, V3ResolveTargetSideOutput), V3ResolveTargetOperatorError> {
+    run_v3_resolve_target_operator_with_history_images(canonical_request, mode, false)
+}
+
+pub(crate) fn run_v3_resolve_target_operator_with_history_images(
+    canonical_request: Value,
+    mode: V3ResolveTargetExecutionMode,
+    has_unprojected_history_images: bool,
+) -> Result<(Value, V3ResolveTargetSideOutput), V3ResolveTargetOperatorError> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = ResolveTargetOperator {
         mode,
+        has_unprojected_history_images,
         side_output: Arc::clone(&side_output),
     };
     let runner_result = run_v3_single_node_operator(

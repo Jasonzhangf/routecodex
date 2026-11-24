@@ -182,6 +182,7 @@ default_model = "main"
 auth = {{ type = "api_key", entries = [{{ alias = "independent", env = "V3_NO_FIRST_FAILURE_TEST_KEY" }}] }}
 [providers.independent.models.main]
 wire_name = "main"
+capabilities = ["vision"]
 supports_streaming = true
 [providers.fallback]
 type = "responses"
@@ -189,6 +190,7 @@ base_url = "{upstream}/fallback/v1"
 default_model = "main"
 auth = {{ type = "api_key", entries = [{{ alias = "fallback", env = "V3_NO_FIRST_FAILURE_TEST_KEY" }}] }}
 [providers.fallback.models.main]
+capabilities = ["vision"]
 supports_streaming = true
 [debug]
 log_console = false

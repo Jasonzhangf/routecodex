@@ -11,6 +11,98 @@ struct PreviousReleaseRestartTransfer {
     target: V3ManagedInstanceDeclaration,
 }
 
+pub(crate) fn retire_abandoned_previous_release_transfer(
+    state_root: &Path,
+    current_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    let path = current_dir.join(PREVIOUS_RELEASE_RESTART_FILE);
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    let transfer: PreviousReleaseRestartTransfer = read_json(&path)?;
+    let previous_dir = state_root
+        .join("instances")
+        .join(&transfer.previous.instance_id);
+    if transfer.schema_version != SCHEMA_VERSION
+        || transfer.target != *expected
+        || transfer.previous.schema_version != SCHEMA_VERSION
+        || transfer.pid.schema_version != SCHEMA_VERSION
+        || transfer.previous.instance_id == expected.instance_id
+        || transfer.pid.instance_id != transfer.previous.instance_id
+        || transfer.pid.pid == 0
+        || transfer.pid.start_nonce.is_empty()
+        || transfer
+            .pid
+            .process_start_token
+            .as_deref()
+            .is_none_or(str::is_empty)
+        || !listener_sets_exactly_match(&transfer.previous.listeners, &expected.listeners)
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "refusing to retire invalid previous-release transfer".into(),
+        ));
+    }
+    let target_pid_path = current_dir.join("pid.cache");
+    if target_pid_path.try_exists()? {
+        let target_pid: V3ManagedPidCache = read_json(&target_pid_path)?;
+        if target_pid.instance_id != expected.instance_id || pid_is_alive(target_pid.pid) {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to retire transfer while target ownership is live or conflicting".into(),
+            ));
+        }
+    }
+    let target_control_path = current_dir.join("control.json");
+    if target_control_path.try_exists()? {
+        let control: V3ManagedControlRecord = read_json(&target_control_path)?;
+        if control.instance_id != expected.instance_id
+            || Path::new(&control.socket_path) != managed_control_socket_path(&control.instance_id)
+            || Path::new(&control.socket_path).try_exists()?
+        {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to retire transfer while target control is live or conflicting".into(),
+            ));
+        }
+    }
+    let previous_path = previous_dir.join("instance.json");
+    if previous_path.try_exists()?
+        && read_json::<V3ManagedInstanceDeclaration>(&previous_path)? != transfer.previous
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous declaration differs from abandoned transfer".into(),
+        ));
+    }
+    let pid_path = previous_dir.join("pid.cache");
+    if pid_path.try_exists()? && read_json::<V3ManagedPidCache>(&pid_path)? != transfer.pid {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous PID record differs from abandoned transfer".into(),
+        ));
+    }
+    let control_path = previous_dir.join("control.json");
+    if control_path.try_exists()? {
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.schema_version != SCHEMA_VERSION
+            || control.instance_id != transfer.previous.instance_id
+            || control.start_nonce != transfer.pid.start_nonce
+            || Path::new(&control.socket_path) != managed_control_socket_path(&control.instance_id)
+        {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "previous control record differs from abandoned transfer".into(),
+            ));
+        }
+    }
+    if pid_is_alive(transfer.pid.pid)
+        || process_start_token(transfer.pid.pid)?.is_some()
+        || read_json::<PreviousReleaseRestartTransfer>(&path)? != transfer
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous-release transfer still has a live or changed owner".into(),
+        ));
+    }
+    fs::remove_file(path)?;
+    Ok(())
+}
+
 pub(crate) struct PreviousReleaseRestartGuard {
     path: PathBuf,
     transfer: PreviousReleaseRestartTransfer,
@@ -242,7 +334,9 @@ pub(crate) fn find_live_previous_owner_for_restart(
     state_root: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<Option<(PathBuf, V3ManagedInstanceDeclaration)>, V3LifecycleError> {
-    let candidates = find_previous_owner_candidates_for_restart(state_root, expected)?;
+    let candidates = find_live_published_owners(state_root, |published| {
+        previous_owner_matches_restart_declaration(published, expected)
+    })?;
     match candidates.as_slice() {
         [] => Ok(None),
         [(instance_dir, declaration)] => Ok(Some((instance_dir.clone(), declaration.clone()))),
@@ -253,9 +347,9 @@ pub(crate) fn find_live_previous_owner_for_restart(
     }
 }
 
-pub(crate) fn find_previous_owner_candidates_for_restart(
+pub(crate) fn find_live_published_owners(
     state_root: &Path,
-    expected: &V3ManagedInstanceDeclaration,
+    matches: impl Fn(&V3ManagedInstanceDeclaration) -> bool,
 ) -> Result<Vec<(PathBuf, V3ManagedInstanceDeclaration)>, V3LifecycleError> {
     let instances_root = state_root.join("instances");
     if !instances_root.exists() {
@@ -274,7 +368,7 @@ pub(crate) fn find_previous_owner_candidates_for_restart(
         let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
             continue;
         };
-        if !previous_owner_matches_restart_declaration(&published, expected) {
+        if !matches(&published) {
             continue;
         }
         if !previous_owner_has_live_control_truth(&instance_dir, &published)? {
@@ -334,6 +428,11 @@ pub(crate) fn previous_owner_has_live_control_truth(
     }
     if !pid_is_alive(pid.pid) {
         return Ok(false);
+    }
+    if let Some(recorded_token) = &pid.process_start_token {
+        if process_start_token(pid.pid)?.as_ref() != Some(recorded_token) {
+            return Ok(false);
+        }
     }
     let socket_path = PathBuf::from(&control.socket_path);
     if socket_path != managed_control_socket_path(&published.instance_id) || !socket_path.exists() {

@@ -143,6 +143,74 @@ pub(crate) fn guard_explicit_listener_pids_are_scoped_to_target_ports(
     Ok(())
 }
 
+pub(crate) fn guard_managed_listener_pids(
+    state_root: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+    pids: &[u32],
+    target_ports: &BTreeSet<u16>,
+) -> Result<(), V3LifecycleError> {
+    for &pid in pids {
+        let mut allowed_ports = target_ports.clone();
+        let mut matching_owner = None;
+        for entry in fs::read_dir(state_root.join("instances"))? {
+            let path = entry?.path();
+            let Ok(published) =
+                read_json::<V3ManagedInstanceDeclaration>(&path.join("instance.json"))
+            else {
+                continue;
+            };
+            let Ok(cached) = read_json::<V3ManagedPidCache>(&path.join("pid.cache")) else {
+                continue;
+            };
+            if cached.pid != pid
+                || cached.process_start_token.is_none()
+                || process_start_token(pid)? != cached.process_start_token
+            {
+                continue;
+            }
+            if matching_owner.is_some() {
+                return Err(V3LifecycleError::IdentityMismatch(
+                    "multiple managed records claim the same process generation".into(),
+                ));
+            }
+            matching_owner = Some((path, published, cached));
+        }
+        if let Some((path, published, cached)) = matching_owner {
+            let control = read_json::<V3ManagedControlRecord>(&path.join("control.json"));
+            if let Ok(control) = control {
+                let same_path = matches!(
+                    (fs::canonicalize(&published.config_path), fs::canonicalize(&declaration.config_path)),
+                    (Ok(left), Ok(right)) if left == right
+                );
+                if published.schema_version == SCHEMA_VERSION
+                    && cached.schema_version == SCHEMA_VERSION
+                    && control.schema_version == SCHEMA_VERSION
+                    && path.file_name().and_then(|name| name.to_str())
+                        == Some(&published.instance_id)
+                    && cached.instance_id == published.instance_id
+                    && control.instance_id == published.instance_id
+                    && !cached.start_nonce.is_empty()
+                    && cached.start_nonce == control.start_nonce
+                    && Path::new(&control.socket_path)
+                        == managed_control_socket_path(&published.instance_id)
+                    && same_path
+                    && same_managed_listener_set(&published.listeners, &declaration.listeners)
+                {
+                    allowed_ports.extend(
+                        published
+                            .listeners
+                            .iter()
+                            .filter(|listener| listener.server_id == "admin_webui")
+                            .map(|listener| listener.port),
+                    );
+                }
+            }
+        }
+        guard_explicit_listener_pids_are_scoped_to_target_ports(&[pid], &allowed_ports)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn listening_ports_for_pid(pid: u32) -> Result<BTreeSet<u16>, V3LifecycleError> {
     #[cfg(target_os = "macos")]
     {

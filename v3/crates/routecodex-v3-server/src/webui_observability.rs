@@ -861,20 +861,23 @@ impl Drop for V3WebuiObservabilityPersistenceWriterLifecycle {
             Some((sender, thread))
         });
         if let Some((sender, thread)) = completion {
-            let (receipt_sender, receipt_receiver) = mpsc::channel();
-            if sender
-                .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
-                    receipt_sender,
-                ))
-                .is_ok()
-                && self.wait_for_completion
-            {
-                let _ = receipt_receiver.recv();
-            }
-            drop(sender);
-            if let Some(thread) = thread {
-                let _ = thread.join();
-            }
+            let wait_for_completion = self.wait_for_completion;
+            std::thread::spawn(move || {
+                let (receipt_sender, receipt_receiver) = mpsc::channel();
+                if sender
+                    .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
+                        receipt_sender,
+                    ))
+                    .is_ok()
+                    && wait_for_completion
+                {
+                    let _ = receipt_receiver.recv();
+                }
+                drop(sender);
+                if let Some(thread) = thread {
+                    let _ = thread.join();
+                }
+            });
         }
     }
 }
@@ -1064,6 +1067,68 @@ impl V3WebuiObservabilityPersistenceWriter {
             .map_err(|error| format!("observability persistence flush receipt missing: {error}"))?
     }
 
+    async fn flush_for_exec(&self) -> Result<(), String> {
+        let (sender, receiver) = mpsc::channel();
+        self.lifecycle
+            .state
+            .lock()
+            .map_err(|error| format!("observability persistence lifecycle poisoned: {error}"))?
+            .sender
+            .as_ref()
+            .ok_or_else(|| "observability persistence writer is closed".to_string())?
+            .try_send(V3WebuiObservabilityPersistenceCommand::Flush(sender))
+            .map_err(|error| format!("observability persistence queue unavailable: {error}"))?;
+        loop {
+            match receiver.try_recv() {
+                Ok(result) => return result,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("observability persistence flush receipt missing".into())
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await
+                }
+            }
+        }
+    }
+
+    async fn close_async(&self) -> Result<(), String> {
+        let completion = {
+            let mut state = self.lifecycle.state.lock().map_err(|error| {
+                format!("observability persistence lifecycle poisoned: {error}")
+            })?;
+            if let Some(result) = state.close_result.clone() {
+                return result;
+            }
+            // Taking the sole sender seals admission before the first await.
+            // The completion worker owns both the terminal command and join,
+            // even when a caller stops waiting for it.
+            state
+                .sender
+                .take()
+                .map(|sender| (sender, state.thread.take()))
+        };
+        if let Some((sender, thread)) = completion {
+            let writer = self.clone();
+            tokio::task::spawn_blocking(move || {
+                let result = writer.finish_close(sender, thread);
+                let _ = writer.set_close_result(result);
+            });
+        }
+        loop {
+            if let Some(result) = self
+                .lifecycle
+                .state
+                .lock()
+                .map_err(|error| format!("observability persistence lifecycle poisoned: {error}"))?
+                .close_result
+                .clone()
+            {
+                return result;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
     fn close(&self) -> Result<(), String> {
         let (sender, thread) = {
             let mut state = self.lifecycle.state.lock().map_err(|error| {
@@ -1079,6 +1144,16 @@ impl V3WebuiObservabilityPersistenceWriter {
             let thread = state.thread.take();
             (sender, thread)
         };
+        let result = self.finish_close(sender, thread);
+        self.set_close_result(result.clone())?;
+        result
+    }
+
+    fn finish_close(
+        &self,
+        sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    ) -> Result<(), String> {
         let (receipt_sender, receipt_receiver) = mpsc::channel();
         let send_result = sender
             .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
@@ -1099,13 +1174,11 @@ impl V3WebuiObservabilityPersistenceWriter {
                 .map_err(|_| "observability persistence writer thread panicked".to_string()),
             None => Err("observability persistence writer thread unavailable".to_string()),
         };
-        let result = match (shutdown_result, join_result) {
+        match (shutdown_result, join_result) {
             (Err(error), Err(join_error)) => Err(format!("{error}; {join_error}")),
             (Err(error), _) | (Ok(()), Err(error)) => Err(error),
             (Ok(()), Ok(())) => Ok(()),
-        };
-        self.set_close_result(result.clone())?;
-        result
+        }
     }
 
     fn set_close_result(&self, result: Result<(), String>) -> Result<(), String> {
@@ -1361,9 +1434,23 @@ impl V3WebuiObservability {
         }
     }
 
+    pub(crate) async fn flush_persistence_for_exec(&self) -> Result<(), String> {
+        match self.persistence_writer.as_ref() {
+            Some(writer) => writer.flush_for_exec().await,
+            None => Ok(()),
+        }
+    }
+
     pub(crate) fn close_persistence(&self) -> Result<(), String> {
         match self.persistence_writer.as_ref() {
             Some(writer) => writer.close(),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) async fn close_persistence_async(&self) -> Result<(), String> {
+        match self.persistence_writer.as_ref() {
+            Some(writer) => writer.close_async().await,
             None => Ok(()),
         }
     }
@@ -2218,6 +2305,137 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[tokio::test]
+    async fn issue_f8c64a9_exec_flush_remains_cancellable_when_writer_is_slow() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let writer = V3WebuiObservabilityPersistenceWriter {
+            gaps: V3WebuiObservabilityGapQueue::new(),
+            alarm: Arc::new(RwLock::new(None)),
+            pending_write_error: Arc::new(std::sync::Mutex::new(None)),
+            history_max_bytes: V3_WEBUI_HISTORY_MAX_BYTES,
+            lifecycle: Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+                sender, false,
+            )),
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(30),
+            writer.flush_for_exec(),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "an unanswered writer must yield to the timeout"
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(V3WebuiObservabilityPersistenceCommand::Flush(_))
+        ));
+        drop(receiver);
+        drop(writer);
+    }
+
+    #[tokio::test]
+    async fn issue_f8c64a9_close_yields_and_retains_terminal_ownership() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (queued_tx, queued_rx) = mpsc::channel();
+        sender
+            .try_send(V3WebuiObservabilityPersistenceCommand::Flush(queued_tx))
+            .unwrap();
+        let writer = V3WebuiObservabilityPersistenceWriter {
+            gaps: V3WebuiObservabilityGapQueue::new(),
+            alarm: Arc::new(RwLock::new(None)),
+            pending_write_error: Arc::new(std::sync::Mutex::new(None)),
+            history_max_bytes: V3_WEBUI_HISTORY_MAX_BYTES,
+            lifecycle: Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+                sender, true,
+            )),
+        };
+        let (release_tx, release_rx) = mpsc::channel();
+        writer.lifecycle.attach_thread(std::thread::spawn(move || {
+            release_rx.recv().unwrap();
+            if let V3WebuiObservabilityPersistenceCommand::Flush(receipt) = receiver.recv().unwrap()
+            {
+                receipt.send(Ok(())).unwrap();
+            } else {
+                panic!("accepted queued work was lost");
+            }
+            if let V3WebuiObservabilityPersistenceCommand::Shutdown(receipt) =
+                receiver.recv().unwrap()
+            {
+                receipt.send(Ok(())).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            } else {
+                panic!("expected terminal command");
+            }
+        }));
+        // Release even on a blocking baseline or failed assertion.
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            release_tx.send(()).unwrap();
+        });
+        let pending =
+            tokio::time::timeout(std::time::Duration::from_millis(30), writer.close_async()).await;
+        let was_pending = pending.is_err();
+        if was_pending {
+            assert!(writer
+                .lifecycle
+                .state
+                .lock()
+                .unwrap()
+                .close_result
+                .is_none());
+            assert!(writer.lifecycle.state.lock().unwrap().sender.is_none());
+            writer.close_async().await.unwrap();
+        }
+        releaser.join().unwrap();
+        assert_eq!(queued_rx.recv().unwrap(), Ok(()));
+        assert!(
+            was_pending,
+            "close blocked the runtime instead of yielding to the deadline"
+        );
+        assert_eq!(
+            writer.lifecycle.state.lock().unwrap().close_result,
+            Some(Ok(()))
+        );
+    }
+
+    #[test]
+    fn issue_f8c64a9_drop_does_not_wait_for_slow_writer() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let lifecycle = V3WebuiObservabilityPersistenceWriterLifecycle::new(sender, true);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        lifecycle.attach_thread(std::thread::spawn(move || {
+            if let Ok(V3WebuiObservabilityPersistenceCommand::Shutdown(receipt)) = receiver.recv() {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                let _ = receipt.send(Ok(()));
+                finished_tx.send(()).unwrap();
+            }
+        }));
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let dropper = std::thread::spawn(move || {
+            drop(lifecycle);
+            dropped_tx.send(()).unwrap();
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let returned_while_writer_held = dropped_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_ok();
+        release_tx.send(()).unwrap();
+        dropper.join().unwrap();
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert!(
+            returned_while_writer_held,
+            "dropping the lifecycle blocked on the writer"
+        );
+    }
+
     #[test]
     fn provider_usage_queue_rejection_is_a_visible_gap() {
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -2353,6 +2571,71 @@ pub(crate) mod tests {
         assert!(!v3_provider_usage_read_generation(&records).unwrap().open);
         drop(writer);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn issue_f8c64a9_async_close_preserves_real_records_and_write_error() {
+        let limits = routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits {
+            latest_encoded_fact_bytes: 8_192,
+            max_facts: 1,
+            physical_fact_log_bytes: 8_192,
+            complete_fact_bytes: 8_192,
+            companion_state_bytes: 64 * 1024,
+        };
+        let (writer, dir, records) =
+            terminal_close_test_writer("async-close-write-failure", limits);
+        writer.enqueue(terminal_close_test_row(4444, "async-first", 10), None);
+        let flushing = writer.clone();
+        tokio::task::spawn_blocking(move || flushing.flush())
+            .await
+            .unwrap()
+            .unwrap();
+        writer.enqueue(terminal_close_test_row(4444, "async-capacity", 20), None);
+        let error = writer.close_async().await.unwrap_err();
+        assert!(error.contains("capacity"), "{error}");
+        assert_eq!(
+            v3_webui_observability_read_provider_usage(&records)
+                .unwrap()
+                .facts
+                .len(),
+            1
+        );
+        assert!(!v3_provider_usage_read_generation(&records).unwrap().open);
+        assert_eq!(writer.close_async().await.unwrap_err(), error);
+        drop(writer);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn issue_f8c64a9_drop_reaper_preserves_accepted_records() {
+        let (writer, dir, records) = terminal_close_test_writer(
+            "drop-accepted-work",
+            routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits::default(),
+        );
+        writer.enqueue(terminal_close_test_row(4444, "drop-terminal", 10), None);
+        drop(writer);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if v3_provider_usage_read_generation(&records)
+                .map(|generation| !generation.open && generation.last_normal_end_epoch_ms.is_some())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "reaper did not close generation"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            v3_webui_observability_read_provider_usage(&records)
+                .unwrap()
+                .facts
+                .len(),
+            1
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

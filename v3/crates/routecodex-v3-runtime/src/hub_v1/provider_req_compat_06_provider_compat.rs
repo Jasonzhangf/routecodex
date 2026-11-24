@@ -245,6 +245,14 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     .map(|result| result.payload)
     .map_err(|reason| classify_v3_provider_compat_error("request", profile, reason))?;
     let mut result = result;
+    if selected
+        .pool_ids
+        .first()
+        .is_some_and(|pool| pool == "default")
+        && !selected.supports_vision()
+    {
+        image_placeholder::project_default_text_attempt_images(&mut result, provider_protocol);
+    }
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);
     drop_glm_unsupported_chat_fields(&mut result, selected, provider_protocol);
@@ -277,6 +285,10 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
 #[path = "provider_req_compat_06_output_cap.rs"]
 mod provider_req_compat_06_output_cap;
 use provider_req_compat_06_output_cap::project_provider_declared_output_cap;
+
+#[path = "provider_req_compat_06_image_placeholder.rs"]
+mod image_placeholder;
+pub(crate) use image_placeholder::project_image_part;
 
 #[path = "provider_req_compat_06_reasoning_effort.rs"]
 mod provider_req_compat_06_reasoning_effort;
@@ -1765,7 +1777,7 @@ mod tests {
     }
 
     #[test]
-    fn non_multimodal_target_preserves_representable_latest_image() {
+    fn default_text_target_replaces_latest_image_with_placeholder() {
         let payload = json!({
             "messages": [{"role": "user", "content": [{
                 "type": "image_url",
@@ -1782,8 +1794,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            payload["messages"][0]["content"][0]["image_url"]["url"],
-            VALID_1X1_PNG_DATA_URL
+            payload["messages"][0]["content"][0],
+            json!({"type":"text","text":"[Image]"})
         );
     }
 

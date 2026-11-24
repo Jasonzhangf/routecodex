@@ -275,6 +275,56 @@ async fn wait_for_control_peer_before_exec(stream: &UnixStream) -> Result<(), V3
     }
 }
 
+// Keep the one shutdown future alive after a client's deadline. Only status
+// observation is accepted while persistence and writer exit are unresolved.
+async fn observe_managed_shutdown(
+    shutdown: impl std::future::Future<Output = Result<(), V3LifecycleError>>,
+    listener: &UnixListener,
+    declaration: &V3ManagedInstanceDeclaration,
+    start_nonce: &str,
+) -> Result<(), V3LifecycleError> {
+    tokio::pin!(shutdown);
+    let mut frames = tokio::task::JoinSet::new();
+    loop {
+        let accepted = tokio::select! {
+            result = &mut shutdown => return result,
+            accepted = next_control_frame(listener, &mut frames) => accepted,
+        };
+        let (mut stream, line, read) = match accepted {
+            Ok(frame) => frame,
+            Err(error) => {
+                eprintln!("managed stopping control accept failed: {error}");
+                // The shutdown owner must still reach its real terminal result.
+                return shutdown.await;
+            }
+        };
+        if !matches!(read, Ok(Ok(n)) if n > 0) {
+            continue;
+        }
+        let valid_status = serde_json::from_str::<ControlRequest>(&line)
+            .map(|request| {
+                request.schema_version == SCHEMA_VERSION
+                    && request.instance_id == declaration.instance_id
+                    && request.start_nonce == start_nonce
+                    && request.operation == ControlOperation::Status
+            })
+            .unwrap_or(false);
+        let response = ControlResponse {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            accepted: valid_status,
+            state: V3ManagedRunState::Stopping,
+            message: "shutdown pending; persistence and writer exit must finish before completion"
+                .into(),
+        };
+        // A slow observer must not stop the owned shutdown from progressing.
+        tokio::select! {
+            result = &mut shutdown => return result,
+            _ = write_control_response(&mut stream, &response) => {},
+        }
+    }
+}
+
 pub(crate) async fn restart_managed_runtime_in_place(
     instance_dir: &Path,
     handle: &V3ServerAggregateHandle,
@@ -509,6 +559,20 @@ pub(crate) async fn run_managed_control_loop(
     tokio::pin!(orphan_watchdog);
     let mut handle = handle;
     let mut frames = tokio::task::JoinSet::new();
+    let shutdown = |handle, hooks_sidecar| {
+        observe_managed_shutdown(
+            shutdown_managed_runtime(
+                instance_dir,
+                &declaration.instance_id,
+                socket_path,
+                handle,
+                hooks_sidecar,
+            ),
+            &listener,
+            declaration,
+            &start_nonce,
+        )
+    };
     loop {
         #[cfg(unix)]
         let accepted = match tokio::select! {
@@ -525,14 +589,7 @@ pub(crate) async fn run_managed_control_loop(
                     )
                     .await;
                 };
-                return shutdown_managed_runtime(
-                    instance_dir,
-                    &declaration.instance_id,
-                    socket_path,
-                    handle,
-                    hooks_sidecar,
-                )
-                .await;
+                return shutdown(handle, hooks_sidecar).await;
             }
             _ = interrupt_signal.recv() => {
                 let Some(handle) = handle.take() else {
@@ -547,7 +604,7 @@ pub(crate) async fn run_managed_control_loop(
                     )
                     .await;
                 };
-                return shutdown_managed_runtime(instance_dir, &declaration.instance_id, socket_path, handle, hooks_sidecar).await;
+                return shutdown(handle, hooks_sidecar).await;
             }
             _ = terminate_signal.recv() => {
                 let Some(handle) = handle.take() else {
@@ -562,7 +619,7 @@ pub(crate) async fn run_managed_control_loop(
                     )
                     .await;
                 };
-                return shutdown_managed_runtime(instance_dir, &declaration.instance_id, socket_path, handle, hooks_sidecar).await;
+                return shutdown(handle, hooks_sidecar).await;
             }
             accepted = next_control_frame(&listener, &mut frames) => accepted,
         } {
@@ -606,7 +663,7 @@ pub(crate) async fn run_managed_control_loop(
                     )
                     .await;
                 };
-                return shutdown_managed_runtime(instance_dir, &declaration.instance_id, socket_path, handle, hooks_sidecar).await;
+                return shutdown(handle, hooks_sidecar).await;
             }
             accepted = next_control_frame(&listener, &mut frames) => accepted,
         } {
@@ -775,14 +832,7 @@ pub(crate) async fn run_managed_control_loop(
                 )
                 .await;
             };
-            return shutdown_managed_runtime(
-                instance_dir,
-                &declaration.instance_id,
-                socket_path,
-                handle,
-                hooks_sidecar,
-            )
-            .await;
+            return shutdown(handle, hooks_sidecar).await;
         }
         if should_release_ports {
             let Some(release_ports) = release_ports else {
@@ -844,14 +894,7 @@ pub(crate) async fn run_managed_control_loop(
                     )
                     .await;
                 };
-                return shutdown_managed_runtime(
-                    instance_dir,
-                    &declaration.instance_id,
-                    socket_path,
-                    handle,
-                    hooks_sidecar,
-                )
-                .await;
+                return shutdown(handle, hooks_sidecar).await;
             }
             let current_detail =
                 match read_live_status_detail(instance_dir, &declaration.instance_id) {

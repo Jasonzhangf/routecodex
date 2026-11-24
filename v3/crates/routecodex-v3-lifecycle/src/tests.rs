@@ -886,6 +886,58 @@ fn managed_test_declaration(
 }
 
 #[test]
+fn issue36df127_admin_exception_requires_matching_control_and_process_identity() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let config = root.path().join("config.toml");
+    fs::write(&config, "version = 3").unwrap();
+    let business = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let business_port = business.local_addr().unwrap().port();
+    let admin_port = admin.local_addr().unwrap().port();
+    let mut declaration =
+        managed_test_declaration("v3-guard-test", &config, "digest", "binary", business_port);
+    declaration.listeners.push(V3ManagedListenerDeclaration {
+        server_id: "admin_webui".to_string(),
+        bind: "127.0.0.1".to_string(),
+        port: admin_port,
+    });
+    let instance_dir = root.path().join("instances").join(&declaration.instance_id);
+    fs::create_dir_all(&instance_dir).unwrap();
+    let pid = std::process::id();
+    let cached = V3ManagedPidCache {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        pid,
+        start_nonce: "nonce".into(),
+        started_at_epoch_ms: 0,
+        process_start_token: process_start_token(pid).unwrap(),
+    };
+    let mut control = V3ManagedControlRecord {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        socket_path: managed_control_socket_path(&declaration.instance_id)
+            .display()
+            .to_string(),
+        start_nonce: "nonce".into(),
+    };
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_json_atomic(&instance_dir.join("pid.cache"), &cached).unwrap();
+    write_json_atomic(&instance_dir.join("control.json"), &control).unwrap();
+    let ports = BTreeSet::from([business_port]);
+    guard_managed_listener_pids(root.path(), &declaration, &[pid], &ports).unwrap();
+    let mut changed_config = declaration.clone();
+    changed_config.instance_id = "v3-new-config".into();
+    changed_config.config_digest = "new-digest".into();
+    guard_managed_listener_pids(root.path(), &changed_config, &[pid], &ports).unwrap();
+    changed_config.listeners[1].port = admin_port.wrapping_add(1);
+    assert!(guard_managed_listener_pids(root.path(), &changed_config, &[pid], &ports).is_err());
+    control.start_nonce = "different".into();
+    write_json_atomic(&instance_dir.join("control.json"), &control).unwrap();
+    assert!(guard_managed_listener_pids(root.path(), &declaration, &[pid], &ports).is_err());
+}
+
+#[test]
 fn deterministic_identity_and_unknown_state_fields_fail() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");

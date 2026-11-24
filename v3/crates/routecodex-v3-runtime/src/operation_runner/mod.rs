@@ -28,8 +28,8 @@ pub(crate) use operators::{
     run_v3_error_04_target_exhaustion_operator, V3Err01SourceInput,
 };
 pub(crate) use resolve_target::{
-    run_v3_resolve_target_operator, V3ResolveTargetExecutionMode, V3ResolveTargetOperatorError,
-    V3ResolveTargetSideOutput,
+    run_v3_resolve_target_operator, run_v3_resolve_target_operator_with_history_images,
+    V3ResolveTargetExecutionMode, V3ResolveTargetOperatorError, V3ResolveTargetSideOutput,
 };
 pub(crate) use single_node::{run_v3_single_node_operator, V3OperationGraph};
 

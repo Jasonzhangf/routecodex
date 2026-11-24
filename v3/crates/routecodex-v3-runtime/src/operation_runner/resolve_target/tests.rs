@@ -106,6 +106,7 @@ fn classify_error(
 ) -> (String, V3Error01SourceRaised) {
     let side_output = Arc::new(Mutex::new(None));
     let error = ResolveTargetOperator {
+        has_unprojected_history_images: false,
         mode,
         side_output: Arc::clone(&side_output),
     }
