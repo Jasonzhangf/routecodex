@@ -43,7 +43,7 @@ flowchart TD
   module_routecodex_v3_admin -->|2 edges / 2 paths| module_v3_debug
   module_routecodex_v3_hooks -->|5 edges / 1 paths| module_routecodex_v3_hooks
   module_routecodex_v3_oauth -->|3 edges / 1 paths| module_routecodex_v3_oauth
-  module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
+  module_routecodex_v3_route_classifier -->|2 edges / 1 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
@@ -68,7 +68,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|140 edges / 31 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
-  module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
+  module_v3_runtime -->|4 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
@@ -101,7 +101,7 @@ flowchart TD
 | routecodex-v3-admin | v3-debug | 2 | `v3.admin.provider_usage_query`<br/>`v3.server.internal_observability_projection` |
 | routecodex-v3-hooks | routecodex-v3-hooks | 5 | `v3.rcc_internal_hooks_sidecar` |
 | routecodex-v3-oauth | routecodex-v3-oauth | 3 | `v3.provider_oauth_credentials.mainline` |
-| routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
+| routecodex-v3-route-classifier | routecodex-v3-route-classifier | 2 | `v3.route_policy.condition_evaluation` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
@@ -126,7 +126,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 140 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
-| v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
+| v3-runtime | routecodex-v3-route-classifier | 4 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
@@ -2822,25 +2822,24 @@ flowchart TD
 Typed current-turn route facts, including the latest Responses tool batch, are produced before VR selection and cannot be reconstructed from request history or business text. Images, tools, search calls and their results only classify when they belong structurally to the current turn; earlier user/tool turns remain business history and never change the current classification.
 
 Owner feature: `vr.current_turn_typed_route_facts`
-Manifest: `docs/architecture/manifests/vr.route_classifier.mainline.yml`
 
 ```mermaid
 flowchart TD
   subgraph c_68_vr_current_turn_typed_route_facts_m_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
-    c_68_vr_current_turn_typed_route_facts_0["routecodex-v3-route-classifier<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small>"]
-    c_68_vr_current_turn_typed_route_facts_1["routecodex-v3-route-classifier<br/>classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small>"]
+    c_68_vr_current_turn_typed_route_facts_1["routecodex-v3-route-classifier<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small>"]
+    c_68_vr_current_turn_typed_route_facts_2["routecodex-v3-route-classifier<br/>classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small>"]
   end
   subgraph c_68_vr_current_turn_typed_route_facts_m_v3_runtime["v3-runtime"]
-    c_68_vr_current_turn_typed_route_facts_2["v3-runtime<br/>build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
+    c_68_vr_current_turn_typed_route_facts_0["v3-runtime<br/>build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
   end
-  c_68_vr_current_turn_typed_route_facts_0 -->|vr-current-turn-01<br/>V3HubReqExecution05Planned → V3CurrentTurnRouteFacts| c_68_vr_current_turn_typed_route_facts_1
-  c_68_vr_current_turn_typed_route_facts_2 -->|v3-route-classifier-facts-02<br/>V3RouterRequestFacts → V3CurrentTurnRouteFacts| c_68_vr_current_turn_typed_route_facts_0
+  c_68_vr_current_turn_typed_route_facts_0 -->|v3-route-classifier-facts-02<br/>V3HubReqInbound02Normalized → V3CurrentTurnRouteFacts| c_68_vr_current_turn_typed_route_facts_1
+  c_68_vr_current_turn_typed_route_facts_0 -->|vr-current-turn-01<br/>V3CurrentTurnRouteFacts → V3RouterRequestFacts| c_68_vr_current_turn_typed_route_facts_2
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `vr-current-turn-01` | `V3HubReqExecution05Planned` → `V3CurrentTurnRouteFacts` | anchored | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small> | `vr.current_turn_typed_route_facts` |
-| `v3-route-classifier-facts-02` | `V3RouterRequestFacts` → `V3CurrentTurnRouteFacts` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | `v3.route_classifier_local_owner` |
+| `v3-route-classifier-facts-02` | `V3HubReqInbound02Normalized` → `V3CurrentTurnRouteFacts` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | `v3.route_classifier_local_owner` |
+| `vr-current-turn-01` | `V3CurrentTurnRouteFacts` → `V3RouterRequestFacts` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small> | `vr.current_turn_typed_route_facts` |
 
 ## v3.provider_declared_successor_selection
 

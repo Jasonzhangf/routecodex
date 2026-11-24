@@ -2032,11 +2032,24 @@ features:
   required_reverse:
   - changing only earlier image carriers leaves current-turn route classification unchanged,
     without destructive historical-image cleanup as the classification mechanism.
+  - completed tool batches cannot classify a later continuation, including a standalone result.
+  - a shell argument or filename that resembles a command does not select its route class.
   - changing only request prose leaves route/control facts unchanged.
   required_positive:
   - Current-turn tool results and current-turn images continue to provide the same-turn
     classification signals on Responses, OpenAI Chat, and Gemini normalized entries; earlier
     tool turns provide none.
+  - New ordinary user input selects thinking. Tool follow-ups select the route for the
+    current operation, including shell reads in thinking and shell writes in coding.
+  - An interpreter script or ambiguous shell construct routes to tools. A heredoc body
+    supplies no read or write classification; an explicit patch command or a literal
+    output file on the command line can supply a write classification. Recognized
+    read-only comparison and analysis stages can select thinking in a compound command.
+  - Coding precedes thinking, thinking precedes search, and search precedes tools
+    when multiple current operations match. A read command that only takes a
+    search pipeline's stdin, such as head without a file, does not add file-read intent.
+  - Explicit read, review, and analysis tools use thinking. Explicit creation and
+    editing tools use coding. Generic tool-name fragments do not activate thinking.
   - hosted web_search and multimodal both present on the same current turn select
     hosted web_search first; coding precedes thinking; search precedes tools; the fixed
     order holds across configured optional-pool combinations.
@@ -2045,7 +2058,8 @@ features:
   required_gates:
   - npm run test:route-classifier-semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server single_pool_public_blackbox
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_latest_tool_batch_selects_tools_instead_of_stale_search
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_same_session_routes_only_current_shell_operation
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
