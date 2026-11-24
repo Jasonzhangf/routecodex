@@ -675,6 +675,46 @@ impl V3ProviderHealthStore {
             None => Ok(()),
         }
     }
+
+    pub async fn flush_persistence_for_exec(&self) -> Result<(), String> {
+        let receiver = {
+            let state = self
+                .state
+                .read()
+                .map_err(|error| format!("provider health state poisoned: {error}"))?;
+            let Some(writer) = state.persistence.as_ref() else {
+                return Ok(());
+            };
+            let (sender, receiver) = mpsc::channel();
+            writer
+                .sender
+                .try_send(V3ProviderHealthPersistenceCommand::Replace(
+                    provider_cooldown_persistence_entries(&state),
+                    provider_rate_limit_persistence_entries(&state),
+                ))
+                .map_err(|error| {
+                    format!("provider health persistence queue unavailable: {error}")
+                })?;
+            writer
+                .sender
+                .try_send(V3ProviderHealthPersistenceCommand::Flush(sender))
+                .map_err(|error| {
+                    format!("provider health persistence queue unavailable: {error}")
+                })?;
+            receiver
+        };
+        loop {
+            match receiver.try_recv() {
+                Ok(result) => return result,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("provider health persistence flush receipt missing".into())
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await
+                }
+            }
+        }
+    }
 }
 
 fn set_persistence_alarm(alarm: &RwLock<Option<String>>, message: String) {

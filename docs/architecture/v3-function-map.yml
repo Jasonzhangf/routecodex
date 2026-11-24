@@ -6275,6 +6275,8 @@ features:
   - V3WebuiObservabilityPersistenceWriter::enqueue
   - V3WebuiObservabilityPersistenceWriter::flush
   - V3WebuiObservabilityPersistenceWriter::close
+  - V3WebuiObservabilityPersistenceWriter::close_async
+  - V3WebuiObservabilityPersistenceWriter::finish_close
   - V3ServerAggregateHandle::shutdown
   - V3ServerAggregateHandle::prepare_for_exec
   - V3ProviderUsagePersistenceStore::append_fact

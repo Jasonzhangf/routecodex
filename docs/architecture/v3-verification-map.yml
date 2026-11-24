@@ -301,14 +301,18 @@ features:
     Lifecycle port availability, stale discovery, cross-instance release, residual PID
     scan and orphan runtime reap exclude admin_webui, so an external admin-only port
     occupant neither blocks start nor becomes a signal target; declaration.listeners
-    keeps the admin_webui entry and the explicit PID port-range guard stays
-    business-scoped. Pending issue850e916 unit tests in
+    keeps the admin_webui entry. The explicit PID port-range guard admits an attached
+    admin port only for the verified generation of the exact published aggregate.
+    Issue850e916 unit tests in
     v3/crates/routecodex-v3-lifecycle/src/tests.rs are
     issue850e916_admin_only_occupancy_is_not_business_unavailability,
     issue850e916_admin_only_occupancy_is_excluded_from_residual_pids, and
     issue850e916_admin_only_occupancy_does_not_block_orphan_reap.
   required_integration:
   - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
+  - issue36df127_stop_unresponsive_aggregate_with_attached_admin releases the exact managed PID and its attached admin listener after a lost control response. The unmanaged sibling-port and external admin-occupancy regressions preserve those protections.
+  - f8c64a9_fresh_start_retires_dead_previous_transfer proves a fresh CLI start removes only an abandoned transfer after its recorded process has exited; active or unverifiable ownership must remain protected.
+  - f8c64a9_shutdown_slow_writer_remains_pending_until_exit holds a real persistence writer and proves stop and start retain its responsive owner across a deadline and config drift, then observes terminal close after release.
   - previous_release_one_step_content_change and previous_release_one_step_config_path_change execute one official restart from a real old handler, preserve PID/start-token/session, refresh nonce, retain one owner and complete provider-backed Responses before and after.
   - previous_release_transfer_rejects_wrong_stale_and_malformed_identity and previous_release_transfer_rejects_listener_drift_and_invalid_auth_before_dispatch retain the original owner and complete Responses without dispatching invalid migration.
   - Native old-handler fixture is prepared from pinned previous source by v3/scripts/prepare-v3-previous-release-fixture.mjs before existing lifecycle/workspace consumers in PR and release CI; local gates require ROUTECODEX_V3_PREVIOUS_RELEASE_BINARY explicitly.
@@ -4050,6 +4054,7 @@ features:
   - Stable terminal and provider-attempt facts survive backfill, detail rotation and restart without counting a replay twice.
   - Identical fact replay does not grow the journal; lossless compaction keeps the latest contribution per identity and survives writer reopen.
   required_negative:
+  - Slow writer close yields to caller deadlines without a completed receipt; one sealed close owner survives cancellation until the actual writer exit.
   - Failed statistic persistence cannot rotate away uncaptured detail or block proxy requests; incomplete coverage stays visible after later successful writes.
   - Fact and reader limits reject over-capacity input explicitly without deleting previous facts, clearing sticky coverage, or returning a complete report.
   required_gates:
