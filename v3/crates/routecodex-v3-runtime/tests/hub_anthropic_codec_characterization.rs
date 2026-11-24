@@ -965,20 +965,31 @@ fn anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasonin
 }
 
 #[test]
-fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
-    let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+fn anthropic_signed_empty_thinking_history_preserves_signed_reasoning() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
         "model":"claude-sonnet",
         "messages":[{
             "role":"assistant",
             "content":[{"type":"thinking","thinking":"","signature":"sig-without-thinking"}]
         }]
     }))
-    .expect_err("malformed Anthropic thinking must fail before entering Hub semantics");
+    .expect("signed empty Anthropic thinking must remain representable");
 
-    assert!(matches!(
-        error,
-        V3AnthropicCodecError::MalformedField { field: "thinking" }
-    ));
+    assert_eq!(
+        semantic["input"],
+        json!([{
+            "type":"reasoning",
+            "summary":[],
+            "encrypted_content":"sig-without-thinking",
+            "routecodex_chat_extension":{
+                "anthropic_reasoning":{
+                    "type":"thinking",
+                    "thinking":"",
+                    "signature":"sig-without-thinking"
+                }
+            }
+        }])
+    );
 }
 
 #[test]
