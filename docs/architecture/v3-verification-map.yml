@@ -114,15 +114,15 @@ features:
   - docs/architecture/v3-function-map.yml
   required_positive:
   - issue127_disabled_health_persistence_direct_public_blackbox proves a real Direct Responses consumer ignores persisted cooldown when health is disabled, attempts a genuine upstream failure without persisting automatic cooldown, and preserves fresh and independent requests; the health-enabled control honors the same seed
-  - persisted cooldown remains unavailable after restart until startup probe succeeds
-  - d9fd985 public consumer proves listener-local failure, exact identity, probe outcomes, explicit-override persistence rebuild and all-owner lifecycle rollback
+  - id9_persistence_rebuild_is_port_local_with_explicit_override and id9_persistence_rebuild_is_port_local_with_default_path prove listener rebuild preserves the cooldown minimum and the later deadline set by a failed real trial, restores neither in-flight ownership nor automatic sends, routes to the spare before the deadline, and admits a governed real recovery attempt on the owning listener at the deadline.
+  - d9fd985 public consumer proves listener-local failure, exact identity, business recovery outcomes, explicit-override persistence rebuild and all-owner lifecycle rollback
   - id9_429_visibility_is_port_local proves a 429 visibility block on one listener does not hide the same provider identity on a sibling listener
-  - id9_terminal_join_releases_both_listener_probe_permits exercises two public listener control entries with held probes, then public shutdown and terminal exec preparation; both probe permits and scheduler registrations must be released before either method returns
+  - id9_terminal_join_releases_both_listener_probe_permits exercises two public listener control entries with held explicit diagnostics, then public shutdown and terminal exec preparation; diagnostic work and owner registrations are joined before either method returns
   - id9_terminal_supervisor_joins_held_owners rejects detached child tasks at the exact supervisor join return boundary, independently of later listener or persistence shutdown yields
   - id9_stopped_owner_joins_remaining_owner_before_exit covers a completed task and held sibling; the already-consumed JoinHandle is removed and every remaining task is cancelled and joined before fault exit
   - id9_partial_registration_does_not_spawn_detached_owner proves failed listener registration leaves no spawned partial batch and synchronously releases prior registrations
-  - due probe failure preserves cooldown and success removes it
-  - provider startup or cooldown probe HTTP/transport failure is recorded as provider-local degraded health and never escapes as a listener or managed-lifecycle startup failure
+  - a failed real recovery attempt preserves cooldown and advances retry eligibility, and a matching governed business success removes the episode
+  - rebuilding provider health restores persisted entries without dispatching upstream recovery requests
   required_negative:
   - cooldown state never enters provider or client payload
   - lock and persistence failures are not converted into availability success
@@ -3475,6 +3475,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
+  - v3/crates/routecodex-v3-server/tests/explicit_cooldown_diagnostic.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3482,30 +3483,41 @@ features:
   - run_v3_plan_execution_operator_with_probes
   - PlanExecutionOperator::execute_plan
   required_positive:
-  - consecutive_provider_errors_direct_public_http and consecutive_provider_errors_relay_public_http prove that non-429 recoverable errors retain the shared tenth-error policy and an ordinary 429 cannot trigger the hour on its own tenth observation. Ten ordinary HTTP 429s within 120 seconds create a 15-second timer-only exclusion. A later request can try that identity when the timer expires; at least eleven ordinary 429s spanning strictly more than 120 seconds without success create the one-hour minimum. Eligible successors and other listeners remain usable. A failed probe preserves the hour minimum, and a real 2xx probe can restore routing only after it expires. A real HTTP 429 with confirmed insufficient_quota still commits the hour immediately.
-  - late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http proves a held real business failure arriving after qualified cooldown switches to a healthy spare and cannot create a second precool owner that shadows the subsequent real successful probe and restored business dispatch.
-  - sustained_429_hour_requires_probe_and_ignores_late_business_success proves a one-hour unresolved episode cannot be cleared by business success or time alone; typed probe matrix preserves non429 failures and the persistence consumer retains the lock across Store reconstruction.
-  - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
-  - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
-  - one opaque typed acquisition identity owns each scheduled or rescue probe; matching current-health-generation success atomically resets score, streak, delta window, cooldown, and probe backoff state
+  - expired_cooldown_is_recovered_by_the_real_request_public_http and expired_cooldown_is_recovered_by_the_real_request_relay_public_http prove an exact cooled identity admits one real trial after expiry and routes concurrent requests to the healthy alternative without automatic synthetic traffic.
+  - failed_real_recovery_attempt_preserves_cooldown_public_http proves a real failed trial keeps the episode and defers the next trial while the current and subsequent requests use the healthy alternative.
+  - slow_direct_trial_defers_from_failure_settlement_public_http holds the upstream response beyond one retry interval with the real clock, then proves the next request still uses the spare until the deadline measured from failure settlement.
+  - final_terminal_trial_is_health_neutral_on_direct_public_entry and final_terminal_trial_is_health_neutral_on_relay_public_entry prove a due singleton trial forwards its complete real final HTTP error, preserves the existing cooldown and cadence, and allows an immediate independent request to own the next trial.
+  - direct_trial_uses_successor_window_at_failure_public_http holds a real Direct trial across a successor's declared window boundary and verifies both reselection when it opens and health-neutral final projection when it closes.
+  - direct_reselection_ignores_a_preferred_candidate_after_its_window_closes proves a cached preferred recovery target cannot bypass Target's current declared model window.
+  - direct_ordinary_429_streak_uses_the_failure_observation_time proves the tenth ordinary HTTP429 stays routable when the observed first-to-last span exceeds 120 seconds.
+  - direct_429_replans_when_its_preferred_successor_closes_public_http proves a real owned HTTP429 can select a successor while its window is open, then send to the next declared identity if that window closes before retry planning.
+  - direct_tenth_429_crosses_120_seconds_while_in_flight_public_http restores nine real HTTP429 observations, sends the tenth inside the span using the production clock, and receives it past the threshold without creating a short cooldown.
+  - superseded_compatibility_failure_preserves_newer_cooldown_public_http proves a late exact-identity HTTP400 from a superseded trial preserves the newer cooldown, retry cadence and consecutive HTTP403 streak.
+  - consecutive_provider_errors_direct_public_http and consecutive_provider_errors_relay_public_http prove that non-429 recoverable errors retain the shared tenth-error policy and an ordinary 429 cannot trigger the hour on its own tenth observation. Ten ordinary HTTP 429s within 120 seconds create a 15-second timer-only exclusion. A later request can try that identity when the timer expires; at least eleven ordinary 429s spanning strictly more than 120 seconds without success create the one-hour minimum. Eligible successors and other listeners remain usable. After the minimum, one matching real request can try recovery. A governed success clears the episode and a failed trial defers the next one. A real HTTP 429 with confirmed insufficient_quota still commits the hour immediately.
+  - late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http proves a held real business failure arriving after qualified cooldown switches to a healthy spare and leaves the episode available for the next eligible real recovery trial.
+  - a one-hour episode requires matching governed success from the owned recovery trial; the minimum and failed-trial deadline survive reconstruction and an ordinary result from an earlier request cannot settle the episode
+  - issue231_responses_relay_stale_probe_public_blackbox proves Responses Relay delivers the healthy later-tier payload while a preferred business trial is held. Both stale completion branches preserve the newer deadline and release their owner. At the new deadline, the final real HTTP error is projected while a healthy sibling continues.
+  - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, and uses governed real trials for failed deferral and successful recovery. Exhaustion preserves the final HTTP400 while explicit current-turn native hosted search continues.
+  - one opaque typed acquisition owns each real business trial; matching governed success atomically resets score, streak, delta window, cooldown, and retry cadence state
   - old_probe_outcomes_release_only_their_owner_and_preserve_stored_health proves stale cancel/success/failure preserve stored health and schedule while releasing only A
   - late_probe_outcomes_cannot_release_replacement_or_sibling_owners and acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b prove same-generation replacement ownership, non-default interface and exact sibling isolation, and deterministic due-time admission
-  - newer_business_generation_shutdown_releases_held_probe_owner, newer_business_generation_exec_releases_held_probe_owner, and newer_business_generation_drop_releases_held_probe_owner prove authenticated held probe release after genuine same-identity earlier business403, while healthy business completes before cancellation; an already accepted read-only public HTTP connection observes original in-memory state after listener exit
-  - public Chat HTTP proves cooldown-only failed rescue closes the exhausted request without client status, error payload or fabricated success, preserves exact-identity cooldown and permits healthy sibling progress
-  - rejected, cancelled or dropped reversible exec preparation restores the sole aggregate probe owner before business admission resumes; restored scheduling preserves future due deadlines and an authenticated due probe restores only its exact cooled identity before subsequent successful business
-  - fair scheduling reaches an independently available fifth due identity while four earlier identities retain real business transport leases; capacity rejection remains health-neutral and the four manager slots stay bounded
-  - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact HTTP 2xx probe recovery
-  - 429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch
-  - Responses, OpenAI Chat, Anthropic, and Gemini probes send a simple ping and accept every HTTP 2xx response without reading the success body or validating content type, JSON, embedded errors, terminal status, or pong text
-  - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
-  - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
-  - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
-  - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
+  - newer_business_generation_shutdown_releases_held_probe_owner, newer_business_generation_exec_releases_held_probe_owner, and newer_business_generation_drop_releases_held_probe_owner prove authenticated explicit diagnostic cancellation after a genuine same-identity earlier HTTP403 while healthy business completes. An already accepted read-only public connection observes the same cooldown after listener exit.
+  - public Chat HTTP proves that a failed diagnostic leaves the exact cooldown intact. A request with only a held identity exhausts without fabricated success, and an eligible final real business failure projects only its own HTTP error while healthy sibling traffic completes.
+  - rejected, cancelled or dropped reversible exec preparation closes the held explicit diagnostic socket, preserves the exact retry deadline, and allows a governed real trial to recover only its own identity when due.
+  - five independent identities can own genuine recovery trials while each identity remains exclusive and concurrent duplicate traffic continues to a declared spare.
+  - each health-excluded complete identity stays visible in the cooldown pool through trial eligibility and in-flight recovery until the matching governed success
+  - the public managed listener exercises exact-key business failures, timer-only 429 expiry, in-flight trial visibility, spare-key routing, and normal same-key dispatch after recovery
+  - explicit bounded diagnostics retain the Responses, OpenAI Chat, Anthropic and Gemini request shape and status-only HTTP observation semantics
+  - explicit_paid_diagnostic_is_bounded_single_flight_and_observation_only_public_http proves the default operator action emits no upstream request, while a paid opt-in observes one exact identity and leaves cooldown eligibility and health unchanged across completed and timed-out diagnostics.
+  - admin_paid_diagnostic_preserves_consent_identity_observation_and_cadence proves the Admin route preserves paid consent and exact listener identity, reports the actual upstream result, and leaves the trial cadence untouched. Its default action emits no upstream request.
+  - a failed business trial advances only next_probe_at_ms from failure settlement and never extends the original blocked_until_ms
+  - every retry interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
+  - cc-sol and kdns provider declarations with probe_interval_ms=120000 cap the retry deferral at two minutes
   - matched HTTP 401 and consecutive HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
-  - Confirmed HTTP 401 errors start the one-hour cooldown immediately for the complete identity. Independent current probes retain their recovery cadence.
-  - Ordinary HTTP 429 requires its own count and elapsed span for automatic cooldown; other recoverable HTTP errors retain their shared-count policy. An early successful or failed probe cannot shorten the committed one-hour minimum.
-  - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
+  - Confirmed HTTP 401 errors start the one-hour cooldown immediately for the complete identity. Other identities retain their separate trial cadence.
+  - Ordinary HTTP 429 requires its own count and elapsed span for automatic cooldown; other recoverable HTTP errors retain their shared-count policy. Explicit diagnostic outcomes leave the committed minimum and trial cadence intact.
+  - private-profile diagnostics preserve provider-specific request compatibility and report HTTP status as an observation
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - Before client business commit, a complete HTTP 502 from the final Provider key reaches the HTTP client with its original status and body. A truncated 2xx follows the separate incomplete-response recovery path and only its exhausted request transport ends.
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
@@ -3521,11 +3533,11 @@ features:
   - Public held-probe SSE regressions prove exhausted requests return without waiting for a probe and subsequent requests can use the independently recovered exact identity.
   - A saturated local capacity snapshot does not exclude the declared preferred candidate in Direct or Relay
   - Direct Chat and Messages precommit SSE failures select an available declared successor immediately; Responses initial protocol preplanning never waits for target recovery.
-  - Business requests acquire no capacity lease or permit. Scheduled probes retain their separate background admission and cannot delay business requests.
+  - Business requests acquire no capacity lease or permit. An eligible selected recovery attempt acquires exact-identity ownership; other requests immediately use available successors.
   required_negative:
-  - stale successful or failed probe generations cannot mutate newer provider health state
-  - Non-2xx probe responses and connection failures preserve cooldown; business response parsing is unaffected by status-only probes
-  - an early due probe does not make the provider available before HTTP 2xx probe success
+  - stale trial results cannot mutate newer provider health state
+  - explicit diagnostic outcomes preserve cooldown and business streaks; business response parsing remains independent of status-only diagnostics
+  - automatic recovery sends no upstream request and eligibility alone cannot clear the cooldown episode
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Capacity saturation, adaptive budget, permit state, FIFO ticket, or Deferred state cannot record provider health, cooldown, MetadataCenter, or provider/client payload truth
@@ -3548,6 +3560,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test explicit_cooldown_diagnostic -- --nocapture
+  - npm run test:v3-port-local-provider-health
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture

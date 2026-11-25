@@ -576,9 +576,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // A generic provider rejection is still an ordinary recoverable failure: it
-    // waits for the declared observation and commits the typed threshold only
-    // after that observation fails.
+    // Generic provider rejection counts once and remains below the threshold.
     for attempt in 0..2 {
         let now_ms = 20_000 + attempt as u64;
         let record = health
@@ -599,10 +597,11 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         assert_eq!(
-            record.failure_count, 0,
-            "generic rejection remains an uncommitted policy fixture; attempt={attempt}"
+            record.failure_count,
+            attempt + 1,
+            "generic rejection counts once; attempt={attempt}"
         );
-        assert_eq!(record.state, "pre_cool_observation");
+        assert_eq!(record.state, "provider_failure_observed");
         let available = health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), now_ms)
@@ -612,7 +611,6 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             "generic rejection must stay available before its observation; attempt={attempt}"
         );
     }
-    complete_due_precool_failures(&health, 20_010).await;
     assert!(
         health
             .store()
@@ -1014,6 +1012,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(
@@ -1101,6 +1100,7 @@ async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection
         .expect("capture Target09 before execution");
     manifest.providers.clear();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -1274,6 +1274,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -1323,23 +1324,21 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     assert!(!state
         .failed_candidates
         .contains(&"first:default:key2:gpt-test".to_string()));
-    assert_eq!(result.event.health_record.state, "pre_cool_observation");
     assert_eq!(
-        result.event.health_record.failure_count, 0,
-        "a held transport failure must not count before its observation"
+        result.event.health_record.state,
+        "provider_failure_observed"
+    );
+    assert_eq!(
+        result.event.health_record.failure_count, 1,
+        "the actual transport failure counts once"
     );
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    // Only the failed exact identity is held; its sibling key and the other
-    // provider stay eligible for the same request.
-    let held = health.availability("first", Some("key1"), Some("gpt-test"), 10_000);
     assert!(
-        !held.available,
-        "the failed exact key must be held by its own observation"
+        health
+            .availability("first", Some("key1"), Some("gpt-test"), 10_000)
+            .available,
+        "one failure must leave the key available to independent requests"
     );
-    assert!(held
-        .blocked_scopes
-        .iter()
-        .any(|blocked| blocked == "provider_pre_cool_observation"));
     assert!(
         health
             .availability("first", Some("key2"), Some("gpt-test"), 10_000)
@@ -1445,6 +1444,7 @@ public_code = "E_PATH_RATE_LIMIT"
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-path-project")
@@ -1552,6 +1552,7 @@ targets = [
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
@@ -1607,6 +1608,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-codec")

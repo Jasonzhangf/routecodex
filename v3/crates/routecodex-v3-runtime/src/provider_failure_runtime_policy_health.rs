@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "provider_failure_runtime_policy/business_recovery_stale_settlement_tests.rs"]
+mod business_recovery_stale_settlement;
+
 fn classify_v3_provider_health_source_via_err02(
     source_projection: Value,
     source: V3Error01SourceRaised,
@@ -15,6 +19,95 @@ fn classify_v3_provider_health_source_via_err02(
 }
 
 impl V3ProviderFailureRuntimeHealth {
+    pub(crate) fn acquire_business_recovery_trial(
+        &self,
+        request_control: &crate::execution_control::V3RequestExecutionControl,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        now_ms: u64,
+    ) -> Result<bool, String> {
+        request_control
+            .acquire_business_recovery_trial(
+                &self.store,
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                self.observation_now_ms(now_ms),
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn record_provider_success_with_business_recovery(
+        &self,
+        request_control: &crate::execution_control::V3RequestExecutionControl,
+        _receipt: &crate::nodes::V3AttemptSuccessReceipt,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        let recovery_settlement = match (auth_alias, model_id) {
+            (Some(auth_alias), Some(model_id)) => request_control
+                .settle_business_recovery_success(
+                    provider_id,
+                    interface_id,
+                    auth_alias,
+                    model_id,
+                    self.observation_now_ms(now_ms),
+                )
+                .map_err(|error| error.to_string())?,
+            _ => None,
+        };
+        if recovery_settlement == Some(false) {
+            // The owned trial was superseded by a newer episode. Its result
+            // cannot feed ordinary success accounting into that episode.
+            return self.record_provider_action_success_in_failure_scope(
+                failure_session_scope,
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+            );
+        }
+        let owned_trial = recovery_settlement == Some(true);
+        self.record_provider_success_in_failure_scope_for_interface_inner(
+            failure_session_scope,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            now_ms,
+            owned_trial,
+        )
+    }
+
+    pub(crate) fn settle_business_recovery_failure(
+        &self,
+        request_control: &crate::execution_control::V3RequestExecutionControl,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        now_ms: u64,
+        has_alternative: bool,
+    ) -> Result<bool, String> {
+        request_control
+            .settle_business_recovery_failure(
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                self.observation_now_ms(now_ms),
+                has_alternative,
+            )
+            .map_err(|error| error.to_string())
+    }
+
     pub fn from_manifest_for_tests(manifest: &V3Config05ManifestPublished) -> Self {
         let store = V3ProviderHealthStore::from_manifest_without_persistence(manifest);
         Self {
@@ -614,6 +707,21 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), String> {
+        self.record_provider_success_in_failure_scope_for_interface_inner(
+            failure_session_scope, provider_id, interface_id, auth_alias, model_id, now_ms, false,
+        )
+    }
+
+    fn record_provider_success_in_failure_scope_for_interface_inner(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+        owned_trial: bool,
+    ) -> Result<(), String> {
         let health_now_ms = self.observation_now_ms(now_ms);
         let mut pending = self.precool.lock().map_err(|error| error.to_string())?;
         if let Some(action) = pending.remove(&precool_identity(
@@ -624,16 +732,18 @@ impl V3ProviderFailureRuntimeHealth {
         )) {
             self.action_gate.record_success(action.ticket.key())?;
         }
-        self.store
-            .record_provider_success_in_session_for_interface(
-                failure_session_scope,
-                provider_id,
-                interface_id,
-                auth_alias,
-                model_id,
-                health_now_ms,
-            )
-            .map_err(|error| error.to_string())?;
+        if !owned_trial {
+            self.store
+                .record_provider_success_in_session_for_interface(
+                    failure_session_scope,
+                    provider_id,
+                    interface_id,
+                    auth_alias,
+                    model_id,
+                    health_now_ms,
+                )
+                .map_err(|error| error.to_string())?;
+        }
         // A completed business 2xx is the recovery counterpart of an observed
         // 429: it restores one unit of adaptive concurrency budget up to the
         // configured hard maximum and clears the saturation window for the
@@ -649,6 +759,23 @@ impl V3ProviderFailureRuntimeHealth {
                 )
                 .map_err(|error| error.to_string())?;
         }
+        self.record_provider_action_success_in_failure_scope(
+            failure_session_scope,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        )
+    }
+
+    fn record_provider_action_success_in_failure_scope(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<(), String> {
         let provider_scope = V3ProviderActionProviderScope::new(
             failure_session_scope,
             v3_relay_provider_candidate_key_parts(

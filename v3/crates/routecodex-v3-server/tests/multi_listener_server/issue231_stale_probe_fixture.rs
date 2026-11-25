@@ -4,9 +4,21 @@ use tokio::net::TcpListener;
 
 const AUTH_ENV: &str = "ISSUE231_STALE_PROBE_KEY";
 const AUTH_SECRET: &str = "issue231-owned-key";
+const INITIAL_FAILURE_MARKER: &str = "issue231 initial authentication failure";
 const BUSINESS_FAILURE_MARKER: &str = "issue231 newer business generation marker";
 const POOLED_MARKER: &str = "issue231 pooled candidate payload marker";
 const HEALTHY_PAYLOAD: &str = "issue231 healthy candidate payload";
+const TRIAL_SUCCESS_PAYLOAD: &str = "issue231 owned business trial success";
+const TERMINAL_MARKER: &str = "issue231 singleton terminal failure";
+
+#[derive(Debug)]
+pub(super) struct Issue231ObservationClock(pub(super) AtomicU64);
+
+impl routecodex_v3_runtime::V3ProviderHealthObservationClock for Issue231ObservationClock {
+    fn now_epoch_ms(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum StaleProbeOutcome {
@@ -16,16 +28,9 @@ enum StaleProbeOutcome {
 
 struct Peer {
     captures: Mutex<Vec<Value>>,
-    probe_attempts: Mutex<u32>,
-    probe_entered: Semaphore,
-    probe_release: Semaphore,
     business_entered: Semaphore,
     business_release: Semaphore,
     first_probe_outcome: StaleProbeOutcome,
-}
-
-fn is_probe_body(body: &Value) -> bool {
-    body.to_string().contains("ping; reply pong")
 }
 
 fn ok_json(body: Value) -> Response<Body> {
@@ -67,9 +72,8 @@ fn failed(status: StatusCode, message: &str) -> Response<Body> {
         .unwrap()
 }
 
-/// The cooled (preferred) provider. It serves exactly two behaviours:
-/// the runtime cooldown rescue probe (probe body) and the pooled business
-/// request. Both are held by semaphores so the test controls their order.
+/// The cooled (preferred) provider. The first marked business request is held
+/// as the owned recovery trial; its response is the stale outcome.
 async fn cooled_provider(
     State(peer): State<Arc<Peer>>,
     headers: HeaderMap,
@@ -80,29 +84,31 @@ async fn cooled_provider(
         format!("Bearer {AUTH_SECRET}")
     );
     assert_eq!(body["model"], "wire-cooled");
-    if is_probe_body(&body) {
-        let attempt = {
-            let mut attempts = peer.probe_attempts.lock().await;
-            *attempts += 1;
-            *attempts
-        };
-        peer.probe_entered.add_permits(1);
-        peer.probe_release.acquire().await.unwrap().forget();
-        return match (attempt, peer.first_probe_outcome) {
-            (1, StaleProbeOutcome::Success) => ok_responses("pong", false),
-            _ => failed(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "issue231 owned probe failure",
-            ),
-        };
+    let mut captures = peer.captures.lock().await;
+    captures.push(body.clone());
+    let attempt = captures.len();
+    drop(captures);
+    if body.to_string().contains(INITIAL_FAILURE_MARKER) {
+        return failed(
+            StatusCode::UNAUTHORIZED,
+            "issue231 owned authentication failure",
+        );
     }
-    peer.captures.lock().await.push(body.clone());
     if body.to_string().contains(BUSINESS_FAILURE_MARKER) {
         peer.business_entered.add_permits(1);
         peer.business_release.acquire().await.unwrap().forget();
+        if attempt == 2 && peer.first_probe_outcome == StaleProbeOutcome::Success {
+            return ok_responses(TRIAL_SUCCESS_PAYLOAD, false);
+        }
         return failed(
             StatusCode::SERVICE_UNAVAILABLE,
             "issue231 owned newer business failure",
+        );
+    }
+    if body.to_string().contains(TERMINAL_MARKER) {
+        return failed(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "issue231 owned cooled failure",
         );
     }
     failed(
@@ -111,8 +117,8 @@ async fn cooled_provider(
     )
 }
 
-/// The healthy (later-tier) provider. It answers any business request with a
-/// true business payload; the health probe gets a plain pong.
+/// The healthy (later-tier) provider answers any business request with a true
+/// business payload.
 async fn healthy_provider(
     State(peer): State<Arc<Peer>>,
     headers: HeaderMap,
@@ -123,13 +129,12 @@ async fn healthy_provider(
         format!("Bearer {AUTH_SECRET}")
     );
     assert_eq!(body["model"], "wire-healthy");
-    if is_probe_body(&body) {
-        return ok_responses("pong", false);
-    }
     let text = body.to_string();
     assert!(
         text.contains(POOLED_MARKER)
+            || text.contains(INITIAL_FAILURE_MARKER)
             || text.contains(BUSINESS_FAILURE_MARKER)
+            || text.contains(TERMINAL_MARKER)
             || text.contains("issue231 healthy sibling")
     );
     peer.captures.lock().await.push(body.clone());
@@ -228,14 +233,13 @@ targets = [
 }
 
 async fn cooldown_pool(client: &reqwest::Client, base: &str) -> Value {
-    client
+    let response = client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    response.json().await.unwrap()
 }
 
 fn cooled_probe_entry(pool: &Value) -> Option<&Value> {
@@ -256,6 +260,40 @@ fn assert_no_client_error_projection(label: &str, response: &reqwest::Response) 
         598,
         "{label}: proxy must never answer the client with 598"
     );
+}
+
+async fn add_cooldown(client: &reqwest::Client, base: &str, duration_ms: u64) -> Value {
+    let response = client
+        .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+        .json(&json!({
+            "provider_id": "cooled",
+            "interface_id": "default",
+            "auth_alias": "key",
+            "model_id": "wire-test",
+            "kind": "probe",
+            "duration_ms": duration_ms
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    response.json().await.unwrap()
+}
+
+async fn schedule_real_trial(client: &reqwest::Client, base: &str) {
+    let response = client
+        .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
+        .json(&json!({
+            "provider_id": "cooled",
+            "interface_id": "default",
+            "auth_alias": "key",
+            "model_id": "wire-test"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.json::<Value>().await.unwrap()["scheduled"], true);
 }
 
 /// Classify what the client really observes for a request that has no business

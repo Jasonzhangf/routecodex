@@ -1347,6 +1347,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         assert!(failure.error_operator_fault.is_none());
 
         let context = V3RelayProviderFailurePolicyContext {
+            recovery_control: None,
             manifest: &manifest,
             captured_target_09: None,
             failure_session_scope: failure_session_scope.clone(),
@@ -1481,6 +1482,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             response_processing_code: None,
         };
         let context = V3RelayProviderFailurePolicyContext {
+            recovery_control: None,
             manifest: &manifest,
             captured_target_09: None,
             failure_session_scope: failure_session_scope.clone(),

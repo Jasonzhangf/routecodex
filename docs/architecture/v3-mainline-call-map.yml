@@ -7021,8 +7021,8 @@ chains:
       to_node: V3ProviderActionSuccessRecorded
       caller_symbol: record_v3_direct_provider_success
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_with_business_recovery
+      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7061,8 +7061,8 @@ chains:
       to_node: V3ProviderActionSuccessObserved
       caller_symbol: execute_v3_relay_runtime_core
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_with_business_recovery
+      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7081,8 +7081,8 @@ chains:
       to_node: V3ProviderActionSuccessRecorded
       caller_symbol: execute_v3_relay_runtime_core
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_with_business_recovery
+      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7121,8 +7121,8 @@ chains:
       to_node: V3ProviderActionSuccessRecorded
       caller_symbol: record_provider_success_after_response_governance
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_with_business_recovery
+      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:

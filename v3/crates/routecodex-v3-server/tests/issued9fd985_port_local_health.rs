@@ -271,6 +271,10 @@ async fn upstream(
     }
 
     state.business.fetch_add(1, Ordering::SeqCst);
+    if state.hold_probe.load(Ordering::SeqCst) && body["input"].as_str() == Some("hold recovery") {
+        state.probe_entered.add_permits(1);
+        let _release = state.probe_release.acquire().await.unwrap();
+    }
     let model = body["model"].as_str().unwrap_or_default();
     let authorization = headers
         .get("authorization")
@@ -700,63 +704,32 @@ async fn id9_probe_outcomes_are_port_local() {
         cooldown_entries(&client, &base_b).await
     );
 
-    let probes_before_manual = primary.probe_count();
     trigger_probe(&client, &base_a).await;
-    advance_clock_after_manual_probe(&clock);
-    wait_until("port A failed probe", || async {
-        primary.probe_count() > probes_before_manual
-    })
-    .await;
-    wait_until("port A failed probe health", || async {
-        exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-            .is_some_and(|entry| entry["failure_count"].as_u64() == Some(1))
-    })
-    .await;
-    assert!(
-        exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none(),
-        "port A failed probe must not mutate port B: {:?}",
-        cooldown_entries(&client, &base_b).await
-    );
-
-    let probes_before_recovery = primary.probe_count();
-    primary.probe_success.store(true, Ordering::SeqCst);
-    trigger_probe(&client, &base_a).await;
-    wait_until("port A recovery probe", || async {
-        primary.probe_count() > probes_before_recovery
-    })
-    .await;
-    wait_until("early successful probe settles", || async {
-        exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-            .is_some_and(|entry| entry["state"] != "probing")
-    })
-    .await;
-    let early_entries = cooldown_entries(&client, &base_a).await;
-    let early_entry = exact_primary_entry(&early_entries)
-        .expect("an early successful probe cannot clear the committed cooldown");
-    assert_eq!(early_entry["until_ms"], cooldown_until);
+    let before = primary.business.load(Ordering::SeqCst);
+    let (status, body) = business_request(&client, &base_a, "client-test", "before-expiry").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(primary.business.load(Ordering::SeqCst), before);
+    assert_eq!(primary.probe_count(), 0);
 
     clock.0.store(cooldown_until, Ordering::SeqCst);
-    let probes_before_expired_recovery = primary.probe_count();
-    trigger_probe(&client, &base_a).await;
-    advance_clock_after_manual_probe(&clock);
-    wait_until("expired port A recovery probe", || async {
-        primary.probe_count() > probes_before_expired_recovery
-    })
-    .await;
-    wait_until("port A recovery", || async {
-        exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none()
-    })
-    .await;
-    assert!(
-        exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none(),
-        "port B must stay untouched by port A recovery: {:?}",
-        cooldown_entries(&client, &base_b).await
-    );
-    assert_eq!(
-        primary.probe_count(),
-        probes_before_manual + 3,
-        "each manual trigger must create one exact-identity probe"
-    );
+    let (status, body) =
+        business_request(&client, &base_a, "client-test", "failed-real-trial").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(primary.business.load(Ordering::SeqCst), before + 1);
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some());
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none());
+    let (status, body) = business_request(&client, &base_a, "client-test", "trial-not-due").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(primary.business.load(Ordering::SeqCst), before + 1);
+
+    clock.0.store(cooldown_until + 100_000, Ordering::SeqCst);
+    let (status, body) =
+        business_request(&client, &base_a, "client-test", "other-port-same-key").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(primary.business.load(Ordering::SeqCst), before + 2);
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none());
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none());
+    assert_eq!(primary.probe_count(), 0);
 
     handle.shutdown().await;
     let _ = primary_shutdown.send(());
@@ -1068,54 +1041,89 @@ async fn persistence_rebuild(explicit_override: bool) {
         cooldown_entries(&client, &base_b).await.is_empty(),
         "port B must not inherit port A persisted cooldown"
     );
-    wait_until("restart startup probe settles", || async {
-        primary.probe_count() >= 1
-            && exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-                .is_some_and(|entry| entry["state"] != "probing")
-    })
-    .await;
+    sleep(Duration::from_millis(1_100)).await;
+    assert_eq!(primary.probe_count(), 0, "rebuild must not send a probe");
+    assert_ne!(exact_primary_entry(&entries_a).unwrap()["state"], "probing");
     assert_eq!(
         std::fs::read(&override_path).expect("read preserved override after rebuild"),
         seeded_bytes
     );
 
-    second.shutdown().await;
-    wait_for_port_release(port_a).await;
-    wait_for_port_release(port_b).await;
-
-    // The next rebuild lets port A run its own recovery probe. Only port A
-    // owns the restored record, so only port A may clear it.
-    primary.probe_success.store(true, Ordering::SeqCst);
     let recovery_deadline = exact_primary_entry(&entries_a)
         .and_then(|entry| entry["until_ms"].as_u64())
         .expect("restored cooldown deadline");
     clock.0.store(recovery_deadline, Ordering::SeqCst);
+    let before_failure = primary.business.load(Ordering::SeqCst);
+    let (status, body) =
+        business_request(&client, &base_a, "client-test", "failed-real-trial").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(primary.business.load(Ordering::SeqCst), before_failure + 1);
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some());
+    second.shutdown().await;
+    wait_for_port_release(port_a).await;
+    wait_for_port_release(port_b).await;
+
+    let next_trial = scoped_files
+        .iter()
+        .filter(|path| **path != override_path)
+        .flat_map(|path| {
+            routecodex_v3_provider_responses::V3ProviderCooldownCoordinator::load(path.clone())
+                .expect("read listener-owned persisted cadence")
+                .persisted_entries()
+        })
+        .find(|(key, _, _)| {
+            key.provider_id == "primary"
+                && key.interface_id == "responses"
+                && key.auth_alias.as_deref() == Some("key")
+                && key.model_id.as_deref() == Some("main")
+        })
+        .map(|(_, minimum, next)| {
+            assert_eq!(
+                minimum, recovery_deadline,
+                "failure must preserve the minimum"
+            );
+            next
+        })
+        .expect("failed real trial must persist its next eligibility");
+    assert!(next_trial > recovery_deadline);
+    clock.0.store(next_trial - 1, Ordering::SeqCst);
     let third = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
-        manifest, clock,
+        manifest,
+        clock.clone(),
     )
     .await
     .expect("rebuild two-listener aggregate for recovery");
     let base_a = listener_base(&third, "a");
     let base_b = listener_base(&third, "b");
-    let probes_before_recovery = primary.probe_count();
-    if timeout(Duration::from_secs(8), async {
-        loop {
-            if exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none() {
-                return;
-            }
-            sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .is_err()
-    {
-        let entries = cooldown_entries(&client, &base_a).await;
-        panic!(
-            "port A restored cooldown recovery timed out; probes_before={probes_before_recovery} probes_after={} entries={:?}",
-            primary.probe_count(),
-            entries
-        );
-    }
+    sleep(Duration::from_millis(1_100)).await;
+    assert_eq!(primary.probe_count(), 0);
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some());
+    let before = primary.business.load(Ordering::SeqCst);
+    let (status, body) = business_request(
+        &client,
+        &base_a,
+        "client-test",
+        "trial-before-saved-deadline",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        primary.business.load(Ordering::SeqCst),
+        before,
+        "rebuild must preserve the failed trial's later cadence and use the spare"
+    );
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some());
+    clock.0.store(next_trial, Ordering::SeqCst);
+    let (status, body) =
+        business_request(&client, &base_a, "client-test", "other-port-same-key").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(primary.business.load(Ordering::SeqCst), before + 1);
+    assert!(exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none());
+    assert_eq!(
+        primary.probe_count(),
+        0,
+        "only real traffic may recover the episode"
+    );
     assert!(
         cooldown_entries(&client, &base_b).await.is_empty(),
         "port A recovery must leave port B untouched"
@@ -1148,95 +1156,59 @@ async fn id9_lifecycle_releases_all_port_owners() {
 
     add_probe_cooldown(&client, &base_a, 3_600_000).await;
     add_probe_cooldown(&client, &base_b, 3_600_000).await;
-    let original_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-        .expect("port A original cooldown")
-        .clone();
-    let original_b = exact_primary_entry(&cooldown_entries(&client, &base_b).await)
-        .expect("port B original cooldown")
-        .clone();
-
-    trigger_probe(&client, &base_a).await;
-    trigger_probe(&client, &base_b).await;
-    advance_clock_after_manual_probe(&clock);
+    let deadline_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
+        .and_then(|entry| entry["until_ms"].as_u64())
+        .unwrap();
+    let deadline_b = exact_primary_entry(&cooldown_entries(&client, &base_b).await)
+        .and_then(|entry| entry["until_ms"].as_u64())
+        .unwrap();
+    clock.0.store(deadline_a.max(deadline_b), Ordering::SeqCst);
+    let trial_a = {
+        let client = client.clone();
+        let base = base_a.clone();
+        tokio::spawn(async move {
+            business_request(&client, &base, "client-test", "hold recovery").await
+        })
+    };
+    let trial_b = {
+        let client = client.clone();
+        let base = base_b.clone();
+        tokio::spawn(async move {
+            business_request(&client, &base, "client-test", "hold recovery").await
+        })
+    };
     timeout(
         Duration::from_secs(4),
         primary.probe_entered.acquire_many(2),
     )
     .await
-    .expect("both port-owned probes must enter the controlled upstream")
-    .expect("probe entry semaphore")
+    .unwrap()
+    .unwrap()
     .forget();
-    assert_eq!(primary.probe_count(), 2, "each port owns exactly one probe");
-    assert_eq!(
-        exact_primary_entry(&cooldown_entries(&client, &base_a).await).expect("port A held probe")
-            ["state"],
-        "probing"
-    );
-    assert_eq!(
-        exact_primary_entry(&cooldown_entries(&client, &base_b).await).expect("port B held probe")
-            ["state"],
-        "probing"
-    );
-
+    for base in [&base_a, &base_b] {
+        assert_eq!(
+            exact_primary_entry(&cooldown_entries(&client, base).await).unwrap()["state"],
+            "probing"
+        );
+        let (status, body) =
+            business_request(&client, base, "client-test", "use-spare-during-trial").await;
+        assert_eq!(status, 200, "{body}");
+    }
+    assert_eq!(primary.business.load(Ordering::SeqCst), 2);
+    assert_eq!(primary.probe_count(), 0);
     let preparation = timeout(Duration::from_secs(3), handle.prepare_exec_attempt())
         .await
-        .expect("held probes must not block aggregate preparation")
+        .expect("in-flight trials must not block preparation")
         .expect("aggregate preparation");
-    wait_until("both port probe owners quiesce", || async {
-        let entry_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await).cloned();
-        let entry_b = exact_primary_entry(&cooldown_entries(&client, &base_b).await).cloned();
-        entry_a.is_some_and(|entry| entry["state"] != "probing")
-            && entry_b.is_some_and(|entry| entry["state"] != "probing")
-    })
-    .await;
     drop(preparation);
-    let rolled_back_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-        .expect("port A cooldown retained after rollback")
-        .clone();
-    let rolled_back_b = exact_primary_entry(&cooldown_entries(&client, &base_b).await)
-        .expect("port B cooldown retained after rollback")
-        .clone();
-    assert_eq!(rolled_back_a["provider_id"], original_a["provider_id"]);
-    assert_eq!(rolled_back_b["provider_id"], original_b["provider_id"]);
-    assert_eq!(
-        primary.probe_release.available_permits(),
-        0,
-        "aborted probes must not release the controlled upstream"
-    );
-
-    wait_until("both port probe owners resume", || async {
-        exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-            .is_some_and(|entry| entry["state"] == "probing")
-            && exact_primary_entry(&cooldown_entries(&client, &base_b).await)
-                .is_some_and(|entry| entry["state"] == "probing")
-    })
-    .await;
-    assert_eq!(
-        primary.probe_count(),
-        4,
-        "rollback must resume exactly one probe per port, not duplicate owners"
-    );
-    let deadline_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
-        .and_then(|entry| entry["until_ms"].as_u64())
-        .expect("port A cooldown deadline");
-    let deadline_b = exact_primary_entry(&cooldown_entries(&client, &base_b).await)
-        .and_then(|entry| entry["until_ms"].as_u64())
-        .expect("port B cooldown deadline");
-
-    for base in [&base_a, &base_b] {
-        let (status, body) =
-            business_request(&client, base, "client-test", "business-after-rollback").await;
+    primary.probe_release.add_permits(2);
+    for trial in [trial_a, trial_b] {
+        let (status, body) = trial.await.unwrap();
         assert_eq!(status, 200, "{body}");
-        assert!(body.contains("upstream-ok"), "{body}");
     }
-
-    clock.0.store(deadline_a.max(deadline_b), Ordering::SeqCst);
-    primary.probe_release.add_permits(64);
-    wait_until("both restored probes recover", || async {
-        exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none()
-            && exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none()
-    })
-    .await;
+    for base in [&base_a, &base_b] {
+        assert!(exact_primary_entry(&cooldown_entries(&client, base).await).is_none());
+    }
 
     handle.shutdown().await;
     let _ = primary_shutdown.send(());

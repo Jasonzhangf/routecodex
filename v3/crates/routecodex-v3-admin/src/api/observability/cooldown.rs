@@ -105,6 +105,8 @@ pub(super) struct ProbeCooldownRequest {
     auth_alias: Option<String>,
     #[serde(default)]
     model_id: Option<String>,
+    #[serde(default)]
+    allow_paid_diagnostic: bool,
 }
 
 /// Shared transport for every manual cooldown action: keep the requested port
@@ -119,6 +121,7 @@ async fn forward_cooldown_action<T: Serialize>(
     port: u16,
     action: &str,
     payload: &T,
+    diagnostic: bool,
 ) -> Response {
     let ports = match configured_ports(state) {
         Ok(ports) => ports,
@@ -133,10 +136,13 @@ async fn forward_cooldown_action<T: Serialize>(
         )
             .into_response();
     }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
+    // The owning listener bounds a paid diagnostic by its configured provider
+    // timeout. Do not replace its typed observation with an Admin timeout.
+    let mut builder = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(2));
+    if !diagnostic {
+        builder = builder.timeout(std::time::Duration::from_secs(2));
+    }
+    let client = match builder.build() {
         Ok(client) => client,
         Err(error) => {
             return (
@@ -196,7 +202,7 @@ pub(super) async fn remove_cooldown(
         )
             .into_response();
     }
-    forward_cooldown_action(&state, request.port, "", &request).await
+    forward_cooldown_action(&state, request.port, "", &request, false).await
 }
 
 /// Manual add. The admin only decides what it can decide locally: an empty
@@ -226,11 +232,11 @@ pub(super) async fn add_cooldown(
         "kind": request.kind,
         "duration_ms": request.duration_ms,
     });
-    forward_cooldown_action(&state, request.port, "/add", &payload).await
+    forward_cooldown_action(&state, request.port, "/add", &payload, false).await
 }
 
-/// Manual probe. This only makes the next probe due; the listener decides
-/// whether a probe entry exists, and a miss is a successful `scheduled: false`.
+/// Enable the next free business trial, or forward explicit consent for one
+/// observation-only, possibly billable diagnostic to the owning listener.
 pub(super) async fn probe_cooldown(
     State(state): axum::extract::State<AppState>,
     Json(request): Json<ProbeCooldownRequest>,
@@ -247,6 +253,14 @@ pub(super) async fn probe_cooldown(
         "interface_id": request.interface_id,
         "auth_alias": request.auth_alias,
         "model_id": request.model_id,
+        "allow_paid_diagnostic": request.allow_paid_diagnostic,
     });
-    forward_cooldown_action(&state, request.port, "/probe", &payload).await
+    forward_cooldown_action(
+        &state,
+        request.port,
+        "/probe",
+        &payload,
+        request.allow_paid_diagnostic,
+    )
+    .await
 }

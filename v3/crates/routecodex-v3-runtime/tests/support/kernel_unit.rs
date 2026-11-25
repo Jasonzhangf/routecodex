@@ -1862,8 +1862,8 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
         "one failed decode attempt must remain observable while provider errors stay off the client stream"
     );
     assert_eq!(
-        observability.provider_failure_events[0].health_state, "pre_cool_observation",
-        "a failed decode attempt is held for observation before any health cooldown is committed"
+        observability.provider_failure_events[0].health_state, "provider_failure_observed",
+        "a failed decode attempt is recorded once without committing a cooldown below threshold"
     );
 }
 
@@ -1985,8 +1985,8 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
         "the malformed terminal is observable before candidate switch"
     );
     assert_eq!(
-        observability.provider_failure_events[0].health_state, "pre_cool_observation",
-        "the failed exact identity remains under observation before any cooldown is committed"
+        observability.provider_failure_events[0].health_state, "provider_failure_observed",
+        "the failed exact identity is recorded without a cooldown below threshold"
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),

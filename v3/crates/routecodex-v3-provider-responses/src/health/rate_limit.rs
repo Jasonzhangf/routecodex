@@ -67,10 +67,12 @@ impl V3ProviderHealthStore {
         );
         let state = self.state.read().map_err(|error| error.to_string())?;
         let owns = match permit.purpose() {
-            V3ProviderProbePurpose::CooldownRecovery => state
-                .provider_cooldown_probes
-                .get(&key)
-                .is_some_and(|probe| probe.active_probe == Some(permit.acquisition_id)),
+            V3ProviderProbePurpose::CooldownRecovery | V3ProviderProbePurpose::BusinessRecovery => {
+                state
+                    .provider_cooldown_probes
+                    .get(&key)
+                    .is_some_and(|probe| probe.active_probe == Some(permit.acquisition_id))
+            }
             V3ProviderProbePurpose::PrecoolObservation => {
                 state.precool_observation_probes.get(&key) == Some(&permit.acquisition_id)
             }

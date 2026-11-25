@@ -198,7 +198,7 @@ fn two_429_observations_spanning_two_minutes_do_not_cool() {
 }
 
 #[test]
-fn tenth_mixed_failure_commits_one_hour_and_requires_probe() {
+fn tenth_mixed_failure_commits_one_hour_and_requires_owned_business_trial() {
     let store = V3ProviderHealthStore::default();
     let committed = record_mixed_failures(&store, "p", "responses", "k", "m", 1000, 10);
     assert_eq!(committed.failure_streak, 10);
@@ -207,7 +207,7 @@ fn tenth_mixed_failure_commits_one_hour_and_requires_probe() {
         .record_provider_key_success_for_interface("p", "responses", "k", "m", 3_601_010)
         .unwrap();
     assert!(
-        !store
+        store
             .scheduling_projection_for_key_with_interface(
                 "p",
                 "responses",
@@ -219,21 +219,37 @@ fn tenth_mixed_failure_commits_one_hour_and_requires_probe() {
             )
             .unwrap()
             .available,
-        "a business success cannot release a committed cooldown"
+        "an expired episode is eligible, but ordinary success does not remove it"
     );
-    let probe = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("the hour lock still exposes its current physical probe");
-    store
-        .complete_provider_cooldown_probe_success_with_permit(&probe, 3_601_011)
-        .unwrap();
+    assert!(!store.cooldown_entries(3_601_010).is_empty());
+    let routecodex_v3_provider_responses::V3ProviderBusinessRecoveryAcquisition::Acquired(trial) =
+        store
+            .acquire_provider_business_recovery_trial_for_interface(
+                "p",
+                "responses",
+                Some("k"),
+                Some("m"),
+                3_601_010,
+            )
+            .unwrap()
+    else {
+        panic!("the expired episode must grant a business recovery trial");
+    };
+    assert!(
+        !store
+            .availability_for_interface("p", "responses", Some("k"), Some("m"), 3_601_010)
+            .available
+    );
+    assert!(store
+        .complete_provider_business_recovery_success_with_permit(&trial, 3_601_011)
+        .unwrap());
     assert!(
         store
             .availability_for_interface("p", "responses", Some("k"), Some("m"), 3_601_011)
             .available,
-        "only a current qualified probe clears the hour lock"
+        "the current owned business success clears the hour lock"
     );
+    assert!(store.cooldown_entries(3_601_011).is_empty());
 }
 
 #[test]
@@ -1994,11 +2010,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     );
     assert_eq!(failed.cooldown_until_ms, Some(3_600_109));
     assert!(
-        !store
+        store
             .record_provider_key_success("p", "k", "m", 3_600_110)
             .expect("business success")
             .available,
-        "business success cannot replace the current probe"
+        "an expired non-429 cooldown is eligible for a business recovery trial"
     );
 
     let failed_probe = store
@@ -2099,23 +2115,23 @@ fn committed_shared_episode_agrees_in_every_projection() {
     let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
     for time in [3_601_010, 9_000_000] {
         assert!(
-            !store
+            store
                 .scheduling_projection("p", "a", "m", 1, 1, time)
                 .unwrap()
                 .available
         );
         assert!(
-            !store
+            store
                 .availability_for_interface("p", "default", Some("a"), Some("m"), time)
                 .available
         );
         assert!(
-            !store
+            store
                 .availability_for_session(&scope, "p", Some("a"), Some("m"), time)
                 .available
         );
         assert!(
-            !store
+            store
                 .record_provider_key_success("p", "a", "m", time)
                 .unwrap()
                 .available
@@ -2163,11 +2179,11 @@ fn a_429_during_an_outstanding_cooldown_preserves_the_committed_restriction() {
     );
     let after_window = 3_601_010;
     assert!(
-        !store
+        store
             .scheduling_projection("p", "a", "m", 1, 1, after_window)
             .expect("projection after the rate-limit window")
             .available,
-        "the committed lock remains unavailable after its minimum"
+        "the expired non-429 episode is eligible for a business recovery trial"
     );
 
     let permit = store

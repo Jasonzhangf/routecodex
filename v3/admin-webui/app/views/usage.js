@@ -761,15 +761,22 @@ function cooldownRow(listener, entry) {
   tr.appendChild(el("td", "col-reason", entry.reason ?? "—"));
 
   const actionsCell = el("td", "col-actions");
-  const probeBtn = el("button", "btn cooldown-action", "Probe now");
+  const probeBtn = el("button", "btn cooldown-action", "Enable next trial");
+  const diagnosticBtn = el("button", "btn cooldown-action", "Run paid diagnostic…");
   const releaseBtn = el("button", "btn cooldown-action cooldown-release", "Release");
   if (kind === "session") {
     probeBtn.disabled = true;
-    probeBtn.title = "Probes only apply to auth_key/probe entries";
+    probeBtn.title = "Recovery trials apply to provider cooldowns";
   }
-  probeBtn.addEventListener("click", () => manualCooldownProbe(identity, [probeBtn, releaseBtn]));
-  releaseBtn.addEventListener("click", () => manualCooldownRelease(identity, [probeBtn, releaseBtn]));
-  actionsCell.append(probeBtn, releaseBtn);
+  if (kind === "session" || !authAlias || !modelId) {
+    diagnosticBtn.disabled = true;
+    diagnosticBtn.title = "Diagnostics require a provider, interface, key and model";
+  }
+  const buttons = [probeBtn, diagnosticBtn, releaseBtn];
+  probeBtn.addEventListener("click", () => manualCooldownProbe(identity, buttons));
+  diagnosticBtn.addEventListener("click", () => manualCooldownDiagnostic(identity, buttons));
+  releaseBtn.addEventListener("click", () => manualCooldownRelease(identity, buttons));
+  actionsCell.append(probeBtn, diagnosticBtn, releaseBtn);
   tr.appendChild(actionsCell);
   return tr;
 }
@@ -792,6 +799,7 @@ function cooldownIdentityText({ provider_id, interface_id, auth_alias, model_id 
 // through showStatus, and re-reads GET /api/observability/cooldown-pool. No
 // optimistic mutation of state.cooldown: the pool stays the only truth.
 async function runCooldownAction(buttons, run, errorPrefix) {
+  const disabled = buttons.map((button) => button?.disabled);
   for (const button of buttons) if (button) button.disabled = true;
   try {
     try {
@@ -801,7 +809,7 @@ async function runCooldownAction(buttons, run, errorPrefix) {
     }
     await loadCooldown({ afterAction: true });
   } finally {
-    for (const button of buttons) if (button) button.disabled = false;
+    buttons.forEach((button, index) => { if (button) button.disabled = disabled[index]; });
   }
 }
 
@@ -828,11 +836,39 @@ async function manualCooldownProbe(identity, buttons) {
     if (identity.model_id) body.model_id = identity.model_id;
     const result = await api("/api/observability/cooldown-pool/probe", { method: "POST", body: JSON.stringify(body) });
     if (result?.scheduled === false) {
-      showStatus("warn", `Probe: no probe state exists for ${label}; nothing scheduled.`);
+      showStatus("warn", `No pending recovery trial for ${label}.`);
     } else {
-      showStatus("ok", `Probe now applied for ${label}; recovery probe will run on the next health tick.`);
+      showStatus("ok", `The next eligible request can try ${label} once the cooldown ends.`);
     }
-  }, `probe failed for ${label}`);
+  }, `Could not enable the next trial for ${label}`);
+}
+
+async function manualCooldownDiagnostic(identity, buttons) {
+  const label = cooldownIdentityText(identity);
+  if (!window.confirm(`Send one upstream diagnostic request for ${label} on port ${identity.port}? The provider may charge for this request. This only observes the result and does not change cooldown or recovery timing.`)) return;
+  await runCooldownAction(buttons, async () => {
+    const body = {
+      port: identity.port,
+      provider_id: identity.provider_id,
+      interface_id: identity.interface_id || "default",
+      auth_alias: identity.auth_alias,
+      model_id: identity.model_id,
+      allow_paid_diagnostic: true,
+    };
+    const result = await api("/api/observability/cooldown-pool/probe", { method: "POST", body: JSON.stringify(body) });
+    const outcome = result?.diagnostic;
+    const messages = {
+      succeeded: "The upstream diagnostic succeeded.",
+      failed: outcome?.http_status != null ? `The upstream diagnostic failed with HTTP ${outcome.http_status}.` : "The upstream diagnostic failed without an HTTP response.",
+      timed_out: "The upstream diagnostic timed out.",
+      already_owned: "A diagnostic is already running for this identity. No new request was sent.",
+      capacity_unavailable: "Diagnostic capacity is unavailable. No request was sent.",
+      owner_unavailable: "The listener could not complete the diagnostic.",
+    };
+    const message = messages[outcome?.status];
+    if (!message) throw new Error("The listener returned no recognized diagnostic outcome");
+    showStatus(outcome.status === "succeeded" ? "ok" : "warn", `${label}: ${message} Cooldown and recovery timing are unchanged.`);
+  }, `Diagnostic failed for ${label}`);
 }
 
 function toggleCooldownAddForm(force) {

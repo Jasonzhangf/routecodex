@@ -1634,12 +1634,11 @@ path = [
                     "a declared provider policy may not wait the request: scoped={scoped}, group={group}, response={response_failure}"
                 );
                 assert_eq!(
-                    event.failure_count, u32::from(!response_failure),
-                    "only the actual HTTP 503 counts here: scoped={scoped}, group={group}, response={response_failure}"
+                    event.failure_count, 1,
+                    "the actual provider failure counts once: scoped={scoped}, group={group}, response={response_failure}"
                 );
                 assert_eq!(
-                    event.health_state,
-                    if response_failure { "pre_cool_observation" } else { "provider_failure_observed" },
+                    event.health_state, "provider_failure_observed",
                     "retain the exact observation owner: scoped={scoped}, group={group}, response={response_failure}"
                 );
                 assert!(
@@ -1931,12 +1930,12 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
     );
     assert_eq!(provider_event.wait_ms, None);
     assert_eq!(
-        provider_event.failure_count, 0,
-        "a decode failure is request-local and must stay health-neutral: {provider_event:#?}"
+        provider_event.failure_count, 1,
+        "a malformed provider body counts once below the cooldown threshold: {provider_event:#?}"
     );
     assert_eq!(
-        provider_event.health_state, "pre_cool_observation",
-        "a decode failure must not create a cooldown: {provider_event:#?}"
+        provider_event.health_state, "provider_failure_observed",
+        "a decode failure must not create a cooldown below threshold: {provider_event:#?}"
     );
     assert!(provider_event.cooldown_until_ms.is_none());
 
