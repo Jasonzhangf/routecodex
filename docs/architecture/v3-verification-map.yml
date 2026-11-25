@@ -3175,7 +3175,7 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_bounded_debug_artifact_lifecycle
-  owner_scope: V3CodexSampleStore is the unique persistence owner; accepted sample jobs run through one serialized worker bounded by a 64-MiB serialized-payload budget across queued and in-flight writes, with no separate fixed job-count cap, so a full-sampling burst is not dropped by a message-count limit; overload is recorded without rejecting business requests, barriers snapshot failures without draining the ledger, and worker shutdown drains the bounded request/file-qualified failure ledger for aggregate shutdown and exec-preparation reporting. The server starts this worker after fallible listener startup checks and before listener tasks begin accepting requests. Dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories; neither samples nor control
+  owner_scope: V3CodexSampleStore is the unique persistence owner; accepted sample jobs run through one serialized worker bounded by a 64-MiB serialized-payload budget across queued and in-flight writes, with no separate fixed job-count cap, so a full-sampling burst is not dropped by a message-count limit; overload is recorded without rejecting business requests, barriers snapshot failures without draining the ledger, and worker shutdown drains the bounded request/file-qualified failure ledger for aggregate shutdown and exec-preparation reporting. The server starts this worker after fallible listener startup checks and before listener tasks begin accepting requests. Dev builds sample by default, and error evidence force-writes; ordinary successes retain the existing 100 request-directory budget while failed-attempt evidence has a separate 256 request-directory reserve for 30 minutes from first successful persistence, expires oldest-first, and returns diagnostic overflow without rejecting the business request. Neither samples nor control
     state may enter MetadataCenter or normal provider/client payload.
   owner_modules:
   - v3/crates/routecodex-v3-debug
@@ -3193,7 +3193,10 @@ features:
   - Direct-to-Relay handoffs retain the paired request across the real failed Direct attempt and successful Relay attempt.
   - Error evidence force-writes request/error samples even when sampling is disabled.
   - Dev builds sample by default; release builds require explicit opt-in.
-  - Each port retains at most 100 request directories.
+  - Ordinary success samples retain the existing global budget of at most 100 request directories across all endpoints and ports.
+  - Failed-attempt records have a separate 256 request-directory reserve and retain for 30 minutes from their first successful persistence; the marker survives later file writes.
+  - Expired failures are removed oldest-first, while in-floor failures cannot be displaced by a success or a newer failure.
+  - A saturated in-floor failure reserve skips only the new diagnostic write and records one bounded request/file-qualified overflow without rejecting or delaying the business path.
   - The worker completes accepted writes before a queue barrier and reports filesystem failures immediately to logs and through the barrier result.
   - Queue overload and payloads above the byte-plus-fixed-overhead budget are explicitly reported without rejecting a passable business request.
   - A barrier reports a failure snapshot without draining it; a cancelled barrier reply cannot erase failures needed by shutdown.
@@ -3218,6 +3221,7 @@ features:
   - npm run verify:v3-resource-map
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
   - npm run test:v3-shared-sample-retention-blackbox
+  - cargo test -p routecodex-v3-server --test sample_retention_public_consumer -- --nocapture
   - cargo test -p routecodex-v3-debug persist_async_worker_keeps_every_sample_under_burst
   - cargo test -p routecodex-v3-debug persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead
   - cargo test -p routecodex-v3-debug persist_failure_barrier_keeps_ledger_when_reply_receiver_is_dropped
