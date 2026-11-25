@@ -1041,10 +1041,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             ));
         }
 
-        let direct_dsml_context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
-            &standardized.body,
-            &ns_tool_identities,
-        );
+        let direct_dsml_context =
+            crate::direct_response_hooks::V3DirectDsmlContext::from_request_with_aliases(
+                &standardized.body,
+                &ns_tool_identities,
+            );
         let compat_context = match v3_direct_protocol_codec::build_direct_response_compat_context(
             &policy.target,
             ns_tool_identities.clone(),

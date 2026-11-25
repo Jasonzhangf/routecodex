@@ -59,6 +59,17 @@ impl V3DirectDsmlContext {
     /// inverse (provider wire name -> client namespace + leaf). The registry
     /// owns nested namespace recursion and every supported discovery channel;
     /// this module never traverses declarations itself.
+    pub(crate) fn from_request_with_aliases(
+        body: &Value,
+        aliases: &provider_compat_core::namespace_identity::NamespaceToolAliases,
+    ) -> Self {
+        let inverse = aliases
+            .iter()
+            .map(|(wire, alias)| (wire.clone(), (alias.namespace.clone(), alias.name.clone())))
+            .collect();
+        Self::from_request(body, &inverse)
+    }
+
     pub(crate) fn from_request(body: &Value, inverse: &HashMap<String, (String, String)>) -> Self {
         use provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry;
         let mut result = Self::default();

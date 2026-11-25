@@ -2821,6 +2821,8 @@ features:
   - NamespaceToolIdentityRegistry::project_tools
   - NamespaceToolIdentityRegistry::project_references
   - NamespaceToolIdentityRegistry::project_request
+  - NamespaceToolIdentityRegistry::project_responses_passthrough_request
+  - NamespaceToolIdentityRegistry::restore_aliases
   - NamespaceToolIdentityRegistry::project_responses_history_references
   - NamespaceToolIdentityRegistry::wire_name_for_responses_history
   - NamespaceToolIdentityRegistry::declares_native_tool_search
@@ -2890,6 +2892,7 @@ features:
   - gemini_sse_complete_attempt_buffering_and_late_error_public
   - signed_namespace_history_responses_exact_projection_consumer
   - responses_direct_additional_tools_declarations_execute_and_follow_up_once
+  - responses_direct_additional_tool_collision_executes_and_follows_up_once
   - signed_namespace_history_anthropic_declared_drop_diagnostic
   - signed_namespace_history_chat_declared_drop_diagnostic
   - gemini_empty_finish_reason_public

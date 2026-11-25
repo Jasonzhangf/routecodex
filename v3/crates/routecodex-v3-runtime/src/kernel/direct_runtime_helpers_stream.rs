@@ -49,7 +49,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     typed_hooks: V3DirectSseTypedHookCatalog,
     tool_thinking_enabled: bool,
     request_id: Option<String>,
-    namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
+    namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
 ) -> V3SseAttemptStream {
     struct StreamState {
         source: V3ProviderAttemptSseStream,
@@ -1120,7 +1120,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     retain_response_cipher: bool,
     compat_plan: &crate::direct_response_hooks::V3DirectResponseCompatPlan,
     dsml_context: &crate::direct_response_hooks::V3DirectDsmlContext,
-    namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
+    namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
