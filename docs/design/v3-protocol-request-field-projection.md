@@ -587,8 +587,8 @@ must not cross ReqInbound02.
 | `prompt_cache_key` | Valid non-empty key is consumed as a local cache hint before wire; malformed values fail; it must not rebuild `cache_control`. |
 | `store` | `false` is validated and consumed before wire; complete valid `true` is warned, recorded as scoped local diagnostic evidence, and omitted from Anthropic wire while the mapped remainder continues; neither value changes RouteCodex continuation state. |
 | `text.verbosity` | Valid low/medium/high value is consumed as a local style hint before wire; invalid values fail; it never becomes Anthropic reasoning effort. |
-| `text.format.type=text` | Conditional exact default-text projection; emits no format object only after the outbound codec verifies no conflicting format field. |
-| `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; complete valid `strict=false` has no target mapping, so warn, record scoped local diagnostic evidence, omit that field from provider wire, and continue with the mapped remainder. Malformed registered output-format values retain their explicit validation failure. |
+| `text.format.type=text` | Conditional exact default-text projection; emits no format object after the outbound codec warns and records any unmatched sibling field while the mapped remainder continues. |
+| `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; source-level `strict=false` and other complete fields without a target mapping are warned, recorded as scoped local diagnostic evidence, and omitted from provider wire while the mapped remainder continues. Malformed registered output-format values retain their explicit validation failure. |
 
 No field in this table may enter MetadataCenter, provider selection, retry,
 continuation, SSE, or server-handler compensation.

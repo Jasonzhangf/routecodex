@@ -7719,6 +7719,359 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
     shutdown.send(()).unwrap();
 }
 
+fn dbc3d38_accepts_structured_output_wire(body: &Value) -> bool {
+    body.get("output_config")
+        .and_then(|config| config.get("format"))
+        .and_then(Value::as_object)
+        .is_some_and(|format| {
+            format.len() == 2
+                && format.get("type").and_then(Value::as_str) == Some("json_schema")
+                && format.get("schema").is_some_and(Value::is_object)
+                && !format.contains_key("strict")
+        })
+}
+
+fn dbc3d38_accepts_structured_output_wire_after_unknown_drop(body: &Value) -> bool {
+    body.get("output_config")
+        .and_then(|config| config.get("format"))
+        .and_then(Value::as_object)
+        .is_some_and(|format| {
+            format.len() == 2
+                && format.get("type").and_then(Value::as_str) == Some("json_schema")
+                && format.get("schema").is_some_and(Value::is_object)
+                && ["strict", "description"]
+                    .iter()
+                    .all(|key| !format.contains_key(*key))
+        })
+}
+
+fn dbc3d38_client_output_text(response: &Value) -> Option<&str> {
+    response
+        .get("output")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                item.get("content")
+                    .and_then(Value::as_array)
+                    .and_then(|content| {
+                        content.iter().find_map(|part| {
+                            (part.get("type").and_then(Value::as_str) == Some("output_text"))
+                                .then(|| part.get("text").and_then(Value::as_str))
+                                .flatten()
+                        })
+                    })
+            })
+        })
+}
+
+#[tokio::test]
+async fn dbc3d38_responses_anthropic_structured_output_strict_false_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("dbc3d38-strict-false-public");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let provider_response = serde_json::to_vec(&json!({
+        "id":"msg_strict_false",
+        "type":"message",
+        "role":"assistant",
+        "model":"wire-protocol",
+        "content":[{"type":"text","text":"{\"answer\":\"ok\"}"}],
+        "usage":{"input_tokens":3,"output_tokens":5},
+        "stop_reason":"end_turn"
+    }))
+    .unwrap();
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream_with_body_when(
+            StatusCode::OK,
+            "application/json",
+            provider_response,
+            dbc3d38_accepts_structured_output_wire,
+        )
+        .await;
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "controlled-dbc3d38-strict-false",
+    );
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "anthropic",
+        provider_base_url.trim_end_matches("/v1"),
+        r#""direct", "relay""#,
+    ))
+    .await
+    .unwrap();
+    let schema = json!({
+        "type":"object",
+        "properties":{"answer":{"type":"string"}},
+        "required":["answer"],
+        "additionalProperties":false
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = client
+        .post(&endpoint)
+        .header("accept", "application/json")
+        .json(&json!({
+            "model":"client-test",
+            "input":[{"role":"user","content":[{"type":"input_text","text":"Return structured output"}]}],
+            "text":{"format":{
+                "type":"json_schema",
+                "name":"contract_name",
+                "schema":schema,
+                "strict":false
+            }},
+            "stream":false
+        }))
+        .send()
+        .await
+        .expect("public Responses request must reach one provider attempt");
+    assert_eq!(response.status(), StatusCode::OK);
+    let client_response: Value = response.json().await.unwrap();
+    assert_eq!(client_response["status"], "completed", "{client_response}");
+    assert_eq!(
+        dbc3d38_client_output_text(&client_response),
+        Some("{\"answer\":\"ok\"}"),
+        "{client_response}"
+    );
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("first provider attempt must reach controlled upstream")
+        .expect("controlled upstream must capture request");
+    assert_eq!(
+        capture.body["output_config"]["format"],
+        json!({"type":"json_schema","schema":schema}),
+        "Anthropic must receive the target structured-output shape without source-only strict=false: {}",
+        capture.body
+    );
+    assert!(
+        capture.body["output_config"]["format"]
+            .get("strict")
+            .is_none(),
+        "strict=false is a source-only field in the registered target projection: {}",
+        capture.body
+    );
+    assert!(
+        timeout(Duration::from_millis(150), captures.recv())
+            .await
+            .is_err(),
+        "a successful projection must need no provider switch or second attempt"
+    );
+
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn dbc3d38_responses_anthropic_structured_output_strict_false_sse_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("dbc3d38-strict-false-sse-public");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream_with_body_when(
+            StatusCode::OK,
+            "text/event-stream",
+            anthropic_sse_text_fixture("{\"answer\":\"ok\"}", false),
+            dbc3d38_accepts_structured_output_wire,
+        )
+        .await;
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "controlled-dbc3d38-strict-false-sse",
+    );
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "anthropic",
+        provider_base_url.trim_end_matches("/v1"),
+        r#""direct", "relay""#,
+    ))
+    .await
+    .unwrap();
+    let schema = json!({
+        "type":"object",
+        "properties":{"answer":{"type":"string"}},
+        "required":["answer"],
+        "additionalProperties":false
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = client
+        .post(&endpoint)
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "input":[{"role":"user","content":[{"type":"input_text","text":"Return structured output"}]}],
+            "text":{"format":{
+                "type":"json_schema",
+                "name":"contract_name",
+                "schema":schema,
+                "strict":false
+            }},
+            "stream":true
+        }))
+        .send()
+        .await
+        .expect("public Responses SSE request must reach one provider attempt");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"].to_str().unwrap(),
+        "text/event-stream"
+    );
+    let body = response.text().await.unwrap();
+    let terminal = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .find(|event| event["type"] == "response.completed")
+        .expect("SSE client must receive a completed business terminal");
+    assert_eq!(terminal["response"]["status"], "completed", "{body}");
+    assert_eq!(
+        dbc3d38_client_output_text(&terminal["response"]),
+        Some("{\"answer\":\"ok\"}"),
+        "{body}"
+    );
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("first provider attempt must reach controlled upstream")
+        .expect("controlled upstream must capture request");
+    assert!(
+        dbc3d38_accepts_structured_output_wire(&capture.body),
+        "Anthropic must receive the exact target structured-output shape: {}",
+        capture.body
+    );
+    assert!(
+        timeout(Duration::from_millis(150), captures.recv())
+            .await
+            .is_err(),
+        "a successful SSE projection must need no provider switch or second attempt"
+    );
+
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn dbc3d38_responses_anthropic_unknown_text_format_field_is_dropped_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("dbc3d38-unknown-format-public");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let provider_response = serde_json::to_vec(&json!({
+        "id":"msg_unknown_format_dropped",
+        "type":"message",
+        "role":"assistant",
+        "model":"wire-protocol",
+        "content":[{"type":"text","text":"{\"answer\":\"ok\"}"}],
+        "usage":{"input_tokens":3,"output_tokens":5},
+        "stop_reason":"end_turn"
+    }))
+    .unwrap();
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream_with_body_when(
+            StatusCode::OK,
+            "application/json",
+            provider_response,
+            dbc3d38_accepts_structured_output_wire_after_unknown_drop,
+        )
+        .await;
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "controlled-dbc3d38-unknown-format",
+    );
+    let mut manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "anthropic",
+        provider_base_url.trim_end_matches("/v1"),
+        r#""direct", "relay""#,
+    );
+    let drop_log = home_guard.path.join("projection-drops.jsonl");
+    manifest.debug.projection_drop_log_file = Some(drop_log.display().to_string());
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let schema = json!({
+        "type":"object",
+        "properties":{"answer":{"type":"string"}},
+        "required":["answer"],
+        "additionalProperties":false
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = client
+        .post(&endpoint)
+        .header("accept", "application/json")
+        .json(&json!({
+            "model":"client-test",
+            "input":[{"role":"user","content":[{"type":"input_text","text":"Return structured output"}]}],
+            "text":{"format":{
+                "type":"json_schema",
+                "name":"contract_name",
+                "description":"source-only schema description",
+                "schema":schema,
+                "strict":false
+            }},
+            "stream":false
+        }))
+        .send()
+        .await
+        .expect("unknown text.format field must not become a pre-provider error");
+    assert_eq!(response.status(), StatusCode::OK);
+    let client_response: Value = response.json().await.unwrap();
+    assert_eq!(client_response["status"], "completed", "{client_response}");
+    assert_eq!(
+        dbc3d38_client_output_text(&client_response),
+        Some("{\"answer\":\"ok\"}"),
+        "{client_response}"
+    );
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("first provider attempt must reach controlled upstream")
+        .expect("controlled upstream must capture request");
+    assert!(
+        dbc3d38_accepts_structured_output_wire_after_unknown_drop(&capture.body),
+        "the mapped remainder must reach Anthropic without the unknown field: {}",
+        capture.body
+    );
+    assert!(
+        timeout(Duration::from_millis(150), captures.recv())
+            .await
+            .is_err(),
+        "an unmapped sibling field must not cause a provider switch or second attempt"
+    );
+    let diagnostic = fs::read_to_string(&drop_log)
+        .expect("the unsupported field must be persisted to projection drop evidence");
+    let record: Value = diagnostic
+        .lines()
+        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .expect("projection drop log must contain one JSON record");
+    assert_eq!(record["target_protocol"], "anthropic", "{record}");
+    assert_eq!(record["json_path"], "$.text.format.description", "{record}");
+    assert_eq!(
+        record["canonical_value"], "source-only schema description",
+        "{record}"
+    );
+    assert_eq!(
+        record["source_value"], "source-only schema description",
+        "{record}"
+    );
+
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
 #[tokio::test]
 async fn capture_node_preconnection_matches_responses_http_success_and_failure() {
     let _test_guard = TEST_LOCK.lock().await;

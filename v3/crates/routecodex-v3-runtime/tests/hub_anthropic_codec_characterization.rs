@@ -2675,13 +2675,11 @@ fn anthropic_consumes_responses_json_schema_name_in_outbound_projection() {
     let mut text_extra = base_chat_for_field_projection();
     text_extra["routecodex_chat_extension"] =
         json!({"responses_request":{"text":{"format":{"type":"text","description":"strict"}}}});
-    let error = encode_v3_responses_semantic_as_anthropic_request(text_extra)
-        .expect_err("Anthropic cannot preserve extra text format fields");
+    let wire = encode_v3_responses_semantic_as_anthropic_request(text_extra)
+        .expect("unmapped text format fields must be omitted without blocking projection");
     assert!(
-        error
-            .to_string()
-            .contains("$.request.text.output_config.format.description"),
-        "{error}"
+        wire.get("output_config").is_none(),
+        "text format emits no output_config: {wire}"
     );
 
     let mut malformed_strict = base_chat_for_field_projection();
