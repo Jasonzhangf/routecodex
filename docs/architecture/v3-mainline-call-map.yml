@@ -2,6 +2,68 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.active_key_selection_control
+  owner_feature_id: v3.virtual_router_target_interpreter
+  summary: Server-owned local endpoint discovery connects Admin selection controls to the selected listener; Target remains the sole queue-state owner.
+  edges:
+  - step_id: v3-active-control-status-http
+    from_node: V3AdminSelectionControlForwarded
+    to_node: V3ServerActiveKeysStatus
+    caller_symbol: forward_selection_control
+    caller_file: v3/crates/routecodex-v3-admin/src/api/routes.rs
+    callee_symbol: active_keys_status
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.admin_observability_aggregation
+    status: anchored
+    notes: HTTP GET /_routecodex/selection/active-keys over the resolved loopback SocketAddr; this is a transport edge, not a Rust direct call.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-release-http
+    from_node: V3AdminSelectionControlForwarded
+    to_node: V3ServerActiveKeysRelease
+    caller_symbol: forward_selection_control
+    caller_file: v3/crates/routecodex-v3-admin/src/api/routes.rs
+    callee_symbol: active_keys_release
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.admin_observability_aggregation
+    status: anchored
+    notes: HTTP POST /_routecodex/selection/active-keys/release forwards an exact member command through the same Server-owned control address.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-companion-publish
+    from_node: V3ServerActiveKeyControlBound
+    to_node: V3ServerActiveKeyControlPublished
+    caller_symbol: start_active_key_control_companion
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: publish_record
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    resource_flow:
+      consumes: []
+      produces: [v3.server.active_key_control_endpoint_record]
+      side_channel_reads: []
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-owner-close
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: ActiveKeyControlOwner::close
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: remove_owned_record
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
 - chain_id: v3.rcc_internal_hooks_sidecar
   owner_feature_id: v3.rcc_internal_hooks_sidecar
   summary: Optional RouteCodex lifecycle starts the installed rccv3-hooksd; the daemon uses only the default Codex App Server socket for session status, send, and continuation evidence.
@@ -580,6 +642,24 @@ chains:
   owner_feature_id: v3.virtual_router_target_interpreter
   summary: Target09 candidate sets become Target10 concrete providers through one session-first selection owner shared by Direct planning, Direct pre-send revalidation, initial Relay resolution, and Relay failure reselection.
   edges:
+  - step_id: v3-target-active-key-core
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: V3TargetInterpreter::select_available_with_health_active
+    caller_file: v3/crates/routecodex-v3-target/src/lib.rs
+    callee_symbol: V3ActiveKeySelectionState::choose
+    callee_file: v3/crates/routecodex-v3-target/src/active_keys.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_target_interpreter
+    semantic_contract:
+      - Explicit active membership intersects each declared pool before alternative counting. Active queue, round robin and accepted-success sticky order only the final existing health/tier/priority bucket.
+      - Listener custody supplies the Target state handle. Attempt and episode witnesses remain request-local; health can end retries early. Versioned delivery feedback counts consecutive failures across requests; the fourth failure invalidates affinity and applies hold/tail once, while early episode closure preserves the streak.
+      - Runtime owns optional listener custody and per-dispatch feedback through Direct and Relay. Server exposes read-only queue and health views plus exact-member release; control outcomes never enter business payloads.
+    resource_flow:
+      consumes: [v3.target.candidate_set, v3.target.active_candidate_set, v3.target.active_key_policy, v3.provider.availability_projection]
+      produces: [v3.target.concrete_provider, v3.target.active_key_attempt]
+      side_channel_reads: [v3.target.active_key_state]
+      side_channel_writes: [v3.target.active_key_state]
   - step_id: v3-rd-target-select-live-recovery
     from_node: V3Server03HttpRequestRaw
     to_node: V3Target10ConcreteProviderSelected
@@ -3915,7 +3995,7 @@ chains:
   - step_id: v3-de-24
     from_node: V3Error01SourceRaised
     to_node: V3RuntimeProviderFailureObservation
-    caller_symbol: handle_provider_failure_with_response_code
+    caller_symbol: handle_provider_failure_with_response_code_and_active_keys
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
     callee_symbol: build_v3_runtime_provider_failure_observation_from_policy_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
@@ -6903,7 +6983,7 @@ chains:
     - step_id: v3-provider-action-gate-05
       from_node: V3Error05ExecutionDecision
       to_node: V3Error06ClientProjected
-      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
+      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       callee_symbol: terminal_projection_for
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6941,7 +7021,7 @@ chains:
       to_node: V3Error05ExecutionDecision
       caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: run_v3_direct_provider_failure_policy
+      callee_symbol: run_v3_direct_provider_failure_policy_with_active_keys
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6961,7 +7041,7 @@ chains:
       to_node: V3Error05ExecutionDecision
       caller_symbol: handle_v3_responses_relay_provider_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6979,9 +7059,9 @@ chains:
     - step_id: v3-provider-action-gate-16
       from_node: V3Error01SourceRaised
       to_node: V3Error05ExecutionDecision
-      caller_symbol: handle_provider_failure_with_response_code
+      caller_symbol: handle_provider_failure_with_response_code_and_active_keys
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
-      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate

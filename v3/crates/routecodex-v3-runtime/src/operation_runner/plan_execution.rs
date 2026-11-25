@@ -12,8 +12,8 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_target::{
-    V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetExhaustion,
-    V3TargetInterpreter,
+    V3ActiveKeySelectionContext, V3ActiveKeySelectionState, V3Target09CandidateSetExpanded,
+    V3Target10ConcreteProviderSelected, V3TargetExhaustion, V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
 use serde_json::Value;
@@ -106,6 +106,7 @@ struct PlanExecutionOperator {
     target_source: V3PlanExecutionTargetSource,
     failure_session_scope: V3ProviderFailureSessionScope,
     provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<V3ActiveKeySelectionState>>,
     request_local_excluded_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
@@ -121,6 +122,7 @@ impl PlanExecutionOperator {
         target_source: V3PlanExecutionTargetSource,
         failure_session_scope: V3ProviderFailureSessionScope,
         provider_health: V3ProviderFailureRuntimeHealth,
+        active_keys: Option<Arc<V3ActiveKeySelectionState>>,
         request_local_excluded_candidates: BTreeSet<String>,
         now_ms: u64,
         deterministic_sample: u64,
@@ -134,6 +136,7 @@ impl PlanExecutionOperator {
             target_source,
             failure_session_scope,
             provider_health,
+            active_keys,
             request_local_excluded_candidates,
             now_ms,
             deterministic_sample,
@@ -193,34 +196,86 @@ impl PlanExecutionOperator {
                 &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
                     &preferred.candidate,
                 ),
+            ) && crate::provider_failure_runtime_policy::selected_target_has_current_witness(
+                preferred,
+                &expanded,
+                self.active_keys.as_deref(),
+                &self.provider_health,
+                &self.failure_session_scope,
+                self.now_ms,
             )
         }) {
             Some(preferred) => preferred,
-            None => match select_v3_target_with_session_then_global(
-                &V3TargetInterpreter::default(),
-                expanded.clone(),
-                &self.failure_session_scope,
-                &self
-                    .provider_health
-                    .session_bound_availability(&self.failure_session_scope),
-                &self.provider_health,
-                &self.request_local_excluded_candidates,
-                self.now_ms,
-                self.deterministic_sample,
-            ) {
-                Ok(selected) => selected,
-                Err(exhaustion) => {
-                    return PlanExecutionOperatorOutput::Exhausted {
-                        expanded,
-                        exhaustion,
-                        source: None,
-                        request_local_excluded_candidates: self
-                            .request_local_excluded_candidates
-                            .clone(),
+            None => {
+                let excluded_active = self.active_keys.as_ref().map(|_| {
+                    expanded
+                        .candidates
+                        .iter()
+                        .filter(|candidate| {
+                            self.request_local_excluded_candidates.contains(
+                                &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate),
+                            )
+                        })
+                        .map(|candidate| candidate.active_key_identity())
+                        .collect()
+                });
+                let active_context = match (self.active_keys.as_deref(), excluded_active.as_ref()) {
+                    (Some(state), Some(excluded)) => Some(V3ActiveKeySelectionContext {
+                        listener_id: self.failure_session_scope.server_id(),
+                        session_id: self
+                            .failure_session_scope
+                            .is_client_session()
+                            .then_some(self.failure_session_scope.session_id()),
+                        state,
+                        excluded,
+                    }),
+                    _ => None,
+                };
+                match select_v3_target_with_session_then_global(
+                    &V3TargetInterpreter::default(),
+                    expanded.clone(),
+                    &self.failure_session_scope,
+                    &self
+                        .provider_health
+                        .session_bound_availability(&self.failure_session_scope),
+                    &self.provider_health,
+                    &self.request_local_excluded_candidates,
+                    self.now_ms,
+                    self.deterministic_sample,
+                    active_context.as_ref(),
+                ) {
+                    Ok(selected) => selected,
+                    Err(exhaustion) => {
+                        return PlanExecutionOperatorOutput::Exhausted {
+                            expanded,
+                            exhaustion,
+                            source: None,
+                            request_local_excluded_candidates: self
+                                .request_local_excluded_candidates
+                                .clone(),
+                        }
                     }
                 }
-            },
+            }
         };
+        if !crate::provider_failure_runtime_policy::selected_target_has_current_witness(
+            &selected,
+            &expanded,
+            self.active_keys.as_deref(),
+            &self.provider_health,
+            &self.failure_session_scope,
+            self.now_ms,
+        ) {
+            return PlanExecutionOperatorOutput::Exhausted {
+                exhaustion: V3TargetExhaustion {
+                    route: Box::new(expanded.route.clone()),
+                    attempted_candidates: selected.unavailable_candidates,
+                },
+                expanded,
+                source: None,
+                request_local_excluded_candidates: self.request_local_excluded_candidates.clone(),
+            };
+        }
         let decision = match self.decide_execution_mode(selected) {
             Ok(decision) => decision,
             Err(Ok(source)) => return PlanExecutionOperatorOutput::Failed(source),
@@ -295,6 +350,62 @@ pub(crate) fn run_v3_plan_execution_operator(
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
+    run_v3_plan_execution_operator_with_selection_state(
+        target_resolved_request,
+        manifest,
+        target_source,
+        failure_session_scope,
+        provider_health,
+        None,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        preferred_selected,
+        mode_policy,
+    )
+}
+
+pub(crate) fn run_v3_plan_execution_operator_with_active_keys(
+    target_resolved_request: Value,
+    manifest: V3Config05ManifestPublished,
+    target_source: V3PlanExecutionTargetSource,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<V3ActiveKeySelectionState>>,
+    request_local_excluded_candidates: BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    mode_policy: V3PlanExecutionModePolicy,
+) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
+    run_v3_plan_execution_operator_with_selection_state(
+        target_resolved_request,
+        manifest,
+        target_source,
+        failure_session_scope,
+        provider_health,
+        active_keys,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        preferred_selected,
+        mode_policy,
+    )
+}
+
+fn run_v3_plan_execution_operator_with_selection_state(
+    target_resolved_request: Value,
+    manifest: V3Config05ManifestPublished,
+    target_source: V3PlanExecutionTargetSource,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<V3ActiveKeySelectionState>>,
+    request_local_excluded_candidates: BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    mode_policy: V3PlanExecutionModePolicy,
+) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = PlanExecutionOperator::new(
         V3PlanExecutionPhase::AdmitAtExecution,
@@ -302,6 +413,7 @@ pub(crate) fn run_v3_plan_execution_operator(
         target_source,
         failure_session_scope,
         provider_health,
+        active_keys,
         request_local_excluded_candidates,
         now_ms,
         deterministic_sample,
@@ -399,6 +511,32 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
     deterministic_sample: u64,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> Result<V3PlanExecutionPreplan, V3PlanExecutionStop> {
+    run_v3_plan_execution_preplan_operator_with_active_keys(
+        target_resolved_request,
+        manifest,
+        target_source,
+        failure_session_scope,
+        provider_health,
+        None,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        mode_policy,
+    )
+}
+
+pub(crate) fn run_v3_plan_execution_preplan_operator_with_active_keys(
+    target_resolved_request: Value,
+    manifest: V3Config05ManifestPublished,
+    target_source: V3PlanExecutionTargetSource,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<V3ActiveKeySelectionState>>,
+    request_local_excluded_candidates: BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    mode_policy: V3PlanExecutionModePolicy,
+) -> Result<V3PlanExecutionPreplan, V3PlanExecutionStop> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = PlanExecutionOperator::new(
         V3PlanExecutionPhase::PreplanWithoutAdmission,
@@ -406,6 +544,7 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         target_source,
         failure_session_scope,
         provider_health,
+        active_keys,
         request_local_excluded_candidates,
         now_ms,
         deterministic_sample,
@@ -546,14 +685,56 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
             + 'a,
     >,
 > {
+    run_v3_plan_execution_operator_with_probes_active_keys(
+        _attempt_budget,
+        target_resolved_request,
+        manifest,
+        target_source,
+        failure_session_scope,
+        provider_health,
+        None,
+        request_local_excluded_candidates,
+        request_local_busy_candidates,
+        now_ms,
+        deterministic_sample,
+        _allow_exhaustion_rescue_probe,
+        preferred_selected,
+        mode_policy,
+    )
+}
+
+pub(crate) fn run_v3_plan_execution_operator_with_probes_active_keys<'a>(
+    _attempt_budget: crate::execution_control::V3AttemptBudget,
+    target_resolved_request: Value,
+    manifest: &'a V3Config05ManifestPublished,
+    target_source: V3PlanExecutionTargetSource,
+    failure_session_scope: &'a V3ProviderFailureSessionScope,
+    provider_health: &'a V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<V3ActiveKeySelectionState>>,
+    request_local_excluded_candidates: &'a BTreeSet<String>,
+    request_local_busy_candidates: &'a BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    _allow_exhaustion_rescue_probe: bool,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    mode_policy: V3PlanExecutionModePolicy,
+) -> std::pin::Pin<
+    Box<
+        impl std::future::Future<
+                Output = Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop>,
+            > + Send
+            + 'a,
+    >,
+> {
     Box::pin(async move {
         let _ = request_local_busy_candidates;
-        let outcome = run_v3_plan_execution_operator(
+        let outcome = run_v3_plan_execution_operator_with_active_keys(
             target_resolved_request,
             manifest.clone(),
             target_source,
             failure_session_scope.clone(),
             provider_health.clone(),
+            active_keys,
             request_local_excluded_candidates.clone(),
             now_ms,
             deterministic_sample,
@@ -1079,6 +1260,7 @@ targets = [
                 &BTreeSet::new(),
                 now_ms,
                 sample,
+                None,
             )
             .expect("selection")
         };
@@ -1135,6 +1317,7 @@ targets = [
             V3PlanExecutionTargetSource::Expanded(expanded.clone()),
             scope.clone(),
             health.clone(),
+            None,
             BTreeSet::new(),
             now_ms,
             0,

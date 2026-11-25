@@ -101,6 +101,9 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     pub image_history: Option<crate::V3ImageHistoryView>,
     pub request_local_busy_candidates: BTreeSet<String>,
+    /// Listener-owned selection control. This is separate from Provider health
+    /// and is never serialized with request or response payloads.
+    pub active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -377,6 +380,8 @@ impl V3ProviderFailureDirective {
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
+    pub(crate) failure_custody:
+        Option<&'state mut super::relay_runtime_shared::V3RelayFailureCustody>,
     pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
@@ -386,6 +391,9 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
     pub(crate) selected_observability: &'state V3RuntimeObservability,
     pub(crate) trace: &'state mut Vec<&'static str>,
+    pub(crate) active_keys: Option<&'state routecodex_v3_target::V3ActiveKeySelectionState>,
+    pub(crate) active_episode: Option<&'state mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    pub(crate) active_attempt_dispatched: bool,
 }
 
 impl V3RuntimeStreamObservation {

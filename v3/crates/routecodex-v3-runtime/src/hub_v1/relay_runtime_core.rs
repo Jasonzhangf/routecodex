@@ -346,6 +346,7 @@ pub(crate) struct V3RelayChatProcessRound {
 /// 因此连续续杯额度不会在轮间被重置。骨架只写 `round`，调用方只读它并决定是否
 /// 发起下一次执行。
 pub(crate) struct V3RelayRefillCarrier {
+    pub(crate) active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
     pub(crate) request_execution_control: crate::nodes::V3RequestExecutionControl,
     /// 前几轮已完成的业务 output 项，按交付顺序存放。
     pub(crate) accumulated_items: Vec<Value>,
@@ -544,6 +545,7 @@ where
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3RelayCoreError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
+    let active_keys = refill.active_keys.clone();
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
     let (
@@ -640,13 +642,14 @@ where
             request_execution_control
                 .attempt_budget()
                 .residence_deadline(),
-            run_v3_plan_execution_operator_with_probes(
+            crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
                 request_execution_control.attempt_budget(),
                 target_resolved_request,
                 manifest,
                 target_source,
                 &failure_session_scope,
                 &provider_health,
+                active_keys.clone(),
                 &failed_candidates,
                 &request_local_busy_candidates,
                 v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
@@ -713,6 +716,29 @@ where
     trace.push("V3HubReqExecution05Planned");
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
+    let mut failure_custody = super::relay_runtime_shared::V3RelayFailureCustody::default();
+    let mut active_episode = None::<routecodex_v3_target::V3ActiveKeyEpisode>;
+    let mut active_attempt_dispatched = false;
+    macro_rules! active_failure {
+        ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr $(,)?) => {
+            active_failure!($context, $selected, $failure, $state, $retry, $events, None)
+        };
+        ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr, $code:expr $(,)?) => {
+            super::relay_runtime_shared::handle_provider_failure_with_response_code_and_active_keys(
+                $context,
+                $selected,
+                $failure,
+                $state,
+                $retry,
+                $events,
+                $code,
+                active_keys.as_deref(),
+                active_episode.as_mut(),
+                active_attempt_dispatched,
+                Some(&mut failure_custody),
+            )
+        };
+    }
     let attempt_budget = request_execution_control.attempt_budget();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
@@ -723,7 +749,6 @@ where
         deterministic_sample,
     };
     loop {
-        last_external_http = None;
         let preferred_selected = retry_selected.take();
         let selected = if let Some(selected) = initial_admitted.take() {
             selected
@@ -731,13 +756,14 @@ where
             let target_resolution =
                 crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
-                    run_v3_plan_execution_operator_with_probes(
+                    crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
                         attempt_budget.clone(),
                         (*req05.previous.previous.previous.payload.0).clone(),
                         manifest,
                         V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
                         &failure_session_scope,
                         &provider_health,
+                        active_keys.clone(),
                         &failed_candidates,
                         &request_local_busy_candidates,
                         v3_relay_provider_policy_now_epoch_ms()
@@ -787,11 +813,11 @@ where
                         "selected_target_exhausted",
                         format!("selected target exhausted after {attempted_candidates:?}"),
                     );
+                    let (_, source, witness) =
+                        failure_custody.into_exhaustion(source, last_external_http.take());
                     return Ok(C::assemble_failure_output(
                         super::relay_runtime_shared::terminalize_provider_failure_with_source(
-                            failure,
-                            source,
-                            last_external_http.clone(),
+                            failure, source, witness,
                         ),
                         trace,
                         std::mem::take(failure_events),
@@ -799,6 +825,15 @@ where
                 }
             }
         };
+        if active_episode.as_ref().map(|episode| &episode.selection)
+            != selected.active_selection.as_ref()
+        {
+            active_episode = selected
+                .active_selection
+                .clone()
+                .map(routecodex_v3_target::V3ActiveKeyEpisode::new);
+        }
+        active_attempt_dispatched = false;
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
@@ -816,7 +851,7 @@ where
         let provider_wire_protocol = match C::wire_protocol(&selected.candidate) {
             Ok(protocol) => protocol,
             Err(error) => {
-                let terminal_failure = handle_provider_failure(
+                let terminal_failure = active_failure!(
                     &failure_context,
                     selected,
                     C::request_failure_builder(
@@ -855,7 +890,7 @@ where
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
-                let terminal_failure = handle_provider_failure(
+                let terminal_failure = active_failure!(
                     &failure_context,
                     selected,
                     C::request_failure_builder($stage, $kind, $error),
@@ -976,6 +1011,32 @@ where
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
+        if !crate::provider_failure_runtime_policy::selected_target_has_current_witness(
+            &selected,
+            &retained_expanded,
+            active_keys.as_deref(),
+            &provider_health,
+            &failure_session_scope,
+            v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+        ) {
+            failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+            retry_selected = None;
+            continue;
+        }
+        if let (Some(keys), Some(episode)) = (active_keys.as_deref(), active_episode.as_mut()) {
+            if !crate::provider_failure_runtime_policy::active_key_selection_is_dispatchable(
+                &episode.selection,
+                &selected.candidate,
+                keys,
+                &provider_health,
+                &failure_session_scope,
+                v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+            ) || episode.begin_attempt().is_none()
+            {
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                continue;
+            }
+        }
         let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3RelayCoreError::Target(format!(
                 "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
@@ -987,6 +1048,9 @@ where
         let attempt_timeout =
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
         let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;
+        last_external_http = None;
+        failure_custody = super::relay_runtime_shared::V3RelayFailureCustody::default();
+        active_attempt_dispatched = true;
         let provider_raw =
             match tokio::time::timeout_at(attempt_deadline, transport.send(transport_request))
                 .await
@@ -1028,7 +1092,7 @@ where
                         ),
                     );
                     let _ = runtime_timing.finish_external();
-                    if let Some(failure) = handle_provider_failure(
+                    if let Some(failure) = active_failure!(
                         &failure_context,
                         selected,
                         failure,
@@ -1067,7 +1131,7 @@ where
                     let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
                     failure.failed_attempt_evidence = failed_attempt_evidence;
                     let _ = runtime_timing.finish_external();
-                    if let Some(failure) = handle_provider_failure(
+                    if let Some(failure) = active_failure!(
                         &failure_context,
                         selected,
                         failure,
@@ -1116,7 +1180,7 @@ where
                             &selected_target_provider_id,
                         );
                         failure.provider_status = Some(provider_status);
-                        let terminal_failure = handle_provider_failure(
+                        let terminal_failure = active_failure!(
                             &failure_context,
                             selected,
                             failure.clone(),
@@ -1196,7 +1260,7 @@ where
                             )
                         };
                         failure.provider_status = Some(provider_status);
-                        if let Some(failure) = handle_provider_failure_with_response_code(
+                        if let Some(failure) = active_failure!(
                             &failure_context,
                             selected,
                             failure,
@@ -1224,6 +1288,12 @@ where
                 };
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
+                if let (Some(keys), Some(episode)) =
+                    (active_keys.as_deref(), active_episode.as_mut())
+                {
+                    keys.accepted_success(episode)
+                        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+                }
                 provider_health
                     .record_provider_success_in_failure_scope_for_interface(
                         &attempt_success_receipt,
@@ -1327,7 +1397,7 @@ where
                         let mut failure =
                             provider_runtime_failure(error, &selected_target_provider_id);
                         failure.provider_status = Some(provider_status);
-                        let terminal_failure = handle_provider_failure(
+                        let terminal_failure = active_failure!(
                             &failure_context,
                             selected,
                             failure.clone(),
@@ -1444,7 +1514,7 @@ where
                         Ok(projected) => projected,
                         Err((mut failure, response_processing_code)) => {
                             failure.provider_status = Some(provider_status);
-                            if let Some(failure) = handle_provider_failure_with_response_code(
+                            if let Some(failure) = active_failure!(
                                 &failure_context,
                                 selected,
                                 failure,
@@ -1472,6 +1542,12 @@ where
                     };
                     let receipt =
                         crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
+                    if let (Some(keys), Some(episode)) =
+                        (active_keys.as_deref(), active_episode.as_mut())
+                    {
+                        keys.accepted_success(episode)
+                            .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+                    }
                     provider_health
                         .record_provider_success_in_failure_scope_for_interface(
                             &receipt,
@@ -1543,7 +1619,7 @@ where
                             &selected_target_provider_id,
                         );
                         failure.provider_status = Some(provider_status);
-                        if let Some(failure) = handle_provider_failure(
+                        if let Some(failure) = active_failure!(
                             &failure_context,
                             selected,
                             failure,
@@ -1794,7 +1870,7 @@ where
                         ),
                     };
                     failure.provider_status = Some(provider_status);
-                    let terminal_failure = handle_provider_failure_with_response_code(
+                    let terminal_failure = active_failure!(
                         &failure_context,
                         selected,
                         failure.clone(),
@@ -1838,6 +1914,12 @@ where
                 };
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed_sse);
+                if let (Some(keys), Some(episode)) =
+                    (active_keys.as_deref(), active_episode.as_mut())
+                {
+                    keys.accepted_success(episode)
+                        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+                }
                 provider_health
                     .record_provider_success_in_failure_scope_for_interface(
                         &attempt_success_receipt,
@@ -1909,6 +1991,7 @@ pub(crate) async fn execute_v3_relay_runtime_with_chat_process_refill<C, T>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<
     (C::Output, Vec<V3RuntimeProviderFailureObservation>),
     (V3RelayCoreError, Vec<V3RuntimeProviderFailureObservation>),
@@ -1935,6 +2018,10 @@ where
         .map(|handoff| std::mem::take(&mut handoff.provider_failure_events))
         .unwrap_or_default();
     let mut carrier = V3RelayRefillCarrier {
+        active_keys: initial_handoff
+            .as_ref()
+            .and_then(|handoff| handoff.active_keys.clone())
+            .or(active_keys),
         request_execution_control,
         accumulated_items: Vec::new(),
         accumulated_usage: None,

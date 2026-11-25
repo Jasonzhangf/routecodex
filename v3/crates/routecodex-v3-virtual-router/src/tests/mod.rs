@@ -67,6 +67,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
                         "default".into(),
                         V3RoutePoolManifest {
                             id: "default".into(),
+                            active_keys: None,
                             selection: V3SelectionPolicy {
                                 strategy: strategy.clone(),
                             },
@@ -80,6 +81,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
                         "tools".into(),
                         V3RoutePoolManifest {
                             id: "tools".into(),
+                            active_keys: None,
                             selection: V3SelectionPolicy { strategy },
                             route_object: None,
                             match_rule: Some(V3RoutePoolMatchManifest {
@@ -197,6 +199,7 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
         "thinking".into(),
         V3RoutePoolManifest {
             id: "thinking".into(),
+            active_keys: None,
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
@@ -358,6 +361,7 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
         "compact".into(),
         V3RoutePoolManifest {
             id: "compact".into(),
+            active_keys: None,
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
@@ -678,6 +682,7 @@ fn add_match_pool(
         pool_id.into(),
         V3RoutePoolManifest {
             id: pool_id.into(),
+            active_keys: None,
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
@@ -709,6 +714,7 @@ fn add_model_match_pool(
         pool_id.into(),
         V3RoutePoolManifest {
             id: pool_id.into(),
+            active_keys: None,
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },

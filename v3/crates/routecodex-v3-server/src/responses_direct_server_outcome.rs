@@ -319,6 +319,7 @@ async fn execute_responses_direct_server_outcome_inner(
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
+                .with_active_keys(state.active_keys.clone())
                 .with_client_identity_headers(client_identity_headers.clone())
                 .with_provider_failure_event_sink(
                     provider_failure_event_sink
@@ -345,6 +346,7 @@ async fn execute_responses_direct_server_outcome_inner(
         None => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
                 V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
+                .with_active_keys(state.active_keys.clone())
                 .with_image_history(state.image_history.for_request(&provider_failure_session_scope))
                 .with_client_identity_headers(client_identity_headers.clone())
                 .with_provider_failure_event_sink(

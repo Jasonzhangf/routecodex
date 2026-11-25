@@ -354,6 +354,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/active_key_control.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   resource_bindings:
   - v3.config.authoring_parsed
@@ -363,6 +364,7 @@ features:
   - v3.config.hub_pipeline_declarations
   - v3.config.route_pool_match_declarations
   - v3.server.listener_set
+  - v3.server.active_key_control_endpoint_record
   - v3.server.validated_http_input
   - v3.error.chain
   entry_symbols:
@@ -371,6 +373,9 @@ features:
   - compile_pool_match
   - compile_provider_health
   - spawn_v3_server_aggregate
+  - start_active_key_control_companion
+  - active_keys_control_router
+  - ActiveKeyControlOwner::close
   - read_json_payload
   - project_v3_http_boundary_error_via_sdk
   allowed_paths:
@@ -645,6 +650,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-debug/src/lib.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/active_keys.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-runtime/src/foundation.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -723,6 +729,10 @@ features:
   entry_symbols:
   - execute_v3_foundation_pending_runtime
   - is_v3_recoverable_response_processing_source
+  - classify_v3_active_key_failure
+  - normalize_v3_active_key_failure_source
+  - active_key_selection_is_dispatchable
+  - plan_v3_active_key_recovery
   - V3ResponsesDirectRuntimeSharedState::defer_debug_node_publication_to_server
   - prepend_refill_observations
   - V3ResponsesDirectServerOutcome::prepend_observations
@@ -1064,6 +1074,14 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-target/src/sticky.rs
+  - v3/crates/routecodex-v3-target/src/active_keys.rs
+  - v3/crates/routecodex-v3-target/tests/active_key_store.rs
+  - v3/crates/routecodex-v3-target/tests/active_pool_declarations.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_selection_public.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_selection_public/review_regressions.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_selection_public/business_recovery.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_control_address.rs
+  - v3/crates/routecodex-v3-runtime/tests/active_key_retry_witness.rs
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/src/provider_priority_schedule.rs
   - v3/crates/routecodex-v3-config/src/user_config.rs
@@ -1087,6 +1105,9 @@ features:
   - v3.route.opaque_target
   - v3.target.candidate_set
   - v3.target.concrete_provider
+  - v3.target.active_candidate_set
+  - v3.target.active_key_state
+  - v3.target.active_key_attempt
   - v3.provider.availability_projection
   - v3.error.action_plan
   mainline_bindings:
@@ -1110,6 +1131,15 @@ features:
   - V3TargetInterpreter::select_available
   - select_available_with_health_sticky
   - V3StickySelectionState::select
+  - V3ActiveKeySelectionState::configure
+  - V3ActiveKeySelectionState::choose
+  - V3ActiveKeySelectionState::accepted_success
+  - V3ActiveKeySelectionState::record_delivery_failure
+  - V3ActiveKeySelectionState::close_failure
+  - V3ActiveKeySelectionState::release
+  - V3TargetInterpreter::select_available_with_health_active
+  - V3TargetInterpreter::active_key_pool_declarations
+  - V3TargetInterpreter::observe_eligible_occurrences
   - V3StickySelectionScope::new
   - V3TargetInterpreter::route_tier_index
   - V3TargetInterpreter::provider_priority_schedule_priority
@@ -1157,6 +1187,8 @@ features:
   - restart
   required_gates:
   - npm run test:v3-p5-router-target
+  - npm run test:v3-active-key-selection
+  - npm run verify:webui-smoke
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates
     -- --nocapture
   - npm run test:v3-p5-server-blackbox
@@ -5954,7 +5986,9 @@ features:
   - v3.admin.provider_candidate
   - v3.admin.provider_probe_result
   - v3.admin.provider_patrol_plan
+  - v3.server.active_key_control_endpoint_record
   entry_symbols:
+  - forward_selection_control
   - require_admin
   - AdminToken::load_or_create
   - admin_session

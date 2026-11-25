@@ -1445,6 +1445,7 @@ dependencies = [
  "routecodex-v3-provider-responses",
  "routecodex-v3-runtime",
  "routecodex-v3-sse",
+ "routecodex-v3-target",
  "serde",
  "serde_json",
  "tokio",
@@ -1466,6 +1467,8 @@ dependencies = [
  "routecodex-v3-config",
  "routecodex-v3-provider-responses",
  "routecodex-v3-virtual-router",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

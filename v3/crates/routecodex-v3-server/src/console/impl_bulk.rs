@@ -1867,6 +1867,7 @@ mod direct_sse_observability_none_tests {
         });
         let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
         Arc::new(V3ListenerState {
+            active_keys: None,
             server,
             manifest_version: manifest.version,
             manifest: Arc::clone(&manifest),

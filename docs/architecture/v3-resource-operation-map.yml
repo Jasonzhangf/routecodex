@@ -491,6 +491,71 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.target.active_key_policy
+    resource_kind: control
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-config
+    owner_node: V3RoutePoolManifest
+    identity: [routingGroupId, poolId, members, retries, onFailure, selectionStrategy]
+    semantic_contract: Optional compiled active membership. It references declared provider aliases and never contains credentials or payload data. Absence preserves legacy selection.
+    allowed_writers: [publish_v3_config_05_manifest_from_v3_config_04]
+    allowed_readers: [routecodex-v3-target, V3ActiveKeySelectionState::snapshot, V3ActiveKeySelectionState::release]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_candidate_set
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3Target09CandidateSetExpanded
+    identity: [requestId, routingGroupId, poolId, tier, activeMembers, declaredOccurrences]
+    semantic_contract: Each declaration occurrence retains its supplying pool and tier. Only that occurrence's active membership intersects candidates and request restrictions. Full provider/interface/model/key identity remains the request-local failure and health key. Read-only recovery observation uses the same eligibility without consuming selection turns.
+    allowed_writers: [V3TargetInterpreter::expand_candidates]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health_active]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-runtime, routecodex-v3-server, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_state
+    resource_kind: control
+    lifecycle: v3.active_key_selection_control
+    owner_crate: routecodex-v3-target
+    owner_node: V3ActiveKeySelectionState
+    identity: [listenerIdentity, routingGroupId, poolId, queueOrder, heldMembers, sessionBindings, memberGeneration, consecutiveDeliveryFailures]
+    semantic_contract: Target-owned selection state contains no payload, credential, raw error, retry counter, or provider health truth. Holds persist; session bindings and cursors are process-local.
+    allowed_writers: [V3ActiveKeySelectionState, V3ActiveKeySelectionState::persist, V3ActiveKeySelectionState::release]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health_active, V3ActiveKeySelectionState, V3ActiveKeySelectionState::snapshot, V3ActiveKeySelectionState::release, V3ActiveKeySelectionState::persist]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_attempt
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3ActiveKeyEpisode
+    identity: [memberGeneration, providerId, interfaceId, modelId, authAlias, actualDispatches, completedDispatch, retryBudget]
+    semantic_contract: Typed request-local witness for selected active identity and generation. Runtime begins each actual dispatch and reports each outcome once. Target records shared consecutive failures; the fourth invalidates matching affinity and holds or tails the member. Early episode closure does not reset the shared streak.
+    allowed_writers: [V3ActiveKeyEpisode::new, V3ActiveKeyEpisode::begin_attempt, V3ActiveKeyEpisode::cancel, V3ActiveKeySelectionState::record_delivery_failure, V3ActiveKeySelectionState::accepted_success, V3ActiveKeySelectionState::close_failure]
+    allowed_readers: [routecodex-v3-runtime]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-provider-responses, request.normal_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.active_key_control_endpoint_record
+    resource_kind: control
+    lifecycle: v3.active_key_selection_control
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerAggregateHandle
+    identity: [canonicalConfig, serverId, actualBusinessSocket, loopbackControlSocket, ownerPid, ownerEndpoint]
+    semantic_contract: Server publishes only selected-listener control transport and ownership. Admin resolves the local record and connects only to loopback. The record contains no queue, health, credentials or business truth. Companion resources remain separate from business listener counts and close with their owning aggregate.
+    allowed_writers: [routecodex-v3-server]
+    allowed_readers: [routecodex-v3-admin, routecodex-v3-server]
+    forbidden_writers: [routecodex-v3-target, routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.target.concrete_provider
     resource_kind: side_channel
     lifecycle: v3.responses_direct.mainline

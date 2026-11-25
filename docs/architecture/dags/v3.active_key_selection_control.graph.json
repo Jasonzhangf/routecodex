@@ -1,0 +1,249 @@
+{
+  "id": "v3.active_key_selection_control",
+  "version": "1",
+  "inputs": [
+    {
+      "id": "Admin 活动密钥选择控制命令",
+      "schema": "Object",
+      "schema_ref": "v3.admin.active_key_control_command"
+    }
+  ],
+  "output_contracts": [
+    {
+      "id": "活动密钥选择控制结果",
+      "schema": "Object",
+      "schema_ref": "v3.target.active_key_control_result"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "解析 Server 所有的本地控制地址",
+      "operator": "routecodex.v3.admin.ActiveKeyRoutes::resolve_listener_control_address",
+      "operator_version": "1",
+      "inputs": ["Admin 活动密钥选择控制命令"],
+      "output": {
+        "id": "已解析的监听器控制地址",
+        "schema": "Object",
+        "schema_ref": "v3.server.active_key_control_address"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.server.active_key_control_endpoint_record"],
+        "writes": []
+      }
+    },
+    {
+      "id": "连接监听器活动密钥控制路由",
+      "operator": "routecodex.v3.admin.ActiveKeyRoutes::forward_to_listener_control",
+      "operator_version": "1",
+      "inputs": ["已解析的监听器控制地址"],
+      "output": {
+        "id": "监听器本地控制命令",
+        "schema": "Object",
+        "schema_ref": "v3.server.active_key_local_control_command"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    },
+    {
+      "id": "授权 loopback 并校验监听器路由池范围",
+      "operator": "routecodex.v3.server.ActiveKeyControl::authorize_and_validate_scope",
+      "operator_version": "1",
+      "inputs": ["监听器本地控制命令"],
+      "output": {
+        "id": "已授权的活动密钥控制命令",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_scope_validated"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.server.listener_control_scope", "v3.server.loopback_peer"],
+        "writes": []
+      }
+    },
+    {
+      "id": "校验监听器与路由池范围",
+      "operator": "routecodex.v3.target.V3ActiveKeySelectionState::snapshot",
+      "operator_version": "1",
+      "inputs": ["已授权的活动密钥控制命令"],
+      "output": {
+        "id": "已校验选择控制命令",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_scope_validated"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.active_key_policy"],
+        "writes": []
+      }
+    },
+    {
+      "id": "读取活动密钥选择状态",
+      "operator": "routecodex.v3.target.V3ActiveKeySelectionState::snapshot",
+      "operator_version": "1",
+      "inputs": ["已校验选择控制命令"],
+      "output": {
+        "id": "活动密钥选择控制读取结果",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_state_snapshot"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.active_key_state"],
+        "writes": []
+      }
+    },
+    {
+      "id": "释放保持成员或在尾部排队",
+      "operator": "routecodex.v3.target.V3ActiveKeySelectionState::release",
+      "operator_version": "1",
+      "inputs": ["活动密钥选择控制读取结果"],
+      "output": {
+        "id": "活动密钥控制处理结果",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_state_updated"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.active_key_state", "v3.target.active_key_policy"],
+        "writes": ["v3.target.active_key_state"]
+      }
+    },
+    {
+      "id": "判断释放是否改变持久 hold",
+      "operator": "routecodex.v3.server.ActiveKeyControl::select_persistence_path",
+      "operator_version": "1",
+      "inputs": ["活动密钥控制处理结果"],
+      "output": {
+        "id": "活动密钥释放持久化分流结果",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_control_persistence_branch"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.active_key_state"],
+        "writes": []
+      }
+    },
+    {
+      "id": "持久化保持成员集合",
+      "operator": "routecodex.v3.target.V3ActiveKeySelectionState::persist",
+      "operator_version": "1",
+      "inputs": ["活动密钥释放持久化分流结果"],
+      "output": {
+        "id": "活动密钥持久化结果",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_persist_result"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.active_key_state"],
+        "writes": ["v3.target.active_key_state"]
+      }
+    },
+    {
+      "id": "返回活动密钥控制结果",
+      "operator": "routecodex.v3.target.V3ActiveKeySelectionState::snapshot",
+      "operator_version": "1",
+      "inputs": ["活动密钥选择控制读取结果", "活动密钥控制处理结果", "活动密钥持久化结果", "活动密钥释放持久化分流结果"],
+      "output": {
+        "id": "活动密钥选择控制结果",
+        "schema": "Object",
+        "schema_ref": "v3.target.active_key_control_result"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.active_key_state"],
+        "writes": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "解析 Server 所有的本地控制地址",
+      "to": "连接监听器活动密钥控制路由",
+      "arc_id": "已解析的监听器控制地址"
+    },
+    {
+      "from": "连接监听器活动密钥控制路由",
+      "to": "授权 loopback 并校验监听器路由池范围",
+      "arc_id": "监听器本地控制命令"
+    },
+    {
+      "from": "授权 loopback 并校验监听器路由池范围",
+      "to": "校验监听器与路由池范围",
+      "arc_id": "已授权的活动密钥控制命令"
+    },
+    {
+      "from": "校验监听器与路由池范围",
+      "to": "读取活动密钥选择状态",
+      "arc_id": "已校验选择控制命令"
+    },
+    {
+      "from": "读取活动密钥选择状态",
+      "to": "返回活动密钥控制结果",
+      "arc_id": "活动密钥选择控制读取结果"
+    },
+    {
+      "from": "读取活动密钥选择状态",
+      "to": "释放保持成员或在尾部排队",
+      "arc_id": "活动密钥选择控制读取结果"
+    },
+    {
+      "from": "持久化保持成员集合",
+      "to": "返回活动密钥控制结果",
+      "arc_id": "活动密钥持久化结果"
+    },
+    {
+      "from": "释放保持成员或在尾部排队",
+      "to": "返回活动密钥控制结果",
+      "arc_id": "活动密钥控制处理结果"
+    },
+    {
+      "from": "释放保持成员或在尾部排队",
+      "to": "判断释放是否改变持久 hold",
+      "arc_id": "活动密钥控制处理结果"
+    },
+    {
+      "from": "判断释放是否改变持久 hold",
+      "to": "持久化保持成员集合",
+      "arc_id": "活动密钥释放持久化分流结果"
+    },
+    {
+      "from": "判断释放是否改变持久 hold",
+      "to": "返回活动密钥控制结果",
+      "arc_id": "活动密钥释放持久化分流结果"
+    }
+  ],
+  "outputs": ["活动密钥选择控制结果"],
+  "semantic_contract": {
+    "failure_scope": "监听器、路由组、路由池和完整 Provider/interface/model/key 身份共同持有连续交付失败计数，独立于当前请求的重试预算和 Provider 健康状态。",
+    "failure_transition": "每次实际派发的唯一失败结果只计数一次。第四次连续失败原子地清除该成员的所有旧 session 绑定、执行挂起或队尾迁移并更新成员代次。提前结束请求内重试不触发队列迁移。",
+    "success_transition": "当前代次已接受的业务成功清零失败计数；只有最新 session 选择的成功结果可以更新绑定。取消和发送前本地失败不计数。",
+    "release_transition": "释放挂起成员更新代次并进入队尾，不恢复旧绑定、不清除健康冷却；旧代次结果不能撤销释放。",
+    "control_transport": "Admin resolves a Server-owned endpoint record keyed by canonical config and server id, connects only to its loopback SocketAddr with redirects and proxies disabled, and sends the listener-scoped control command. The Server keeps loopback peer authorization for both business-listener controls and its optional companion, which exposes no business endpoints.",
+    "control_state": "Status is read-only. Release validates the exact listener, route group, pool and complete identity. Persist only when release changes the durable held set; return persistence errors explicitly.",
+    "control_lifecycle": "Bind a specific non-loopback listener's companion on IPv4 loopback port zero. Publish its typed address record only after serving is ready. On partial startup, shutdown, exec close or drop, stop owned tasks/sockets and remove only a record that still names this owner's endpoint. Control failure leaves business listeners serving and reports control unavailability."
+  }
+}

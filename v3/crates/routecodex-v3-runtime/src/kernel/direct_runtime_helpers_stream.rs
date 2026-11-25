@@ -2438,6 +2438,7 @@ pub(crate) fn relay_handoff_output(
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     observability_accumulator: V3RuntimeObservabilityAccumulator,
     request_execution_control: V3RequestExecutionControl,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability: None,
@@ -2460,6 +2461,7 @@ pub(crate) fn relay_handoff_output(
         node_trace: node_trace.clone(),
         error_chain: None,
         protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
+            active_keys,
             target,
             expanded,
             request_local_excluded_candidates,

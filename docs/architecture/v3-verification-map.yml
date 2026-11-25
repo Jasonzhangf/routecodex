@@ -244,6 +244,7 @@ features:
   - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
   - Omitted weights in one multi-member tier compile to equal weights.
   - A pool may declare `selection = { strategy = "sticky" }`; it parses, projects into the Manifest pool selection, and round-trips while the default priority selection stays omitted from serialized output.
+  - Optional route-pool active_keys compiles explicit provider/alias members, default retries=3 and hold disposition; an empty list stays empty and the simplified authoring round-trips the same typed policy.
   - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
   - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
   - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
@@ -251,6 +252,7 @@ features:
   - Explicit config.v3.toml remains on V3ConfigStore until the retirement phase.
   required_negative:
   - Unknown user fields, internal fields, malformed provider/model refs, empty pools or tiers, duplicate members, invalid weights, and unknown topology fail before Manifest publication.
+  - Active membership rejects unknown providers/aliases, duplicate members, unreachable pinned aliases, unsupported priority/weighted combinations, and active_queue without active_keys.
   - Runtime, Server, Virtual Router, Target, Provider, and Error crates do not read config.toml or call the user parser.
   - Parse failure never retries config.v3.toml and config.v3 failure never retries config.toml.
   - Lifecycle does not directly choose a parser or re-read config.toml through the legacy store.
@@ -1510,6 +1512,60 @@ features:
     forbidden_claim: Do not claim P5 Router/Target selection, P6 Responses Provider request, P7 relay/protocol support, real ~/.rcc mutation, or global install from P3/P4 evidence.
 - feature_id: v3.virtual_router_target_interpreter
   status: p5_source_and_live_verified
+  active_key_selection_blackbox:
+    requirement: routecodex-active-key-queue v2
+    command: npm run test:v3-active-key-selection
+    test_design: docs/design/v3-active-key-selection.md
+    test_ids:
+    - active_queue_success_retains_head_and_excludes_inactive_alias
+    - fourth_recoverable_failure_reselects_and_next_request_keeps_b
+    - third_failure_then_success_does_not_dispose_active_head
+    - decode_and_empty_response_failures_reselect_without_unchanged_retry
+    - cross_protocol_fourth_failure_and_round_robin_retry_keep_actual_turns
+    - same_protocol_generic_direct_retries_then_holds_and_releases_the_key
+    - sticky_success_feedback_covers_chat_anthropic_and_gemini_entries
+    - confirmed_quota_switches_early_and_queue_release_does_not_clear_health
+    - final_only_account_errors_count_once_each_until_fourth_failure_hold
+    - held_key_survives_fixture_reconstruction_and_release_rejoins_tail
+    - corrupt_hold_state_fails_startup_without_releasing_or_leaking_listener
+    - cancellation_does_not_count_as_a_delivery_failure_or_hold_a_key
+    - accepted_refusal_and_content_filter_reset_the_failure_streak
+    - streaming_failure_recovery_commits_only_the_accepted_keys_business_frames
+    - review_regressions::legacy_failure_enters_active_default_with_target_witness
+    - review_regressions::held_active_default_is_not_a_health_successor
+    - review_regressions::overlapping_legacy_and_active_occurrences_keep_their_own_policy
+    - review_regressions::hold_store_failure_still_recovers_to_healthy_successor
+    - review_regressions::shared_identity_uses_the_supplying_active_pools_state
+    - review_regressions::concurrent_fourth_failure_holds_once_and_independent_requests_keep_b
+    - business_recovery::due_active_head_has_one_business_trial_while_other_requests_use_b
+    - business_recovery::held_active_member_cannot_acquire_trial_and_release_keeps_health
+    - business_recovery::failed_owned_trial_defers_without_spending_active_retry_budget
+    - round_robin_uses_only_active_aliases_and_retries_do_not_consume_turns
+    - sticky_sessions_spread_then_keep_their_successful_alias
+    - sticky_failed_attempt_does_not_create_a_successful_preference
+    - sticky_tail_fourth_failure_clears_old_binding_and_allows_later_fresh_a
+    - failure_streak_accumulates_across_requests_without_retry_budget_reset
+    - nonretryable_http_failures_accumulate_without_unchanged_same_key_retries
+    - exhausted_final_complete_http_error_preserves_actual_status_and_body
+    - actual_final_truncation_never_projects_an_earlier_http_error_or_cycles
+    - invalid_model_arguments_are_success_and_client_error_history_stays_paired
+  active_key_control_blackbox:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test active_key_control_address -- --test-threads=1 --nocapture
+    test_ids:
+    - real_admin_status_and_exact_release_follow_the_selected_listener_control
+    - control_publication_failure_keeps_business_and_preserves_the_foreign_record
+    - drop_and_exec_close_the_owned_companion_and_record
+    address_coverage: IPv4 wildcard, IPv6 loopback and wildcard, and a currently assigned non-loopback IPv4 address. The companion exposes only selection controls and closes its record and sockets with its listener owner.
+  active_key_attempt_witness_blackbox:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test active_key_retry_witness -- --test-threads=1 --nocapture
+    test_ids:
+    - responses_skipped_retry_preserves_final_actual_http_witness
+    - chat_skipped_retry_preserves_final_actual_http_witness
+    - gemini_skipped_retry_preserves_final_actual_http_witness
+    - anthropic_skipped_retry_preserves_final_actual_http_witness
+    - no_transition_qualifies_second_actual_http_error
+    - later_actual_transport_never_projects_earlier_http_error
+    - later_actual_truncation_never_projects_earlier_http_error
   admission_nonblocking_blackbox:
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e37891a_admission_nonblocking -- --nocapture --test-threads=1
     test_ids:
@@ -1597,6 +1653,8 @@ features:
   - A pool may declare selection strategy sticky: Target10 then keeps one primary and one standby provider per server+routingGroup+sessionId+pool binding, keyed by providerId+authAlias+modelId. The same session keeps its primary across attempts, uses the standby only when the primary is unusable, and rolls primary/standby only on a health or cooldown exclusion, never on a request-local provider failure; recovery is lazy and never pulls the session back. A fresh session takes the least-held primary in that pool so different sessions spread instead of stacking on the heaviest member, and a single-member pool keeps an empty standby. Sticky state is process-lifetime in-memory per pool with no cross-pool association, and a request without a client control session id creates no binding and keeps the previous selection behavior. Sticky only orders candidates the unchanged health/cooldown/availability/priority rules already admitted, inside the same eligible route tier.
   required_gates:
   - npm run test:v3-p5-router-target
+  - npm run test:v3-active-key-selection
+  - npm run verify:webui-smoke
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target sticky -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture

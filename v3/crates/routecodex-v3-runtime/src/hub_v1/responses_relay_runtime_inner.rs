@@ -140,6 +140,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
 > {
     Box::pin(async move {
         chat_process_refill.clear();
+        let active_keys = initial_relay_seeds.active_keys.clone();
         let client_identity_headers = initial_relay_seeds.client_identity_headers.clone();
         let observability_accumulator = initial_relay_seeds
             .observability_accumulator
@@ -294,13 +295,14 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 request_execution_control
                     .attempt_budget()
                     .residence_deadline(),
-                run_v3_plan_execution_operator_with_probes(
+                crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
                     request_execution_control.attempt_budget(),
                     target_resolved_request,
                     manifest,
                     target_source,
                     &input.failure_session_scope,
                     &provider_health,
+                    active_keys.clone(),
                     &failed_candidates,
                     &request_local_busy_candidates,
                     v3_relay_provider_policy_now_epoch_ms()
@@ -402,6 +404,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         trace.push("V3HubReqExecution05Planned");
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
         let mut last_external_http = None;
+        let mut failure_custody = super::relay_runtime_shared::V3RelayFailureCustody::default();
+        let mut active_episode = None::<routecodex_v3_target::V3ActiveKeyEpisode>;
+        let mut active_attempt_dispatched = false;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
         let attempt_budget = request_execution_control.attempt_budget();
         let mut provider_send_attempts = attempt_budget.transport_attempts();
@@ -416,7 +421,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             deterministic_sample,
         };
         loop {
-            last_external_http = None;
             let (selected, protocol_decision) = if let Some((selected, protocol_decision)) =
                 initial_selected.take()
             {
@@ -425,13 +429,14 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 let preferred_selected = retry_selected.take();
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
-                    run_v3_plan_execution_operator_with_probes(
+                    crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
                         attempt_budget.clone(),
                     (*req05.previous.previous.previous.payload.0).clone(),
                     manifest,
                     V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
                     &input.failure_session_scope,
                     &provider_health,
+                        active_keys.clone(),
                     &failed_candidates,
                     &request_local_busy_candidates,
                     v3_relay_provider_policy_now_epoch_ms()
@@ -474,6 +479,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         source,
                         ..
                     }) => {
+                        let (_, source, witness) = failure_custody.into_exhaustion(source, last_external_http.take());
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,
@@ -503,7 +509,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
                                     failure,
                                     source,
-                                    last_external_http.clone(),
+                                    witness,
                                 ),
                                 &provider_failure_events,
                             ),
@@ -513,6 +519,15 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     }
                 }
             };
+            if active_episode.as_ref().map(|episode| &episode.selection)
+                != selected.active_selection.as_ref()
+            {
+                active_episode = selected
+                    .active_selection
+                    .clone()
+                    .map(routecodex_v3_target::V3ActiveKeyEpisode::new);
+            }
+            active_attempt_dispatched = false;
             if matches!(
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -623,6 +638,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                failure_custody: Some(&mut failure_custody),
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -631,6 +647,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
                                 last_external_http: &mut last_external_http,
+                                active_keys: active_keys.as_deref(),
+                                active_episode: active_episode.as_mut(),
+                                active_attempt_dispatched,
                             },
                         )
                         .await
@@ -721,6 +740,38 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 .map(|history| {
                     history.capture_attempt(transport_request.body(), provider_wire_protocol)
                 });
+            if !crate::provider_failure_runtime_policy::selected_target_has_current_witness(
+                &selected,
+                &retained_expanded,
+                active_keys.as_deref(),
+                &provider_health,
+                &input.failure_session_scope,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
+            ) {
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                retry_selected = None;
+                continue;
+            }
+            if let (Some(active_keys), Some(episode)) =
+                (active_keys.as_deref(), active_episode.as_mut())
+            {
+                if !crate::provider_failure_runtime_policy::active_key_selection_is_dispatchable(
+                    &episode.selection,
+                    &selected.candidate,
+                    active_keys,
+                    &provider_health,
+                    &input.failure_session_scope,
+                    v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                ) || episode.begin_attempt().is_none()
+                {
+                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                    retry_selected = None;
+                    continue;
+                }
+                active_attempt_dispatched = true;
+            }
             provider_send_attempts =
                 handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
                     |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
@@ -728,6 +779,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+            last_external_http = None;
+            failure_custody = super::relay_runtime_shared::V3RelayFailureCustody::default();
             let transport_result = match tokio::time::timeout(
                 v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
                 transport.send(transport_request),
@@ -793,6 +846,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                failure_custody: Some(&mut failure_custody),
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -801,6 +855,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
                                 last_external_http: &mut last_external_http,
+                                active_keys: active_keys.as_deref(),
+                                active_episode: active_episode.as_mut(),
+                                active_attempt_dispatched,
                             },
                         )
                         .await
@@ -837,6 +894,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                failure_custody: Some(&mut failure_custody),
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -845,6 +903,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
                                 last_external_http: &mut last_external_http,
+                                active_keys: active_keys.as_deref(),
+                                active_episode: active_episode.as_mut(),
+                                active_attempt_dispatched,
                             },
                         )
                         .await
@@ -894,6 +955,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
+                                        failure_custody: Some(&mut failure_custody),
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -903,6 +965,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
                                         last_external_http: &mut last_external_http,
+                                        active_keys: active_keys.as_deref(),
+                                        active_episode: active_episode.as_mut(),
+                                        active_attempt_dispatched,
                                     },
                                 )
                                 .await
@@ -958,6 +1023,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 selected,
                                 failure,
                                 &mut V3ResponsesRelayProviderRetryState {
+                                    failure_custody: Some(&mut failure_custody),
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
@@ -967,6 +1033,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
                                     last_external_http: &mut last_external_http,
+                                    active_keys: active_keys.as_deref(),
+                                    active_episode: active_episode.as_mut(),
+                                    active_attempt_dispatched,
                                 },
                             )
                             .await
@@ -1021,6 +1090,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         selected,
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
+                                            failure_custody: Some(&mut failure_custody),
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
@@ -1030,6 +1100,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                             selected_observability: &selected_observability,
                                             trace: &mut trace,
                                             last_external_http: &mut last_external_http,
+                                            active_keys: active_keys.as_deref(),
+                                            active_episode: active_episode.as_mut(),
+                                            active_attempt_dispatched,
                                         },
                                     )
                                     .await
@@ -1110,6 +1183,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ),
                         attempt_budget.clone(),
                     )?;
+                    if let (Some(active_keys), Some(episode)) =
+                        (active_keys.as_deref(), active_episode.as_mut())
+                    {
+                        active_keys.accepted_success(episode).map_err(|error| {
+                            V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string())
+                        })?;
+                    }
                     commit_route_policy_if_present!();
                     if disposition == V3ChatProcessRefillDisposition::RequestRefill {
                         request_execution_control
@@ -1208,6 +1288,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
+                                        failure_custody: Some(&mut failure_custody),
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -1217,6 +1298,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
                                         last_external_http: &mut last_external_http,
+                                        active_keys: active_keys.as_deref(),
+                                        active_episode: active_episode.as_mut(),
+                                        active_attempt_dispatched,
                                     },
                                 )
                                 .await
@@ -1282,6 +1366,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         selected,
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
+                                            failure_custody: Some(&mut failure_custody),
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
@@ -1291,6 +1376,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                             selected_observability: &selected_observability,
                                             trace: &mut trace,
                                             last_external_http: &mut last_external_http,
+                                            active_keys: active_keys.as_deref(),
+                                            active_episode: active_episode.as_mut(),
+                                            active_attempt_dispatched,
                                         },
                                     )
                                     .await
@@ -1395,6 +1483,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ),
                         attempt_budget.clone(),
                     )?;
+                    if let (Some(active_keys), Some(episode)) =
+                        (active_keys.as_deref(), active_episode.as_mut())
+                    {
+                        active_keys.accepted_success(episode).map_err(|error| {
+                            V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string())
+                        })?;
+                    }
                     commit_route_policy_if_present!();
                     if disposition == V3ChatProcessRefillDisposition::RequestRefill {
                         request_execution_control

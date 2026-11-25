@@ -192,6 +192,11 @@ mod tests {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["default".to_string()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "default".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: true,
             path: vec!["responses".to_string()],
         }

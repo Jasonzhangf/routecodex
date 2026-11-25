@@ -607,10 +607,12 @@ fn ordered_target_indices(
             .into_iter()
             .flatten()
             .collect(),
-        V3SelectionStrategy::Sticky => priority_tier_indices(targets, |target| target.priority)
-            .into_iter()
-            .flatten()
-            .collect(),
+        V3SelectionStrategy::Sticky | V3SelectionStrategy::ActiveQueue => {
+            priority_tier_indices(targets, |target| target.priority)
+                .into_iter()
+                .flatten()
+                .collect()
+        }
         V3SelectionStrategy::Weighted => {
             let mut state = selection_state.lock().expect("router selection state lock");
             let mut order = Vec::with_capacity(targets.len());

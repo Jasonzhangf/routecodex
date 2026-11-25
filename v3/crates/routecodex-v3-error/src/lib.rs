@@ -1617,6 +1617,11 @@ pub fn project_v3_pending_endpoint_error(
     projected
 }
 
+mod active_keys;
+pub use active_keys::{
+    classify_v3_active_key_failure, normalize_v3_active_key_failure_source,
+    plan_v3_active_key_recovery, V3ActiveKeyFailureClass, V3ActiveKeyRecoveryAction,
+};
 mod sse_disposition;
 /// Consecutive real failures required by the shared recoverable provider
 /// health policy.

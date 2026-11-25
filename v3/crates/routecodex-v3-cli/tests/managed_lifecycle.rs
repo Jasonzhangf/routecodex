@@ -7,7 +7,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Mutex, MutexGuard};
-use std::thread::sleep;
+use std::thread::{self, sleep, JoinHandle};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
@@ -1111,6 +1111,59 @@ fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
     false
 }
 
+struct CapturedChild {
+    child: Option<Child>,
+    stdout: Option<JoinHandle<Vec<u8>>>,
+    stderr: Option<JoinHandle<Vec<u8>>>,
+}
+
+impl CapturedChild {
+    fn new(mut child: Child) -> Self {
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+        Self {
+            child: Some(child),
+            stdout: Some(thread::spawn(move || {
+                let mut bytes = Vec::new();
+                stdout.read_to_end(&mut bytes).unwrap();
+                bytes
+            })),
+            stderr: Some(thread::spawn(move || {
+                let mut bytes = Vec::new();
+                stderr.read_to_end(&mut bytes).unwrap();
+                bytes
+            })),
+        }
+    }
+
+    fn finish(mut self) -> Output {
+        let status = self.child.as_mut().unwrap().wait().unwrap();
+        let stdout = self.stdout.take().unwrap().join().unwrap();
+        let stderr = self.stderr.take().unwrap().join().unwrap();
+        self.child.take();
+        Output {
+            status,
+            stdout,
+            stderr,
+        }
+    }
+}
+
+impl Drop for CapturedChild {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if let Some(stdout) = self.stdout.take() {
+            let _ = stdout.join();
+        }
+        if let Some(stderr) = self.stderr.take() {
+            let _ = stderr.join();
+        }
+    }
+}
+
 fn assert_start_stdout(output: &Output, label: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -1287,7 +1340,7 @@ fn temporary_config_foreground_start_exits_after_config_removal() {
         .env("TMPDIR", temp_config_dir.path())
         .env("TMP", temp_config_dir.path())
         .env("TEMP", temp_config_dir.path())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -1391,6 +1444,15 @@ fn run_status_json_top_level(binary: &str, state_root: &Path, config: &Path) -> 
 }
 
 fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Child {
+    spawn_top_level_start_with_stdout(binary, state_root, config, Stdio::piped())
+}
+
+fn spawn_top_level_start_with_stdout(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    stdout: Stdio,
+) -> Child {
     managed_test_command(binary, state_root)
         .args(["start", "--config"])
         .arg(config)
@@ -1401,7 +1463,7 @@ fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Chil
         )
         .env("ROUTECODEX_FORCE_LOG_COLOR", "1")
         .env("V3_MANAGED_TEST_KEY", SECRET)
-        .stdout(Stdio::piped())
+        .stdout(stdout)
         .stderr(Stdio::piped())
         .spawn()
         .unwrap()
@@ -1425,7 +1487,7 @@ fn spawn_top_level_start_with_args_and_home(
             request_counter_file(state_root),
         )
         .env("V3_MANAGED_TEST_KEY", SECRET)
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap()
@@ -2700,7 +2762,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     let config = write_config_with_debug(&root, ports, true, false);
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let start = spawn_top_level_start(binary, &state_root, &config);
+    let start = CapturedChild::new(spawn_top_level_start(binary, &state_root, &config));
     for port in ports {
         wait_port(port, true);
     }
@@ -2790,7 +2852,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     for port in ports {
         wait_port(port, false);
     }
-    let start_output = start.wait_with_output().unwrap();
+    let start_output = start.finish();
     assert!(
         start_output.status.success(),
         "{}",
@@ -3603,7 +3665,7 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
         .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -4129,7 +4191,7 @@ fn start_preserves_occupied_admin_webui_port_and_serves_business() {
             .env("V3_MANAGED_TEST_KEY", SECRET)
             .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
             .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap(),
@@ -4340,7 +4402,10 @@ fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
     );
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let mut foreground = spawn_top_level_start(binary, &state_root, &foreground_config);
+    // This case asserts lifecycle status and stderr, not startup console text.
+    // Give stdout a consumer so its pipe cannot hold startup in Starting.
+    let mut foreground =
+        spawn_top_level_start_with_stdout(binary, &state_root, &foreground_config, Stdio::null());
     wait_port(shared_port, true);
     wait_status_file_state(&single_instance_dir(&state_root), "running");
     assert_eq!(

@@ -534,6 +534,11 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
                 priority: 0,
                 weight: 1,
                 pool_ids: vec!["default".to_string()],
+                occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                    pool_id: "default".into(),
+                    tier_index: 0,
+                    plan_index: 0,
+                }],
                 default_pool_member: true,
                 path: vec!["anthropic-provider".to_string()],
             },
@@ -541,6 +546,12 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
             unavailable_candidates: Vec::new(),
             attempts: 1,
             default_floor_protected: false,
+            occurrence: routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "default".into(),
+                tier_index: 0,
+                plan_index: 0,
+            },
+            active_selection: None,
         }
     }
 

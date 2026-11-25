@@ -1,3 +1,4 @@
+mod active_key_control;
 mod aggregate_probe_lifecycle;
 mod client_sse_transport;
 mod client_transport_observation;
@@ -136,6 +137,10 @@ use routecodex_v3_sse::{
     build_v3_sse_transport_out_04_keepalive_comment, SseField, SseIncrementalDecoder,
     SseTransportLimits,
 };
+use routecodex_v3_target::{
+    V3ActiveKeyIdentity, V3ActiveKeyScope, V3ActiveKeySelectionState, V3TargetInterpreter,
+};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_request_activity_permit, V3ServerMaintenanceGuard,
@@ -180,7 +185,7 @@ where
 }
 
 #[derive(Clone)]
-struct V3ListenerState {
+pub(crate) struct V3ListenerState {
     server: V3ServerManifest,
     manifest_version: u16,
     manifest: Arc<V3Config05ManifestPublished>,
@@ -190,6 +195,7 @@ struct V3ListenerState {
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    active_keys: Option<Arc<V3ActiveKeySelectionState>>,
     image_history: routecodex_v3_runtime::V3SuccessfulImageHistory,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
@@ -257,6 +263,49 @@ pub struct V3ServerAggregateHandle {
     provider_health: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
     observability_writers: Vec<V3WebuiObservability>,
     codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
+    active_key_controls: Vec<ActiveKeyControlOwner>,
+}
+
+#[derive(Debug)]
+struct ActiveKeyControlOwner {
+    task: ActiveKeyControlTask,
+    record_path: PathBuf,
+    record: active_key_control::ActiveKeyControlEndpointRecord,
+    shutdown: Option<oneshot::Sender<()>>,
+    broker: Option<V3FrontTransportBroker>,
+}
+
+#[derive(Debug)]
+enum ActiveKeyControlTask {
+    Serving(tokio::task::JoinHandle<()>),
+    RecordOnly,
+}
+
+impl ActiveKeyControlOwner {
+    fn close(&mut self) {
+        if let ActiveKeyControlTask::Serving(task) = &self.task {
+            task.abort();
+        }
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(broker) = self.broker.take() {
+            broker.close_active_client_transports();
+        }
+        if let Err(error) = active_key_control::remove_owned_record(&self.record_path, &self.record)
+        {
+            eprintln!(
+                "V3 active-key control record cleanup failed at {}: {error}",
+                self.record_path.display()
+            );
+        }
+    }
+}
+
+impl Drop for ActiveKeyControlOwner {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 #[derive(Debug)]
@@ -368,6 +417,7 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
+        self.close_active_key_controls();
         persistence_failures.extend(codex_sample_persist_failures);
         persistence_failures
     }
@@ -383,6 +433,7 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
+        self.close_active_key_controls();
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -429,6 +480,10 @@ impl V3ServerAggregateHandle {
             }
         }
         failures
+    }
+
+    fn close_active_key_controls(&mut self) {
+        self.active_key_controls.clear();
     }
 
     pub fn restore_front_checkpoints(
@@ -485,6 +540,7 @@ impl V3ServerAggregateHandle {
 impl Drop for V3ServerAggregateHandle {
     fn drop(&mut self) {
         self.probe_lifecycle.terminate();
+        self.active_key_controls.clear();
     }
 }
 
@@ -579,9 +635,11 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     let admin_config_path_for_router = admin_config_path.clone();
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
-        let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
+        let ip: std::net::IpAddr = server
+            .bind
             .parse()
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        let addr = SocketAddr::new(ip, server.port);
         let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await?;
         let bound_addr = listener.local_addr()?;
         bound.push((server, listener, bound_addr));
@@ -595,8 +653,9 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 "admin_webui requires a canonical config path",
             ))
         } else {
-            match format!("{}:{}", admin.bind, admin.port).parse::<SocketAddr>() {
-                Ok(addr) => {
+            match admin.bind.parse::<std::net::IpAddr>() {
+                Ok(ip) => {
+                    let addr = SocketAddr::new(ip, admin.port);
                     match bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await {
                         Ok(listener) => listener
                             .local_addr()
@@ -644,10 +703,34 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
             .map(std::path::PathBuf::from)
             .map(routecodex_v3_config::default_v3_config_path)
     });
+    // Load required holds before spawning any listener task. Corrupt state
+    // must never silently release keys, and legacy listeners do not load it.
+    let mut active_key_states = std::collections::BTreeMap::new();
+    for (server, _, addr) in &bound {
+        if !manifest
+            .route_groups
+            .get(&server.routing_group)
+            .is_some_and(|group| group.pools.values().any(|pool| pool.active_keys.is_some()))
+        {
+            continue;
+        }
+        let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "active keys require a canonical config path",
+            )
+        })?;
+        let file_name = format!("active-keys-{}.json", addr.to_string().replace(':', "_"));
+        let state = V3ActiveKeySelectionState::from_file(config_path.with_file_name(file_name))
+            .map_err(std::io::Error::other)?;
+        configure_listener_active_keys(&manifest, server, &state)?;
+        active_key_states.insert(server.id.clone(), Arc::new(state));
+    }
     let mut listeners = Vec::with_capacity(bound.len());
     let mut observability_writers = Vec::with_capacity(bound.len());
     let mut pending_listener_tasks = Vec::with_capacity(bound.len());
     let mut provider_health_handles = Vec::with_capacity(bound.len());
+    let mut active_key_controls = Vec::new();
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = if server_id == "admin_webui" {
@@ -700,9 +783,11 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
             if let Some(clock) = observation_clock.as_ref() {
                 listener_health = listener_health.with_observation_clock(clock.clone());
             }
-            let listener_provider_health = Arc::new(listener_health);
+            let active_keys = active_key_states.remove(&server.id);
+            let listener_provider_health =
+                Arc::new(listener_health.with_active_keys(active_keys.clone()));
             provider_health_handles.push(Arc::clone(&listener_provider_health));
-            build_v3_listener_router(V3ListenerState {
+            let listener_state = Arc::new(V3ListenerState {
                 server,
                 manifest_version: preflight.manifest_version,
                 manifest: manifest.clone(),
@@ -712,12 +797,40 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 request_counter: Arc::clone(&request_counter),
                 codex_sample_store: codex_sample_store.clone(),
                 provider_health: listener_provider_health,
+                active_keys,
                 image_history: Default::default(),
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
                 webui_observability,
-            })
+            });
+            if listener_state.active_keys.is_some() {
+                let control_bind = active_key_control::control_bind_address(addr);
+                if let Some(control_bind) = control_bind {
+                    match publish_active_key_control_record(
+                        canonical_admin_config_path.as_deref(), &server_id, addr, control_bind,
+                    ) {
+                        Ok(owner) => active_key_controls.push(owner),
+                        Err(error) => eprintln!("V3 active-key control unavailable for {server_id} at {addr}: {error}; business listener remains active"),
+                    }
+                } else {
+                    match start_active_key_control_companion(
+                        &listener_state,
+                        active_key_control::companion_bind_address(),
+                        canonical_admin_config_path.as_deref(),
+                        &server_id,
+                        addr,
+                    )
+                    .await
+                    {
+                        Ok(owner) => active_key_controls.push(owner),
+                        Err(error) => eprintln!(
+                            "V3 active-key control unavailable for {server_id} at {addr}: {error}; business listener remains active"
+                        ),
+                    }
+                }
+            }
+            build_v3_listener_router((*listener_state).clone())
         };
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
@@ -806,6 +919,7 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
         provider_health: provider_health_handles,
         observability_writers,
         codex_sample_persist_worker,
+        active_key_controls,
     })
 }
 
@@ -860,6 +974,14 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route("/_routecodex/debug/logs", get(debug_logs))
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
         .route("/_routecodex/debug/dry-run", post(debug_dry_run))
+        .route(
+            "/_routecodex/selection/active-keys",
+            get(active_keys_status),
+        )
+        .route(
+            "/_routecodex/selection/active-keys/release",
+            post(active_keys_release),
+        )
         .route(
             "/_routecodex/diagnostics/virtual-router",
             get(virtual_router_status),
@@ -1068,6 +1190,233 @@ fn current_epoch_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn configure_listener_active_keys(
+    manifest: &V3Config05ManifestPublished,
+    server: &V3ServerManifest,
+    state: &V3ActiveKeySelectionState,
+) -> Result<(), std::io::Error> {
+    for (pool_id, pool) in V3TargetInterpreter::default()
+        .active_key_pool_declarations(manifest, &server.routing_group)
+        .map_err(std::io::Error::other)?
+    {
+        let scope = V3ActiveKeyScope {
+            listener_id: server.id.clone(),
+            routing_group_id: server.routing_group.clone(),
+            pool_id: pool_id.clone(),
+        };
+        state
+            .configure(scope, pool.policy, pool.strategy, &pool.universe)
+            .map_err(std::io::Error::other)?;
+    }
+    Ok(())
+}
+
+fn active_key_identity_json(identity: &V3ActiveKeyIdentity) -> Value {
+    json!({
+        "provider_id": identity.provider_id,
+        "interface_id": identity.interface_id,
+        "model_id": identity.model_id,
+        "auth_alias": identity.auth_alias,
+    })
+}
+
+fn active_keys_control_router(state: Arc<V3ListenerState>) -> Router {
+    Router::new()
+        .route(
+            "/_routecodex/selection/active-keys",
+            get(active_keys_status),
+        )
+        .route(
+            "/_routecodex/selection/active-keys/release",
+            post(active_keys_release),
+        )
+        .method_not_allowed_fallback(|| async { axum::http::StatusCode::METHOD_NOT_ALLOWED })
+        .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
+        .with_state(state)
+}
+
+async fn start_active_key_control_companion(
+    state: &Arc<V3ListenerState>,
+    bind: SocketAddr,
+    config_path: Option<&std::path::Path>,
+    server_id: &str,
+    business_addr: SocketAddr,
+) -> io::Result<ActiveKeyControlOwner> {
+    let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(bind)).await?;
+    let control_addr = listener.local_addr()?;
+    if !control_addr.ip().is_loopback() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "active-key control companion did not bind loopback",
+        ));
+    }
+    let config_path = config_path.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "canonical config path is unavailable",
+        )
+    })?;
+    let record_path = active_key_control::record_path(config_path, server_id)?;
+    let record = active_key_control::make_record(server_id, business_addr, control_addr);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = active_keys_control_router(Arc::clone(state));
+    let broker = V3FrontTransportBroker::default();
+    let task = tokio::spawn(run_v3_listener_accept_loop(
+        listener,
+        app,
+        shutdown_rx,
+        broker.clone(),
+        Arc::new(V3ListenerAcceptState::new()),
+    ));
+    if let Err(error) = active_key_control::publish_record(&record_path, &record) {
+        task.abort();
+        broker.close_active_client_transports();
+        return Err(error);
+    }
+    Ok(ActiveKeyControlOwner {
+        task: ActiveKeyControlTask::Serving(task),
+        record_path,
+        record,
+        shutdown: Some(shutdown_tx),
+        broker: Some(broker),
+    })
+}
+
+fn publish_active_key_control_record(
+    config_path: Option<&std::path::Path>,
+    server_id: &str,
+    business_addr: SocketAddr,
+    control_addr: SocketAddr,
+) -> io::Result<ActiveKeyControlOwner> {
+    let config_path = config_path.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "canonical config path is unavailable",
+        )
+    })?;
+    let record_path = active_key_control::record_path(config_path, server_id)?;
+    let record = active_key_control::make_record(server_id, business_addr, control_addr);
+    active_key_control::publish_record(&record_path, &record)?;
+    Ok(ActiveKeyControlOwner {
+        task: ActiveKeyControlTask::RecordOnly,
+        record_path,
+        record,
+        shutdown: None,
+        broker: None,
+    })
+}
+
+async fn active_keys_status(
+    State(state): State<Arc<V3ListenerState>>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+) -> Response<Body> {
+    if !remote.ip().is_loopback() {
+        return json_response(403, json!({"error":"loopback_only"}));
+    }
+    let Some(active_keys) = &state.active_keys else {
+        return json_response(200, json!({"pools":[]}));
+    };
+    let Some(group) = state.manifest.route_groups.get(&state.server.routing_group) else {
+        return json_response(200, json!({"pools":[]}));
+    };
+    let mut pools = Vec::new();
+    for (pool_id, pool) in &group.pools {
+        let Some(policy) = &pool.active_keys else {
+            continue;
+        };
+        let scope = V3ActiveKeyScope {
+            listener_id: state.server.id.clone(),
+            routing_group_id: state.server.routing_group.clone(),
+            pool_id: pool_id.clone(),
+        };
+        let snapshot = match active_keys.snapshot(&scope) {
+            Ok(snapshot) => snapshot,
+            Err(error) => return json_response(500, json!({"error":error.to_string()})),
+        };
+        let order = snapshot
+            .order
+            .iter()
+            .map(active_key_identity_json)
+            .collect::<Vec<_>>();
+        let held = snapshot
+            .held
+            .iter()
+            .map(active_key_identity_json)
+            .collect::<Vec<_>>();
+        let configured_members = policy
+            .members
+            .iter()
+            .map(|member| json!({"provider":member.provider,"alias":member.alias}))
+            .collect::<Vec<_>>();
+        let health = snapshot.order.iter().map(|identity| {
+            let (eligible, reason) = state.provider_health.active_key_health_status(identity, current_epoch_ms());
+            json!({"provider_id":identity.provider_id,"interface_id":identity.interface_id,"model_id":identity.model_id,"auth_alias":identity.auth_alias,"eligible":eligible,"reason":reason})
+        }).collect::<Vec<_>>();
+        pools.push(json!({"routing_group_id":scope.routing_group_id,"pool_id":scope.pool_id,"strategy":snapshot.strategy,"configured_members":configured_members,"order":order,"held":held,"health":health,"persistence_error":snapshot.persistence_error}));
+    }
+    json_response(200, json!({"pools":pools}))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActiveKeyReleaseRequest {
+    routing_group_id: String,
+    pool_id: String,
+    provider_id: String,
+    interface_id: String,
+    model_id: String,
+    auth_alias: String,
+}
+
+async fn active_keys_release(
+    State(state): State<Arc<V3ListenerState>>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> Response<Body> {
+    if !remote.ip().is_loopback() {
+        return json_response(403, json!({"error":"loopback_only"}));
+    }
+    let Some(active_keys) = &state.active_keys else {
+        return json_response(404, json!({"error":"active keys are not configured"}));
+    };
+    let payload = match read_json_payload(request).await {
+        Ok(value) => value,
+        Err(_) => return json_response(400, json!({"error":"invalid_json"})),
+    };
+    let body: ActiveKeyReleaseRequest = match serde_json::from_value(payload) {
+        Ok(body) => body,
+        Err(error) => return json_response(400, json!({"error":error.to_string()})),
+    };
+    let scope = V3ActiveKeyScope {
+        listener_id: state.server.id.clone(),
+        routing_group_id: body.routing_group_id,
+        pool_id: body.pool_id,
+    };
+    let identity = V3ActiveKeyIdentity {
+        provider_id: body.provider_id,
+        interface_id: body.interface_id,
+        model_id: body.model_id,
+        auth_alias: body.auth_alias,
+    };
+    match active_keys.release(&scope, &identity) {
+        Ok(changed) => json_response(
+            200,
+            json!({"released":changed,"identity":active_key_identity_json(&identity)}),
+        ),
+        Err(error) => {
+            let status = if matches!(
+                error,
+                routecodex_v3_target::V3ActiveKeyStateError::UnknownScope
+                    | routecodex_v3_target::V3ActiveKeyStateError::UnknownMember
+            ) {
+                404
+            } else {
+                500
+            };
+            json_response(status, json!({"error":error.to_string()}))
+        }
+    }
 }
 
 async fn pending_endpoint(
