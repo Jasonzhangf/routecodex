@@ -37,7 +37,7 @@ pub(crate) type V3DirectResponseProjectionFuture = Pin<
 
 pub(crate) fn build_direct_response_compat_context(
     target: &V3Target10ConcreteProviderSelected,
-    namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
+    namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
     tool_thinking_enabled: bool,
     tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
     custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,

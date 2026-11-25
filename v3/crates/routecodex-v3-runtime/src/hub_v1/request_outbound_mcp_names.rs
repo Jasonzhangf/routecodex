@@ -98,6 +98,17 @@ pub(super) fn restore_responses_mcp_namespace(
     object: &mut Map<String, Value>,
     identities: &HashMap<String, (String, String)>,
 ) -> bool {
+    restore_responses_namespace(object, |name| {
+        identities
+            .get(name)
+            .map(|(namespace, leaf)| (namespace.as_str(), leaf.as_str()))
+    })
+}
+
+fn restore_responses_namespace<'a>(
+    object: &mut Map<String, Value>,
+    resolve: impl FnOnce(&str) -> Option<(&'a str, &'a str)>,
+) -> bool {
     if object
         .get("namespace")
         .is_some_and(|namespace| !namespace.is_null())
@@ -107,15 +118,15 @@ pub(super) fn restore_responses_mcp_namespace(
     let Some(name) = object.get("name").and_then(Value::as_str) else {
         return false;
     };
-    let Some((namespace, leaf)) = identities.get(name) else {
+    let Some((namespace, leaf)) = resolve(name) else {
         return false;
     };
     if namespace.is_empty() {
         object.remove("namespace");
     } else {
-        object.insert("namespace".into(), Value::String(namespace.clone()));
+        object.insert("namespace".into(), Value::String(namespace.into()));
     }
-    object.insert("name".into(), Value::String(leaf.clone()));
+    object.insert("name".into(), Value::String(leaf.into()));
     true
 }
 
@@ -149,19 +160,40 @@ pub(super) fn restore_responses_mcp_tool_identity_item(
 
 pub(crate) fn restore_v3_responses_namespace_in_value(
     value: &mut Value,
-    identities: &HashMap<String, (String, String)>,
+    identities: &provider_compat_core::namespace_identity::NamespaceToolAliases,
 ) {
-    match value.get("type").and_then(Value::as_str) {
+    use provider_compat_core::namespace_identity::ToolKind;
+    let restore = |item: &mut Value| {
+        let kind = match item["type"].as_str() {
+            Some("function_call") => ToolKind::Function,
+            Some("custom_tool_call") => ToolKind::Custom,
+            _ => return,
+        };
+        if let Some(object) = item.as_object_mut() {
+            restore_responses_namespace(object, |name| {
+                let alias = identities
+                    .get(name)
+                    .filter(|alias| alias.kind.is_none_or(|wire_kind| wire_kind == kind))?;
+                Some((alias.namespace.as_str(), alias.name.as_str()))
+            });
+        }
+    };
+    let response = match value.get("type").and_then(Value::as_str) {
         Some("response.output_item.added" | "response.output_item.done") => {
             if let Some(item) = value.get_mut("item") {
-                restore_responses_mcp_tool_identity_item(item, identities);
+                restore(item);
             }
+            return;
         }
         Some("response.completed" | "response.done" | "response.incomplete") => {
-            if let Some(response) = value.get_mut("response") {
-                restore_responses_mcp_tool_identities(response, identities);
-            }
+            let Some(response) = value.get_mut("response") else {
+                return;
+            };
+            response
         }
-        _ => restore_responses_mcp_tool_identities(value, identities),
+        _ => value,
+    };
+    if let Some(output) = response.get_mut("output").and_then(Value::as_array_mut) {
+        output.iter_mut().for_each(restore);
     }
 }

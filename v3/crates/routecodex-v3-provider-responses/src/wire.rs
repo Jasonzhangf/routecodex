@@ -1,5 +1,6 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use provider_compat_core::namespace_identity::NamespaceToolAliases;
 use provider_compat_core::namespace_tools::{
     push_unique_provider_function_tool, NamespaceToolIdentityRegistry,
 };
@@ -145,7 +146,7 @@ pub struct V3Provider12ResponsesWirePayload {
     endpoint: V3ResponsesRequestEndpoint,
     body: Value,
     custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
-    namespace_identities: HashMap<String, (String, String)>,
+    namespace_identities: NamespaceToolAliases,
 }
 
 impl V3Provider12ResponsesWirePayload {
@@ -153,7 +154,7 @@ impl V3Provider12ResponsesWirePayload {
         self.stream_intent = intent;
         self
     }
-    pub fn namespace_identities(&self) -> &HashMap<String, (String, String)> {
+    pub fn namespace_identities(&self) -> &NamespaceToolAliases {
         &self.namespace_identities
     }
     pub fn request_id(&self) -> &str {
@@ -323,7 +324,7 @@ fn build_responses_wire_payload_with_registry(
             detail,
         })?,
     };
-    let namespace_identities = registry.restore_identities();
+    let namespace_identities = registry.restore_aliases();
     let mut body = if already_projected {
         current_request_body
     } else {
