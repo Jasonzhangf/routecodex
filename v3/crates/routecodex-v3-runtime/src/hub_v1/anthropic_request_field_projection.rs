@@ -2,6 +2,7 @@ use serde_json::{json, Map, Value};
 
 use super::anthropic_codec::V3AnthropicCodecError;
 use super::client_metadata_projection::unsupported_client_metadata_paths;
+use crate::projection_drop_log::V3ProjectionDropRecord;
 
 pub(super) fn project_chat_store_to_anthropic_wire(projected: &mut Value) -> Result<(), String> {
     let Some(store) = projected
@@ -77,6 +78,7 @@ pub(super) fn validate_responses_cache_and_store_for_anthropic(
 pub(super) fn project_responses_text_as_anthropic_output_config(
     output: &mut Map<String, Value>,
     extension: Option<&Map<String, Value>>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), V3AnthropicCodecError> {
     let Some(text) = extension.and_then(|row| row.get("text")) else {
         return Ok(());
@@ -98,16 +100,17 @@ pub(super) fn project_responses_text_as_anthropic_output_config(
                 field: "routecodex_chat_extension.responses_request.text.format",
             })?;
         match format.get("type").and_then(Value::as_str) {
-            Some("text") => reject_unmapped_anthropic_text_format_fields(format, &["type"])?,
+            Some("text") => record_unmapped_anthropic_text_format_fields(format, &["type"], drops),
             Some("json_schema") => {
-                reject_unmapped_anthropic_text_format_fields(
+                record_unmapped_anthropic_text_format_fields(
                     format,
                     // Responses uses `name` to identify the source schema and `strict`
                     // to select a validation mode. Anthropic's output_config.format has
                     // no equivalent wire fields; consume both source-only values while
                     // projecting the exact target shape below.
                     &["type", "name", "schema", "strict"],
-                )?;
+                    drops,
+                );
                 if format
                     .get("strict")
                     .is_some_and(|strict| !strict.is_boolean())
@@ -193,21 +196,22 @@ fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError
         })
 }
 
-fn reject_unmapped_anthropic_text_format_fields(
+fn record_unmapped_anthropic_text_format_fields(
     format: &Map<String, Value>,
     allowed: &[&str],
-) -> Result<(), V3AnthropicCodecError> {
-    let paths = format
-        .keys()
-        .filter(|key| !allowed.contains(&key.as_str()))
-        .map(|key| format!("$.request.text.output_config.format.{key}"))
-        .collect::<Vec<_>>();
-    if paths.is_empty() {
-        Ok(())
-    } else {
-        Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: paths.join(","),
-        })
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) {
+    for (key, value) in format {
+        if allowed.contains(&key.as_str()) {
+            continue;
+        }
+        drops.push(V3ProjectionDropRecord::new(
+            "anthropic",
+            format!("$.text.format.{key}"),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "record_unmapped_anthropic_text_format_fields",
+        ));
     }
 }
 

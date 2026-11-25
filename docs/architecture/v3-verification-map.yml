@@ -2201,7 +2201,7 @@ features:
     save without MetadataCenter, headers, or outbound repair.
   - Responses text.verbosity remains output verbosity. Anthropic consumes valid low/medium/high values only as a registered local style hint; it never maps them to output_config.effort because that field
     is reasoning effort, not verbosity.
-  - "Responses text.format.json_schema.name and boolean strict are source-only schema controls: inbound preserves them, while Anthropic outbound consumes them and emits only the target-valid `{type:json_schema,schema}` format. Unknown nested format fields and non-boolean strict values remain explicit outbound failures."
+  - "Responses text.format.json_schema.name and boolean strict are source-only schema controls: inbound preserves them, while Anthropic outbound consumes them and emits only the target-valid `{type:json_schema,schema}` format. An unmatched nested format field is dropped with target/path/field diagnostic evidence while the mapped remainder continues; a malformed registered target field such as non-boolean strict remains an explicit outbound failure."
   - ? Responses custom tool declarations map exactly to native OpenAI Chat custom tools. Anthropic uses the registered `v3.custom_tool.anthropic_string_input_wrapper.v1` compatibility projection
     : exact raw input becomes `tool_use.input={"input":raw}`, declaration description/schema carries free-form or exact grammar information without claiming native enforcement, and reverse projection requires
       governed custom declaration identity plus the exact wrapper shape for raw-string unwrapping; other model-generated JSON values remain complete custom input text with a paired consumer error and exact client-string follow-up. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image
@@ -2304,6 +2304,7 @@ features:
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
   - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
   - dbc3d38_responses_anthropic_structured_output_strict_false_public
+  - dbc3d38_responses_anthropic_structured_output_strict_false_sse_public
   - anthropic_relay_preserves_explicit_tool_result_is_error_presence
   - responses_completed_tool_output_does_not_synthesize_anthropic_is_error
   - anthropic_consumes_responses_json_schema_name_in_outbound_projection

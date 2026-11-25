@@ -570,8 +570,8 @@ must not cross ReqInbound02.
 | `prompt_cache_key` | Valid non-empty key is consumed as a local cache hint before wire; malformed values fail; it must not rebuild `cache_control`. |
 | `store` | `false` is validated and consumed before wire; `true` fails because Anthropic cannot preserve remote storage semantics; neither value changes RouteCodex continuation state. |
 | `text.verbosity` | Valid low/medium/high value is consumed as a local style hint before wire; invalid values fail; it never becomes Anthropic reasoning effort. |
-| `text.format.type=text` | Conditional exact default-text projection; emits no format object only after the outbound codec verifies no conflicting format field. |
-| `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; `strict=false` is not representable and fails. |
+| `text.format.type=text` | Conditional exact default-text projection; unmatched sibling fields are recorded and omitted while the mapped remainder continues. |
+| `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; boolean `strict` is consumed as a source control, unmatched sibling fields are recorded and omitted, and malformed registered values fail. |
 
 No field in this table may enter MetadataCenter, provider selection, retry,
 continuation, SSE, or server-handler compensation.
