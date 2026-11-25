@@ -747,7 +747,7 @@ targets = [
 
     #[test]
     fn direct_reselection_ignores_a_preferred_candidate_after_its_window_closes() {
-        let manifest = multi_provider_manifest(&["windowed", "fallback"]);
+        let manifest = multi_provider_manifest(&["windowed", "next"]);
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
         let scope =
             V3ProviderFailureSessionScope::new("test", "default", "window-reselection").unwrap();
@@ -792,9 +792,9 @@ targets = [
             direct_policy(),
         )
         .unwrap() else {
-            panic!("the fallback must be selected");
+            panic!("the next eligible candidate must be selected");
         };
-        assert_eq!(plan.selected.candidate.provider_id, "fallback");
+        assert_eq!(plan.selected.candidate.provider_id, "next");
     }
 
     fn opaque_hit(
