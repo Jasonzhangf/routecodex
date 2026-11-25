@@ -170,9 +170,6 @@ targets = [{{ kind = "provider_model", provider = "cooled", model = "step-5-prev
     if preceding_tier {
         let group = authoring.route_groups.get_mut("recovery").unwrap();
         let mut preceding = group.pools["default"].clone();
-        preceding
-            .targets
-            .retain(|target| target.provider.as_deref() == Some("cooled"));
         preceding.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchAuthoringConfig {
             precedence: Some(10),
             entry_protocol: Some("openai_chat".into()),
@@ -285,20 +282,16 @@ async fn retained_cooldown_pool(socket: &mut TcpStream) -> Value {
 }
 
 async fn assert_released_on_retained_connection(socket: &mut TcpStream, before: &Value) {
-    timeout(Duration::from_secs(2), async {
-        loop {
-            let pool = retained_cooldown_pool(socket).await;
-            let entry = exact_probe(&pool);
-            if entry["state"] != "probing" {
-                assert_eq!(entry["failure_count"], before["failure_count"]);
-                assert_eq!(entry["until_ms"], before["until_ms"]);
-                return;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("exited probe owner must release its marker despite newer business generation");
+    let pool = timeout(Duration::from_secs(2), retained_cooldown_pool(socket))
+        .await
+        .expect("the retained connection must still read the cooldown");
+    assert_same_cooldown(exact_probe(&pool), before);
+}
+
+fn assert_same_cooldown(actual: &Value, before: &Value) {
+    for field in ["failure_count", "until_ms", "state", "reason"] {
+        assert_eq!(actual[field], before[field], "cooldown field {field}");
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -414,20 +407,22 @@ async fn public_recovery_witness_with_generation(
         .json(&json!({"provider_id":"cooled", "interface_id":"default", "auth_alias":"key", "model_id":"step-5-preview", "kind":"probe", "duration_ms":60000}))
         .send().await.unwrap();
     assert_eq!(add.status(), 200);
-    let scheduled = client
-        .post(format!(
-            "{base}/_routecodex/health/cooldown-pool/probe"
-        ))
-        .json(&json!({"provider_id":"cooled", "interface_id":"default", "auth_alias":"key", "model_id":"step-5-preview"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(scheduled.status(), 200);
-    assert_eq!(
-        scheduled.json::<Value>().await.unwrap()["scheduled"],
-        true,
-        "fixture must make the existing manual probe due now"
+    // The explicit diagnostic exercises lifecycle custody without owning the cooldown.
+    let before_diagnostic = exact_probe(&cooldown_pool(&client, &base).await).clone();
+    let mut diagnostic = tokio::spawn(
+        client
+            .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
+            .json(&json!({
+                "provider_id":"cooled", "interface_id":"default", "auth_alias":"key",
+                "model_id":"step-5-preview", "allow_paid_diagnostic":true
+            }))
+            .send(),
     );
+    timeout(Duration::from_secs(2), peer.probe_entered.acquire())
+        .await
+        .expect("the paid diagnostic must reach the exact upstream")
+        .unwrap()
+        .forget();
     let request_client = client.clone();
     let request_base = base.clone();
     let mut request = tokio::spawn(async move {
@@ -435,11 +430,6 @@ async fn public_recovery_witness_with_generation(
             .json(&json!({"model":"step-5-preview","messages":[{"role":"user","content":"step5 marker"}],"stream":false}))
             .send().await
     });
-    timeout(Duration::from_secs(2), peer.probe_entered.acquire())
-        .await
-        .expect("real probe must enter upstream")
-        .unwrap()
-        .forget();
     let before_release = timeout(Duration::from_millis(500), &mut request).await;
     let attempted_before_release = peer
         .captures
@@ -456,7 +446,7 @@ async fn public_recovery_witness_with_generation(
         );
     }
     let pending_pool = cooldown_pool(&client, &base).await;
-    assert_eq!(exact_probe(&pending_pool)["state"], "probing");
+    assert_same_cooldown(exact_probe(&pending_pool), &before_diagnostic);
     if preceding_tier {
         let concurrent = client.post(format!("{base}/v1/chat/completions"))
             .json(&json!({"model":"step-5-preview","messages":[{"role":"user","content":"concurrent marker"}],"stream":false}))
@@ -508,7 +498,7 @@ async fn public_recovery_witness_with_generation(
     .await
     .unwrap();
     let before_exit = exact_probe(&before_exit).clone();
-    assert_eq!(before_exit["state"], "probing");
+    assert_same_cooldown(&before_exit, &before_diagnostic);
     match probe_end {
         ProbeEnd::Release => peer.probe_release.add_permits(64),
         ProbeEnd::Shutdown => {
@@ -516,6 +506,9 @@ async fn public_recovery_witness_with_generation(
                 .await
                 .expect("held probe must not block shutdown");
             assert_released_on_retained_connection(&mut retained, &before_exit).await;
+            let _ = timeout(Duration::from_secs(2), &mut diagnostic)
+                .await
+                .expect("shutdown must join the held diagnostic");
             assert_eq!(peer.probe_release.available_permits(), 0);
             upstream.abort();
             let _ = upstream.await;
@@ -528,6 +521,9 @@ async fn public_recovery_witness_with_generation(
                 .unwrap();
             drop(preparation);
             assert_released_on_retained_connection(&mut retained, &before_exit).await;
+            let _ = timeout(Duration::from_secs(2), &mut diagnostic)
+                .await
+                .expect("exec must join the held diagnostic");
             assert_eq!(peer.probe_release.available_permits(), 0);
             let pool = cooldown_pool(&client, &base).await;
             assert_eq!(
@@ -543,26 +539,54 @@ async fn public_recovery_witness_with_generation(
         ProbeEnd::Drop => {
             drop(handle);
             assert_released_on_retained_connection(&mut retained, &before_exit).await;
+            let _ = timeout(Duration::from_secs(2), &mut diagnostic)
+                .await
+                .expect("drop must cancel the held diagnostic");
             assert_eq!(peer.probe_release.available_permits(), 0);
             upstream.abort();
             let _ = upstream.await;
             return;
         }
     }
-    timeout(Duration::from_secs(2), async {
-        loop {
-            let pool = cooldown_pool(&client, &base).await;
-            if exact_probe(&pool)["state"] != "probing" {
-                assert_eq!(exact_probe(&pool)["failure_count"], 1);
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("released 503 probe must complete and retain exact cooldown");
-    // The pinned request reaches a separate business attempt. Its error and
-    // the earlier failed health probe carry different upstream bodies.
+    let diagnostic_response = timeout(Duration::from_secs(2), diagnostic)
+        .await
+        .expect("released diagnostic must complete")
+        .unwrap()
+        .unwrap();
+    let diagnosis = diagnostic_response.json::<Value>().await.unwrap();
+    assert_eq!(diagnosis["diagnostic"]["status"], "failed", "{diagnosis}");
+    assert_eq!(diagnosis["diagnostic"]["http_status"], 503, "{diagnosis}");
+    assert_same_cooldown(
+        exact_probe(&cooldown_pool(&client, &base).await),
+        &before_diagnostic,
+    );
+    // While the exact declared identity is held, a pinned request cannot
+    // dispatch and must terminate without a fabricated business result.
+    let blocked = raw_chat(port, "cooled.step-5-preview", "all cooled raw", false).await;
+    let blocked = String::from_utf8_lossy(&blocked);
+    assert!(!blocked.contains("owned failed probe"), "{blocked}");
+    assert!(
+        !blocked.contains("owned exhausted business request"),
+        "{blocked}"
+    );
+    assert!(!blocked.contains("step5 complete"), "{blocked}");
+    assert!(!peer
+        .captures
+        .lock()
+        .await
+        .iter()
+        .any(|call| { call.body["messages"][0]["content"] == "all cooled raw" }));
+    let release = client
+        .post(format!("{base}/_routecodex/health/cooldown-pool"))
+        .json(&json!({
+            "provider_id":"cooled", "interface_id":"default", "auth_alias":"key",
+            "model_id":"step-5-preview", "kind":"probe"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(release.status(), 200);
+    // A later pinned request sees only its own complete upstream error.
     let failure_client = client.clone();
     let failure_base = base.clone();
     let mut exhausted = tokio::spawn(async move {
@@ -684,7 +708,7 @@ async fn public_recovery_witness_with_generation(
         .as_array()
         .unwrap()
         .iter()
-        .any(|v| v["provider_id"] == "cooled" && v["model_id"] == "step-5-preview"));
+        .all(|v| v["provider_id"] != "cooled"));
     assert!(!pool["entries"]
         .as_array()
         .unwrap()

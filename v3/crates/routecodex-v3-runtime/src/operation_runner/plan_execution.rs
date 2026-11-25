@@ -189,11 +189,12 @@ impl PlanExecutionOperator {
         // not excluded by local capacity state; a real Provider failure switches
         // to the next declared candidate on the following iteration.
         let selected = match self.preferred_selected.clone().filter(|preferred| {
-            !self.request_local_excluded_candidates.contains(
-                &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
-                    &preferred.candidate,
-                ),
-            )
+            V3TargetInterpreter::candidate_admitted(&preferred.candidate, self.now_ms)
+                && !self.request_local_excluded_candidates.contains(
+                    &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                        &preferred.candidate,
+                    ),
+                )
         }) {
             Some(preferred) => preferred,
             None => match select_v3_target_with_session_then_global(
@@ -742,6 +743,58 @@ targets = [
         V3PlanExecutionModePolicy::RelayOnly {
             entry_protocol: V3HubEntryProtocol::Responses,
         }
+    }
+
+    #[test]
+    fn direct_reselection_ignores_a_preferred_candidate_after_its_window_closes() {
+        let manifest = multi_provider_manifest(&["windowed", "fallback"]);
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let scope =
+            V3ProviderFailureSessionScope::new("test", "default", "window-reselection").unwrap();
+        let request = json!({"model":"client-model", "input":"opaque"});
+        let mut expanded = expanded_from_hit(&manifest, opaque_hit(&manifest, &request));
+        expanded.candidates[0].model_availability = Some(
+            routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+                timezone: "UTC".into(),
+                guard_minutes: 0,
+                periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+                    start: "00:00".into(),
+                    end: "00:01".into(),
+                }],
+            },
+        );
+        let V3PlanExecutionOutcome::Selected { plan, .. } = run_v3_plan_execution_operator(
+            request.clone(),
+            manifest.clone(),
+            V3PlanExecutionTargetSource::Expanded(expanded.clone()),
+            scope.clone(),
+            health.clone(),
+            BTreeSet::new(),
+            0,
+            0,
+            None,
+            direct_policy(),
+        )
+        .unwrap() else {
+            panic!("the initial target must be selected");
+        };
+        assert_eq!(plan.selected.candidate.provider_id, "windowed");
+        let V3PlanExecutionOutcome::Selected { plan, .. } = run_v3_plan_execution_operator(
+            request,
+            manifest,
+            V3PlanExecutionTargetSource::Expanded(expanded),
+            scope,
+            health,
+            BTreeSet::new(),
+            120_000,
+            0,
+            Some(plan.selected),
+            direct_policy(),
+        )
+        .unwrap() else {
+            panic!("the fallback must be selected");
+        };
+        assert_eq!(plan.selected.candidate.provider_id, "fallback");
     }
 
     fn opaque_hit(

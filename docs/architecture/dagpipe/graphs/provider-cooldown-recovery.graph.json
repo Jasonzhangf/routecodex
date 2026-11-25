@@ -1,0 +1,240 @@
+{
+  "id": "v3.provider_cooldown_recovery",
+  "version": "1",
+  "inputs": [
+    {
+      "id": "real-attempt-candidate-context",
+      "schema": "Object",
+      "schema_ref": "v3.provider_cooldown_recovery.arc.real_attempt_candidate_context"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "evaluate_recovery_eligibility",
+      "operator": "routecodex.v3.provider.evaluate_business_recovery_eligibility",
+      "operator_version": "1",
+      "inputs": ["real-attempt-candidate-context"],
+      "output": {
+        "id": "recovery-eligibility",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.recovery_eligibility"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state",
+          "v3.provider.availability_projection",
+          "v3.target.candidate_set"
+        ],
+        "writes": []
+      }
+    },
+    {
+      "id": "acquire_selected_business_trial",
+      "operator": "routecodex.v3.provider.acquire_selected_business_recovery_trial",
+      "operator_version": "1",
+      "inputs": ["recovery-eligibility"],
+      "output": {
+        "id": "trial-acquisition",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.trial_acquisition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ],
+        "writes": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ]
+      }
+    },
+    {
+      "id": "select_declared_successor",
+      "operator": "routecodex.v3.provider.select_declared_successor_after_trial_unavailable",
+      "operator_version": "1",
+      "inputs": ["trial-acquisition"],
+      "output": {
+        "id": "trial-unavailable",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.trial_unavailable"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.target.candidate_set",
+          "v3.provider.availability_projection",
+          "v3.operation_runner.request_local_exclusions"
+        ],
+        "writes": ["v3.operation_runner.request_local_exclusions"]
+      }
+    },
+    {
+      "id": "execute_owned_business_attempt",
+      "operator": "routecodex.v3.provider.execute_owned_business_attempt",
+      "operator_version": "1",
+      "inputs": ["trial-acquisition"],
+      "output": {
+        "id": "owned-attempt-outcome",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.owned_attempt_outcome"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.request.normal_payload",
+          "v3.execution.attempt_control_state"
+        ],
+        "writes": ["v3.response.provider_raw"]
+      }
+    },
+    {
+      "id": "settle_governed_business_success",
+      "operator": "routecodex.v3.provider.settle_owned_business_recovery_success",
+      "operator_version": "1",
+      "inputs": ["owned-attempt-outcome"],
+      "output": {
+        "id": "success-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.success_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.execution.attempt_success_receipt",
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ],
+        "writes": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state",
+          "v3.provider.global_cooldown_persistence"
+        ]
+      }
+    },
+    {
+      "id": "defer_failed_trial_with_successor",
+      "operator": "routecodex.v3.provider.defer_owned_business_recovery_with_successor",
+      "operator_version": "1",
+      "inputs": ["owned-attempt-outcome"],
+      "output": {
+        "id": "failure-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.failure_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.error.classified",
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ],
+        "writes": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state",
+          "v3.provider.global_cooldown_persistence"
+        ]
+      }
+    },
+    {
+      "id": "release_terminal_or_cancelled_trial",
+      "operator": "routecodex.v3.provider.release_terminal_or_cancelled_business_recovery",
+      "operator_version": "1",
+      "inputs": ["owned-attempt-outcome"],
+      "output": {
+        "id": "release-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.release_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.execution.request_lifecycle_control",
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ],
+        "writes": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ]
+      }
+    },
+    {
+      "id": "ignore_superseded_trial_outcome",
+      "operator": "routecodex.v3.provider.ignore_superseded_business_recovery_outcome",
+      "operator_version": "1",
+      "inputs": ["owned-attempt-outcome"],
+      "output": {
+        "id": "superseded-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.superseded_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.provider.health_state",
+          "v3.provider.cooldown_probe_state"
+        ],
+        "writes": []
+      }
+    },
+    {
+      "id": "publish_recovery_disposition",
+      "operator": "routecodex.v3.provider.publish_business_recovery_disposition",
+      "operator_version": "1",
+      "inputs": [
+        "trial-unavailable",
+        "success-disposition",
+        "failure-disposition",
+        "release-disposition",
+        "superseded-disposition"
+      ],
+      "output": {
+        "id": "recovery-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.provider_cooldown_recovery.arc.recovery_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.provider.availability_projection"],
+        "writes": ["v3.provider.availability_projection"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "evaluate_recovery_eligibility", "to": "acquire_selected_business_trial", "arc_id": "recovery-eligibility" },
+    { "from": "acquire_selected_business_trial", "to": "select_declared_successor", "arc_id": "trial-acquisition" },
+    { "from": "acquire_selected_business_trial", "to": "execute_owned_business_attempt", "arc_id": "trial-acquisition" },
+    { "from": "execute_owned_business_attempt", "to": "settle_governed_business_success", "arc_id": "owned-attempt-outcome" },
+    { "from": "execute_owned_business_attempt", "to": "defer_failed_trial_with_successor", "arc_id": "owned-attempt-outcome" },
+    { "from": "execute_owned_business_attempt", "to": "release_terminal_or_cancelled_trial", "arc_id": "owned-attempt-outcome" },
+    { "from": "execute_owned_business_attempt", "to": "ignore_superseded_trial_outcome", "arc_id": "owned-attempt-outcome" },
+    { "from": "select_declared_successor", "to": "publish_recovery_disposition", "arc_id": "trial-unavailable" },
+    { "from": "settle_governed_business_success", "to": "publish_recovery_disposition", "arc_id": "success-disposition" },
+    { "from": "defer_failed_trial_with_successor", "to": "publish_recovery_disposition", "arc_id": "failure-disposition" },
+    { "from": "release_terminal_or_cancelled_trial", "to": "publish_recovery_disposition", "arc_id": "release-disposition" },
+    { "from": "ignore_superseded_trial_outcome", "to": "publish_recovery_disposition", "arc_id": "superseded-disposition" }
+  ],
+  "outputs": ["recovery-disposition"]
+}

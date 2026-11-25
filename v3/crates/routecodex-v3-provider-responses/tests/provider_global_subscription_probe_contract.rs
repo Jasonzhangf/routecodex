@@ -166,12 +166,21 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
             assert_eq!(entry.auth_alias.as_deref(), Some("key-a"));
             assert_eq!(entry.model_id.as_deref(), Some("model-a"));
             assert_eq!(entry.state, if in_flight { "probing" } else { "waiting" });
-            assert!(
-                !store
-                    .scheduling_projection_for_key("provider-a", "key-a", "model-a", 1, 1, now)
-                    .unwrap()
-                    .available
-            );
+            if in_flight {
+                assert!(
+                    !store
+                        .scheduling_projection_for_key("provider-a", "key-a", "model-a", 1, 1, now)
+                        .unwrap()
+                        .available
+                );
+            } else {
+                assert!(
+                    store
+                        .scheduling_projection_for_key("provider-a", "key-a", "model-a", 1, 1, now)
+                        .unwrap()
+                        .available
+                );
+            }
             for (provider, key, model) in [
                 ("provider-a", "key-b", "model-a"),
                 ("provider-a", "key-a", "model-b"),

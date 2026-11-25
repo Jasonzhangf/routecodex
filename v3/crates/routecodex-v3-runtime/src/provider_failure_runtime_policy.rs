@@ -456,6 +456,7 @@ pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
     pub(crate) captured_target_09: Option<&'ctx V3Target09CandidateSetExpanded>,
     pub(crate) failure_session_scope: V3ProviderFailureSessionScope,
     pub(crate) provider_health: &'ctx V3ProviderFailureRuntimeHealth,
+    pub(crate) recovery_control: Option<&'ctx crate::execution_control::V3RequestExecutionControl>,
     pub(crate) retry_policy: V3RelayProviderFailureRetryPolicy,
     pub(crate) deterministic_sample: u64,
 }
@@ -654,7 +655,7 @@ impl V3ProviderFailureRuntimeHealth {
         self
     }
 
-    fn observation_now_ms(&self, supplied_now_ms: u64) -> u64 {
+    pub(crate) fn observation_now_ms(&self, supplied_now_ms: u64) -> u64 {
         self.observation_clock
             .as_ref()
             .map_or(supplied_now_ms, |clock| clock.now_epoch_ms())
@@ -1004,7 +1005,31 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     )
     .await;
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
+    let trial_failed = match context.recovery_control {
+        Some(control)
+            if !matches!(
+                attempt_source.source_kind,
+                V3ErrorSourceKind::ClientDisconnect
+            ) =>
+        {
+            context
+                .provider_health
+                .settle_business_recovery_failure(
+                    control,
+                    &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
+                    &selected.candidate.auth_alias,
+                    &selected.candidate.model_id,
+                    v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(v3_relay_provider_policy_ordinary_error)?,
+                    has_alternative,
+                )
+                .map_err(v3_relay_provider_policy_ordinary_error)?
+        }
+        _ => false,
+    };
     if has_alternative
+        && !trial_failed
         && is_request_local_compat_failure
         && is_real_http_failure
         && matches!(status, 400..=402 | 404..=599)
@@ -1024,7 +1049,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // attempt publishes diagnostics only; it does not update health or actions.
     // The last or only eligible candidate stays health-neutral for every
     // provider failure class.
-    let health_record = if is_request_local_compat_failure || !has_alternative {
+    let health_record = if is_request_local_compat_failure || !has_alternative || trial_failed {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),
@@ -1032,6 +1057,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 "request_local_response_processing"
             } else if is_request_local_compat_failure {
                 "request_local_provider_compat"
+            } else if trial_failed && has_alternative {
+                "recovery_trial_failed"
             } else {
                 "last_candidate_terminal"
             }

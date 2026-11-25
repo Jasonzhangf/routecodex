@@ -720,6 +720,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
     let failure_context = V3RelayProviderFailurePolicyContext {
+        recovery_control: Some(&request_execution_control),
         manifest,
         captured_target_09: Some(&retained_expanded),
         failure_session_scope: input.failure_session_scope.clone(),
@@ -931,6 +932,25 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 ),
             };
         let provider_request_snapshot = transport_request.provider_request_projection();
+        if !provider_health
+            .acquire_business_recovery_trial(
+                &request_execution_control,
+                &selected_target_provider_id,
+                &selected_target_interface_id,
+                &selected_target_auth_alias,
+                &selected_target_model_id,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3AnthropicRelayRuntimeError::ExecutionControlRequest)?,
+            )
+            .map_err(V3AnthropicRelayRuntimeError::ExecutionControlRequest)?
+        {
+            failed_candidates.insert(
+                crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                ),
+            );
+            continue;
+        }
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
@@ -1269,6 +1289,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 record_provider_success_after_response_governance(
                     &crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
                     &provider_health,
+                    &request_execution_control,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
                     &selected_target_interface_id,
@@ -1518,6 +1539,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 record_provider_success_after_response_governance(
                     &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                     &provider_health,
+                    &request_execution_control,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
                     &selected_target_interface_id,
@@ -1581,6 +1603,7 @@ fn anthropic_relay_client_headers_as_provider_request_headers(
 fn record_provider_success_after_response_governance(
     receipt: &crate::nodes::V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
+    request_execution_control: &crate::execution_control::V3RequestExecutionControl,
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
     interface_id: &str,
@@ -1588,7 +1611,8 @@ fn record_provider_success_after_response_governance(
     model_id: &str,
 ) -> Result<(), V3AnthropicRelayRuntimeError> {
     provider_health
-        .record_provider_success_in_failure_scope_for_interface(
+        .record_provider_success_with_business_recovery(
+            request_execution_control,
             receipt,
             failure_session_scope,
             provider_id,

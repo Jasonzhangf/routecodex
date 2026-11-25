@@ -329,42 +329,92 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
                 .availability("p", Some("k"), Some("m"), 1_000)
                 .available
         );
-        // 到点后仍不可用：冷却由「探针成功」而不是墙上时钟解除，配对 probe 条目
-        // 仍 pending；这与失败驱动的 auth_key 冷却完全一致（D6 不可区分）。
-        let expired_but_probing = store.availability("p", Some("k"), Some("m"), 61_000);
-        assert!(
-            !expired_but_probing.available,
-            "a cooled identity is released by a successful probe, not by wall-clock expiry"
-        );
-        assert!(expired_but_probing
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope == "provider_cooldown_probe_pending"));
-        assert!(
-            !expired_but_probing
-                .blocked_scopes
-                .iter()
-                .any(|scope| scope.starts_with("auth_key:")),
-            "the auth_key deadline itself has already elapsed"
-        );
-        // 释放半边：走运行时同一条 probe 完成路径，不手工清 map。
-        let permit = store
-            .acquire_provider_cooldown_probe("p", Some("k"), None)
-            .expect("acquire scheduled probe")
-            .expect("the paired probe must be acquirable");
-        assert_eq!(permit.provider_id(), "p");
-        assert_eq!(permit.auth_alias(), Some("k"));
-        assert_eq!(permit.model_id(), None);
-        store
-            .complete_provider_cooldown_probe_success_with_permit(&permit, 62_000)
-            .expect("probe success");
-        let released = store.availability("p", Some("k"), Some("m"), 62_000);
-        assert!(
-            released.available,
-            "a successful probe must release the identity: {:?}",
-            released.blocked_scopes
-        );
-        assert!(store.cooldown_entries(62_000).is_empty());
+        for model in ["m", "sibling"] {
+            assert!(
+                store
+                    .availability("p", Some("k"), Some(model), 61_000)
+                    .available
+            );
+            assert!(matches!(
+                store
+                    .acquire_provider_business_recovery_trial_for_interface(
+                        "p",
+                        "default",
+                        Some("k"),
+                        Some(model),
+                        61_000,
+                    )
+                    .unwrap(),
+                crate::key_health::V3ProviderBusinessRecoveryAcquisition::NotRequired
+            ));
+        }
+        assert!(store.cooldown_entries(61_000).is_empty());
+    }
+
+    #[test]
+    fn business_trial_settles_its_episode_after_ordinary_failure_but_not_after_extension() {
+        use crate::key_health::V3ProviderBusinessRecoveryAcquisition::Acquired;
+        use routecodex_v3_error::V3ProviderFailureAction;
+
+        for extend in [false, true] {
+            for succeeds in [false, true] {
+                let store = V3ProviderHealthStore::default();
+                store
+                    .add_cooldown_entry("p", Some("k"), Some("m"), "probe", 1_000, 1_000)
+                    .unwrap();
+                let Acquired(permit) = store
+                    .acquire_provider_business_recovery_trial_for_interface(
+                        "p",
+                        "default",
+                        Some("k"),
+                        Some("m"),
+                        2_000,
+                    )
+                    .unwrap()
+                else {
+                    panic!("one owned real trial")
+                };
+                store
+                    .record_provider_failure_action_if_cooled_for_interface(
+                        "p",
+                        "default",
+                        "k",
+                        "m",
+                        &V3ProviderFailureAction::recoverable("late body failure"),
+                        2_005,
+                    )
+                    .unwrap()
+                    .expect("ordinary failure may update the cooled identity");
+                if extend {
+                    store
+                        .add_cooldown_entry("p", Some("k"), Some("m"), "probe", 60_000, 2_010)
+                        .unwrap();
+                }
+                if succeeds {
+                    assert_eq!(
+                        store
+                            .complete_provider_business_recovery_success_with_permit(&permit, 2_020)
+                            .unwrap(),
+                        !extend
+                    );
+                    store.cancel_provider_cooldown_probe(&permit).unwrap();
+                } else {
+                    store
+                        .complete_provider_cooldown_probe_failure_with_permit(&permit, 2_020)
+                        .unwrap();
+                }
+                let next = store
+                    .provider_cooldown_probe_next_deadline_ms("p", Some("k"), Some("m"))
+                    .unwrap();
+                if extend {
+                    assert_eq!(next, Some(62_010));
+                } else if succeeds {
+                    assert_eq!(next, None);
+                } else {
+                    assert!(next.is_some_and(|deadline| deadline > 2_020));
+                }
+            }
+        }
     }
 
     #[test]
@@ -640,19 +690,18 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
                 .availability("p", Some("k"), Some("m"), 2_000)
                 .available
         );
-        // Restart re-arms the probe schedule for every persisted cooldown
-        // (startup probe), exactly as it does for a failure-driven cooldown;
-        // the manual deadline itself is what must survive.
+        // Restart preserves the deadline and does not schedule an early
+        // synthetic recovery attempt.
         assert_eq!(
             restored
                 .provider_cooldown_probe_next_deadline_ms("p", Some("k"), Some("m"))
                 .unwrap(),
-            Some(0)
+            Some(121_000)
         );
-        assert_eq!(
-            restored.provider_cooldown_probe_keys_due(0).unwrap(),
-            vec![("p".into(), Some("k".into()), Some("m".into()))]
-        );
+        assert!(restored
+            .provider_cooldown_probe_keys_due(0)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -683,9 +732,14 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
             .expect("auth_key pair must be restored through its probe entry");
         assert_eq!(probe.model_id, None);
         assert_eq!(probe.until_ms, Some(121_000));
-        assert_eq!(
-            restored.provider_cooldown_probe_keys_due(0).unwrap(),
-            vec![("p".into(), Some("k".into()), None)]
+        assert!(restored
+            .provider_cooldown_probe_keys_due(0)
+            .unwrap()
+            .is_empty());
+        assert!(
+            restored
+                .availability("p", Some("k"), Some("m"), 121_000)
+                .available
         );
     }
 }

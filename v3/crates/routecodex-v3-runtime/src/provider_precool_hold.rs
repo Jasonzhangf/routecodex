@@ -88,7 +88,7 @@ impl V3ProviderFailureRuntimeHealth {
         action: &V3ProviderFailureAction,
         observed_http_failure: bool,
         policy: Option<V3ProviderFailurePolicy>,
-        minimum_delay_ms: u64,
+        _minimum_delay_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
         let provider_key = v3_relay_provider_candidate_key_parts(
             provider_id,
@@ -190,34 +190,26 @@ impl V3ProviderFailureRuntimeHealth {
             record.cooldown_until_ms = cooled.cooldown_until_ms;
             return Ok(record);
         }
-        let mut key =
-            V3ProviderActionGateKey::new(scope, record.provider_key.clone(), "provider_pre_cool")?;
-        // The enclosing RuntimeHealth belongs to one listener. Only the session
-        // discriminator is shared; the real listener and identity remain intact.
-        key.provider_scope.session_id = format!("pre-cool-observation:{}", record.provider_key);
-        key.session_id = key.provider_scope.session_id.clone();
-        let failure = self
-            .action_gate
-            .record_failure_with_minimum_delay(&key, minimum_delay_ms)?;
-        let entry = pending
-            .entry(identity)
-            .or_insert_with(|| V3DeferredHealthAction {
-                ticket: failure.recovery_ticket().clone(),
-                observing: None,
-                failures: Vec::new(),
-                applied: 0,
-            });
-        entry.ticket = failure.recovery_ticket().clone();
-        entry.failures.push(V3DeferredProviderFailure {
-            action: action.clone(),
-            policy,
-            scope: scope.clone(),
-            reason: reason.map(str::to_owned),
-        });
-        record.state = "pre_cool_observation".into();
-        record.cooldown_until_ms = None;
         drop(pending);
-        self.store.publish_availability_change();
+        let now_ms = self.observation_now_ms(now_ms);
+        if let Some(policy) = policy {
+            let mut record = self.store.record_provider_failure_in_session_with_policy_for_interface(
+                scope, provider_id, interface_id, auth_alias, model_id, reason,
+                action.failure_fingerprint.clone(), now_ms, Some(policy),
+            ).map_err(|error| error.to_string())?;
+            record.state = if record.cooldown_until_ms.is_some() {
+                "cooldown"
+            } else {
+                "provider_failure_observed"
+            }.into();
+            return Ok(record);
+        }
+        let projection = self.store.record_provider_failure_action_for_interface(
+            provider_id, interface_id, auth_alias.unwrap(), model_id.unwrap(), action, now_ms,
+        )?;
+        record.state = if projection.cooldown { "cooldown" } else { "provider_failure_observed" }.into();
+        record.failure_count = projection.failure_streak;
+        record.cooldown_until_ms = projection.cooldown_until_ms;
         Ok(record)
     }
 

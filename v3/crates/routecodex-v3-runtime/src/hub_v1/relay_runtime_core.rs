@@ -715,6 +715,7 @@ where
     let mut last_external_http = None;
     let attempt_budget = request_execution_control.attempt_budget();
     let failure_context = V3RelayProviderFailurePolicyContext {
+        recovery_control: Some(&request_execution_control),
         manifest,
         captured_target_09: Some(&retained_expanded),
         failure_session_scope: failure_session_scope.clone(),
@@ -976,6 +977,24 @@ where
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
+        if !provider_health
+            .acquire_business_recovery_trial(
+                &request_execution_control,
+                &selected_target_provider_id,
+                &selected_target_interface_id,
+                &selected_target_auth_alias,
+                &selected_target_model_id,
+                v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+            )
+            .map_err(V3RelayCoreError::Target)?
+        {
+            failed_candidates.insert(
+                crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                ),
+            );
+            continue;
+        }
         let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3RelayCoreError::Target(format!(
                 "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
@@ -1225,7 +1244,8 @@ where
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                 provider_health
-                    .record_provider_success_in_failure_scope_for_interface(
+                    .record_provider_success_with_business_recovery(
+                        &request_execution_control,
                         &attempt_success_receipt,
                         &failure_session_scope,
                         &selected_target_provider_id,
@@ -1473,7 +1493,8 @@ where
                     let receipt =
                         crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                     provider_health
-                        .record_provider_success_in_failure_scope_for_interface(
+                        .record_provider_success_with_business_recovery(
+                            &request_execution_control,
                             &receipt,
                             &failure_session_scope,
                             &selected_target_provider_id,
@@ -1839,7 +1860,8 @@ where
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed_sse);
                 provider_health
-                    .record_provider_success_in_failure_scope_for_interface(
+                    .record_provider_success_with_business_recovery(
+                        &request_execution_control,
                         &attempt_success_receipt,
                         &failure_session_scope,
                         &selected_target_provider_id,

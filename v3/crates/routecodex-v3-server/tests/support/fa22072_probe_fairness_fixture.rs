@@ -72,27 +72,25 @@ async fn serve(
         peer.holders_entered.add_permits(1);
         peer.holders_release.acquire().await.unwrap().forget();
     }
-    if marker == "ping; reply pong" {
+    assert_ne!(
+        marker, "ping; reply pong",
+        "automatic recovery must not send synthetic traffic"
+    );
+    if marker == "genuine recovery" {
         assert_eq!(body["model"], "recovery");
         if index != 4 {
-            // The request path no longer carries a capacity permit, so a probe
-            // is not gated by another transport holding the same identity. Keep
-            // this sibling's probe open for as long as its transport is held:
-            // the free fifth identity must still receive its own admitted probe.
+            // Hold the real trial. Other identities must remain independent.
             peer.sibling_probes_entered.add_permits(1);
             peer.sibling_probes_release
                 .acquire()
                 .await
                 .unwrap()
                 .forget();
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error":{"message":"held sibling probe released"}})),
-            );
+            return (StatusCode::OK, Json(business("recovery")));
         }
         peer.fifth_entered.add_permits(1);
         peer.fifth_release.acquire().await.unwrap().forget();
-        return (StatusCode::OK, Json(json!({"actual":"2xx probe success"})));
+        return (StatusCode::OK, Json(business("recovery")));
     }
     (
         StatusCode::OK,

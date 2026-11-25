@@ -338,6 +338,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
         last_external_http = None;
+        let now_epoch_ms = if send_attempts == 0 {
+            now_epoch_ms
+        } else {
+            match v3_direct_selection_now_ms(&provider_health) {
+                Ok(now_ms) => now_ms,
+                Err(error) => {
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        runtime_source("V3Target10ConcreteProviderSelected", error),
+                        None,
+                        trace,
+                        &hook_registry,
+                    );
+                }
+            }
+        };
         let (selected, planned_decision): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3Execution11ProtocolDecision>,
@@ -515,10 +530,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,
                     provider_health: &provider_health,
+                    recovery_control: Some(&request_execution_control),
                     availability: &availability,
                     expanded: expanded.as_ref(),
                     provider_pinned: false,
-                    now_epoch_ms,
                 },
                 &selected,
                 source,
@@ -772,6 +787,32 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             });
 
+        match provider_health.acquire_business_recovery_trial(
+            &request_execution_control,
+            &policy.target.candidate.provider_id,
+            &policy.target.candidate.interface_id,
+            &policy.target.candidate.auth_alias,
+            &policy.target.candidate.model_id,
+            now_epoch_ms,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                failed_candidates.insert(
+                    crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                        &policy.target.candidate,
+                    ),
+                );
+                continue;
+            }
+            Err(error) => {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    runtime_source("V3ProviderHealthStateMutated", error),
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
+            }
+        }
         send_attempts = match attempt_budget.admit_transport_attempt() {
             Ok(attempts) => attempts,
             Err(error) => {
@@ -892,10 +933,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
+                        recovery_control: Some(&request_execution_control),
                         availability: &availability,
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
-                        now_epoch_ms,
                     },
                     &policy.target,
                     source,
@@ -1112,10 +1153,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
+                        recovery_control: Some(&request_execution_control),
                         availability: &availability,
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
-                        now_epoch_ms,
                     },
                     &policy.target,
                     source,
@@ -1273,10 +1314,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
+                        recovery_control: Some(&request_execution_control),
                         availability: &availability,
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
-                        now_epoch_ms,
                     },
                     &policy.target,
                     source,
@@ -1454,10 +1495,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 &V3DirectProviderFailurePolicyContext {
                                     failure_session_scope: &direct_failure_session_scope,
                                     provider_health: &provider_health,
+                                    recovery_control: Some(&request_execution_control),
                                     availability: &availability,
                                     expanded: expanded.as_ref(),
                                     provider_pinned: false,
-                                    now_epoch_ms,
                                 },
                                 &policy.target,
                                 source,
@@ -1583,6 +1624,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             if let Err(source) = record_v3_direct_provider_success(
                 &attempt_success_receipt,
                 &provider_health,
+                &request_execution_control,
                 &direct_failure_session_scope,
                 &policy.target,
                 now_epoch_ms,

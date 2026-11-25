@@ -1,5 +1,4 @@
-//! Issue #231 public-entry black box for the Responses Relay stale
-//! provider-cooldown rescue probe race.
+//! Issue #231 public-entry black box for stale business-recovery ownership.
 //!
 //! Stable public test ID: `issue231_responses_relay_stale_probe_public_blackbox`.
 //!
@@ -11,29 +10,26 @@
 //! Sequence under test (no product test-only business fields; every marker is
 //! ordinary client input text the controlled upstream keys on):
 //!
-//! 1. A pooled business request with two eligible candidates is parked in the controlled
-//!    upstream before any cooldown exists, so it selects `cooled` normally.
-//! 2. A manual cooldown `probe` is seeded through the public
-//!    `/_routecodex/health/cooldown-pool/add` operator hook.
-//! 3. A pooled client request now selects `healthy` while the runtime starts a
-//!    single-flight cooldown rescue probe for the cooled preferred tier and
-//!    holds it in flight upstream (probe A).
-//! 4. The parked `cooled` business request is released and fails with a genuine
-//!    provider HTTP error, advancing the same identity's health generation
-//!    while probe A is still in flight, then completes on `healthy`.
-//! 5. Probe A is released (stale success 2xx or stale failure 503). Its
-//!    completion must be a no-op that keeps the newer cooldown, releases only
-//!    its own permit, and never mutates the sibling/replacement identity.
-//! 6. The client already received the true `healthy` business payload, with no
-//!    598, no `target_resolution_failure` and no replacement error payload.
-//! 7. A single-provider failure closes only its own transport while a concurrent
-//!    healthy request still completes.
+//! 1. A real authentication failure on `cooled` commits the identity's
+//!    cooldown, and completes on `healthy`.
+//! 2. The cooldown and recovery cadence expire, making one recovery trial due.
+//! 3. A real client request owns the trial and is held at `cooled`; concurrent
+//!    requests use `healthy`.
+//! 4. A later operator cooldown replaces the owning deadline while the trial is
+//!    in flight.
+//! 5. Releasing the trial (business success or business failure) must not
+//!    clear the newer cooldown or mutate its sibling; it releases the trial
+//!    slot, and the next request still uses `healthy`.
+//! 6. A separately pinned single candidate projects its final real HTTP error
+//!    while a concurrent healthy request still completes.
 //!
 //! Owner: `v3.provider_key_health_scoring` (Provider health / probe state) with
 //! the Runtime `provider_cooldown_rescue` consumer. No runtime change is
 //! required; this test binds the existing contract.
 
 include!("issue231_stale_probe_fixture.rs");
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     // This case counts upstream attempts, so the Chat Process continuation
@@ -43,18 +39,12 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let cooled_peer = Arc::new(Peer {
         captures: Mutex::new(Vec::new()),
-        probe_attempts: Mutex::new(0),
-        probe_entered: Semaphore::new(0),
-        probe_release: Semaphore::new(0),
         business_entered: Semaphore::new(0),
         business_release: Semaphore::new(0),
         first_probe_outcome: outcome,
     });
     let healthy_peer = Arc::new(Peer {
         captures: Mutex::new(Vec::new()),
-        probe_attempts: Mutex::new(0),
-        probe_entered: Semaphore::new(0),
-        probe_release: Semaphore::new(0),
         business_entered: Semaphore::new(0),
         business_release: Semaphore::new(0),
         first_probe_outcome: StaleProbeOutcome::Failure,
@@ -63,70 +53,46 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         spawn_provider_router(post(cooled_provider), cooled_peer.clone()).await;
     let (healthy_base, healthy_shutdown) =
         spawn_provider_router(post(healthy_provider), healthy_peer.clone()).await;
-    let handle = spawn_v3_server_aggregate(issue231_manifest(
-        free_port(),
-        free_port(),
-        &cooled_base,
-        &healthy_base,
-    ))
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = Arc::new(Issue231ObservationClock(AtomicU64::new(now_ms)));
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        issue231_manifest(free_port(), free_port(), &cooled_base, &healthy_base),
+        clock.clone(),
+    )
     .await
     .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let endpoint = format!("{base}/v1/responses");
     let client = reqwest::Client::new();
 
-    // 1. Park the pooled same-identity business request while `cooled` has no
-    //    cooldown yet, so it selects the preferred provider as a normal
-    //    business attempt and reaches the controlled upstream.
-    let earlier_business = tokio::spawn(send_for_outcome(
-        client.clone(),
-        endpoint.clone(),
-        "wire-test",
-        BUSINESS_FAILURE_MARKER,
-    ));
-    timeout(
-        Duration::from_secs(5),
-        cooled_peer.business_entered.acquire(),
-    )
-    .await
-    .expect("pooled same-identity business request must reach the preferred provider")
-    .unwrap()
-    .forget();
-
-    // 2. Seed the preferred identity's cooldown probe through the public
-    //    operator hook.
-    let add = client
-        .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+    // 1. A real business request commits the preferred identity's cooldown.
+    let first = client
+        .post(&endpoint)
         .json(&json!({
-            "provider_id": "cooled",
-            "interface_id": "default",
-            "auth_alias": "key",
-            "model_id": "wire-test",
-            "kind": "probe",
-            "duration_ms": 60000
+            "model": "wire-test",
+            "input": INITIAL_FAILURE_MARKER,
+            "stream": false
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(add.status(), 200);
-    // Make the seeded probe due now so the aggregate's own scheduled probe
-    // loop sends it through the real provider wire. The manual add alone
-    // schedules the probe for the cooldown deadline.
-    let probe = client
-        .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
-        .json(&json!({
-            "provider_id": "cooled",
-            "interface_id": "default",
-            "auth_alias": "key",
-            "model_id": "wire-test"
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(probe.status(), 200);
+    assert_eq!(first.status(), 200);
+    let first_body: Value = first.json().await.unwrap();
+    assert_eq!(first_body["output_text"], HEALTHY_PAYLOAD);
+    let committed = cooled_probe_entry(&cooldown_pool(&client, &base).await)
+        .expect("a real cooled failure must commit the exact cooldown")
+        .clone();
+    assert_eq!(committed["state"], "blocked");
 
-    // 3. The pooled request skips the cooled preferred tier (its probe is
-    //    in flight) and completes on the healthy later tier.
+    // 2. The first exact cooldown reaches its recovery trial deadline.
+    let initial_deadline = committed["until_ms"].as_u64().unwrap();
+    schedule_real_trial(&client, &base).await;
+    clock.0.store(initial_deadline + 1, Ordering::SeqCst);
+
+    // 3. A real request owns the recovery trial and is held at the upstream.
     let pooled_client = client.clone();
     let pooled_endpoint = endpoint.clone();
     let mut pooled = tokio::spawn(async move {
@@ -134,27 +100,40 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
             .post(pooled_endpoint)
             .json(&json!({
                 "model": "wire-test",
-                "input": POOLED_MARKER,
+                "input": BUSINESS_FAILURE_MARKER,
                 "stream": false
             }))
             .send()
             .await
     });
-    match timeout(Duration::from_secs(5), cooled_peer.probe_entered.acquire()).await {
-        Ok(permit) => permit.unwrap().forget(),
-        Err(_) => panic!("the runtime must start a real cooldown rescue probe for the cooled tier"),
-    }
+    timeout(
+        Duration::from_secs(5),
+        cooled_peer.business_entered.acquire(),
+    )
+    .await
+    .expect("the expired cooldown must let the real request become the trial")
+    .unwrap()
+    .forget();
+    let held = cooled_probe_entry(&cooldown_pool(&client, &base).await)
+        .expect("the owning trial must remain the cooled identity")
+        .clone();
+    assert_eq!(held["state"], "probing", "{held}");
 
-    // The pooled request already carries the true healthy business payload
-    // even though probe A is held.
-    let pooled_response = timeout(Duration::from_secs(5), &mut pooled)
+    // A concurrent request cannot borrow the single trial slot. It uses the
+    // healthy later tier while the owned request remains in flight.
+    let concurrent = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "wire-test",
+            "input": POOLED_MARKER,
+            "stream": false
+        }))
+        .send()
         .await
-        .expect("healthy later tier must complete while the cooled probe is held")
-        .unwrap()
         .unwrap();
-    assert_no_client_error_projection("pooled", &pooled_response);
-    assert_eq!(pooled_response.status(), 200);
-    let pooled_body: Value = pooled_response.json().await.unwrap();
+    assert_no_client_error_projection("concurrent", &concurrent);
+    assert_eq!(concurrent.status(), 200);
+    let pooled_body: Value = concurrent.json().await.unwrap();
     assert_eq!(pooled_body["status"], "completed", "{pooled_body}");
     let pooled_text = pooled_body["output_text"].as_str().unwrap_or_default();
     assert!(
@@ -167,8 +146,6 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
             .contains("target_resolution_failure"),
         "no target_resolution_failure may reach the client"
     );
-    // The healthy provider really served it; the cooled provider only saw the
-    // probe (and the pinned failure), never the pooled business request.
     let healthy_saw_pooled = healthy_peer
         .captures
         .lock()
@@ -187,62 +164,37 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         .any(|body| body.to_string().contains(POOLED_MARKER));
     assert!(
         !cooled_saw_pooled,
-        "cooled preferred tier must not serve the pooled request while its probe is in flight"
+        "cooled preferred tier must not serve the pooled request while its trial is in flight"
     );
 
-    // 4. Release the parked business failure so the same identity's health
-    //    generation advances while probe A is still in flight.
+    // 4. A newer cooldown replaces the owning deadline before settlement.
+    let extended = add_cooldown(&client, &base, 3_720_000).await;
+    let extended_deadline = extended["until_ms"].as_u64().unwrap();
+    assert!(extended_deadline > initial_deadline);
+
+    // 5. Release the trial. Its stale result must not clear the newer hold.
     cooled_peer.business_release.add_permits(1);
-    let earlier_outcome = timeout(Duration::from_secs(5), earlier_business)
+    let trial_response = timeout(Duration::from_secs(5), &mut pooled)
         .await
-        .expect("business failure must be processed")
-        .unwrap();
-    match earlier_outcome {
-        ClientOutcome::TransportBreak => panic!("eligible healthy fallback must complete"),
-        ClientOutcome::Response(response) => {
-            assert_no_client_error_projection("earlier fallback", &response);
-            assert_eq!(response.status(), 200);
-            let body: Value = response.json().await.unwrap();
-            assert_eq!(body["output_text"], HEALTHY_PAYLOAD);
-        }
-    }
-
-    // The newer failure is now the owning state; probe A is still in flight.
-    let pending = cooldown_pool(&client, &base).await;
-    let pending_entry = cooled_probe_entry(&pending)
-        .expect("cooled exact identity must remain in the cooldown pool")
-        .clone();
-    assert_eq!(
-        pending_entry["state"], "probing",
-        "probe A must still be in flight after the newer failure"
-    );
-
-    // 5. Release the stale probe. Its completion is a no-op: newer cooldown
-    //    retained, permit released, sibling identity untouched.
-    cooled_peer.probe_release.add_permits(8);
-    timeout(Duration::from_secs(5), async {
-        loop {
-            let pool = cooldown_pool(&client, &base).await;
-            if cooled_probe_entry(&pool).is_some_and(|entry| entry["state"] != "probing") {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("released stale probe must complete and release its permit");
+        .expect("released trial must complete")
+        .unwrap()
+        .expect("the owned trial must produce its real provider outcome");
+    assert_eq!(trial_response.status(), 200);
+    let trial_body: Value = trial_response.json().await.unwrap();
+    let expected_trial_output = match outcome {
+        StaleProbeOutcome::Success => TRIAL_SUCCESS_PAYLOAD,
+        StaleProbeOutcome::Failure => HEALTHY_PAYLOAD,
+    };
+    assert_eq!(trial_body["output_text"], expected_trial_output);
 
     let settled = cooldown_pool(&client, &base).await;
     let settled_entry = cooled_probe_entry(&settled)
-        .expect("stale probe must not clear the newer cooled cooldown")
+        .expect("the stale trial must not clear the newer cooled cooldown")
         .clone();
-    assert_eq!(
-        settled_entry["failure_count"], pending_entry["failure_count"],
-        "the stale probe must not mutate the newer ownership state: {settled_entry}"
-    );
+    assert_eq!(settled_entry["until_ms"], extended_deadline);
     assert!(
         settled_entry["state"] != "probing",
-        "the completed stale probe must release its permit: {settled_entry}"
+        "the completed stale trial must release its permit: {settled_entry}"
     );
     assert!(
         settled_entry["until_ms"].as_u64().unwrap_or(0) > 0,
@@ -254,16 +206,35 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
             .unwrap()
             .iter()
             .any(|entry| entry["provider_id"] == "healthy"),
-        "the stale cooled probe must not create or mutate a healthy sibling entry"
+        "the stale cooled trial must not create or mutate a healthy sibling entry"
+    );
+    let after_stale = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "wire-test",
+            "input": BUSINESS_FAILURE_MARKER,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after_stale.status(), 200);
+    let after_stale_body: Value = after_stale.json().await.unwrap();
+    assert_eq!(after_stale_body["output_text"], HEALTHY_PAYLOAD);
+    assert!(
+        cooled_peer.captures.lock().await.len() == 2,
+        "the retained newer cooldown must keep a fresh request away from cooled"
     );
 
-    // 6. A singleton bypasses automatic cooldown and projects its final real
-    //    HTTP error; a concurrent healthy request still completes.
+    // 6. At the extended deadline the pinned identity may try again and
+    //    project its complete final HTTP error. Its sibling stays independent.
+    schedule_real_trial(&client, &base).await;
+    clock.0.store(extended_deadline + 1, Ordering::SeqCst);
     let exhausted = tokio::spawn(send_for_outcome(
         client.clone(),
         endpoint.clone(),
         "cooled.wire-test",
-        "issue231 singleton terminal failure",
+        TERMINAL_MARKER,
     ));
     let sibling = client
         .post(&endpoint)
@@ -309,11 +280,10 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     std::env::remove_var(AUTH_ENV);
 }
 
-/// Issue #231 public-entry regression: a stale provider cooldown rescue probe
-/// completion (both the success and failure branches) must not clear the newer
-/// same-identity failure, must release only its own permit, and must not abort
-/// target reselection to the healthy candidate on the real `/v1/responses`
-/// Relay entry.
+/// Issue #231 public-entry regression: a stale business-recovery trial
+/// completion (both the success and failure branches) must not clear a newer
+/// same-identity cooldown, must release only its own permit, and must not abort
+/// target reselection on the real `/v1/responses` Relay entry.
 #[tokio::test]
 async fn issue231_responses_relay_stale_probe_public_blackbox() {
     let _test_guard = TEST_LOCK.lock().await;

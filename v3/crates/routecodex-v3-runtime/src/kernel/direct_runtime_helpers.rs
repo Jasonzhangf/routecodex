@@ -148,10 +148,10 @@ pub(crate) struct V3DirectProviderFailurePolicyContext<
 > {
     failure_session_scope: &'ctx V3ProviderFailureSessionScope,
     provider_health: &'ctx V3ProviderFailureRuntimeHealth,
+    recovery_control: Option<&'ctx crate::execution_control::V3RequestExecutionControl>,
     availability: &'ctx R,
     expanded: Option<&'ctx routecodex_v3_target::V3Target09CandidateSetExpanded>,
     provider_pinned: bool,
-    now_epoch_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,12 +253,14 @@ fn record_v3_direct_provider_failure_record(
 fn record_v3_direct_provider_success(
     receipt: &V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
+    request_control: &crate::execution_control::V3RequestExecutionControl,
     failure_session_scope: &V3ProviderFailureSessionScope,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     now_epoch_ms: u64,
 ) -> crate::shared::V3DirectSourceResult<()> {
     provider_health
-        .record_provider_success_in_failure_scope_for_interface(
+        .record_provider_success_with_business_recovery(
+            request_control,
             receipt,
             failure_session_scope,
             &selected.candidate.provider_id,
@@ -820,6 +822,13 @@ targets = [
     }
 }
 
+fn v3_direct_selection_now_ms(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+) -> Result<u64, String> {
+    crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+        .map(|now_ms| provider_health.observation_now_ms(now_ms))
+}
+
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -846,6 +855,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             retryable_transient: false,
         });
     }
+    let failure_now_ms = v3_direct_selection_now_ms(context.provider_health).map_err(|error| {
+        direct_policy_failure(&source, "V3Target10ConcreteProviderSelected", error)
+    })?;
     let observed_status = source
         .external_error
         .as_ref()
@@ -892,7 +904,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             expanded_candidates,
             context.availability,
             &failed_with_current,
-            context.now_epoch_ms,
+            failure_now_ms,
         )
     });
     let mut next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
@@ -900,7 +912,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             expanded_candidates,
             context.availability,
             &failed_with_current,
-            context.now_epoch_ms,
+            failure_now_ms,
         )
     });
     if remaining == 0 {
@@ -913,7 +925,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                         !failed_with_current.contains(&key)
                             && routecodex_v3_target::V3TargetInterpreter::candidate_admitted(
                                 candidate,
-                                context.now_epoch_ms,
+                                failure_now_ms,
                             )
                             && context
                                 .provider_health
@@ -922,7 +934,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                                     &candidate.interface_id,
                                     Some(&candidate.auth_alias),
                                     Some(&candidate.model_id),
-                                    context.now_epoch_ms,
+                                    failure_now_ms,
                                 )
                                 .available
                     })
@@ -933,7 +945,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                         (!failed_with_current.contains(&key)
                             && routecodex_v3_target::V3TargetInterpreter::candidate_admitted(
                                 candidate,
-                                context.now_epoch_ms,
+                                failure_now_ms,
                             )
                             && context
                                 .provider_health
@@ -942,7 +954,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                                     &candidate.interface_id,
                                     Some(&candidate.auth_alias),
                                     Some(&candidate.model_id),
-                                    context.now_epoch_ms,
+                                    failure_now_ms,
                                 )
                                 .available)
                             .then(|| key)
@@ -960,7 +972,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 context.availability,
                 context.provider_health,
                 &failed_with_current,
-                context.now_epoch_ms,
+                failure_now_ms,
                 0,
             )
             .ok()
@@ -975,7 +987,20 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             .map(|alternative| candidate_key(&alternative.candidate));
     }
     let final_eligible = remaining == 0 && next_provider_key.is_none();
+    let trial_failed = match context.recovery_control {
+        Some(control) => context.provider_health.settle_business_recovery_failure(
+            control,
+            &selected.candidate.provider_id,
+            &selected.candidate.interface_id,
+            &selected.candidate.auth_alias,
+            &selected.candidate.model_id,
+            failure_now_ms,
+            !final_eligible,
+        ).map_err(|error| direct_policy_failure(&source, "V3ProviderHealthStateMutated", error))?,
+        None => false,
+    };
     if is_health_neutral_failure
+        && !trial_failed
         && !final_eligible
         && matches!(provider_http_status, Some(400..=402 | 404..=599))
     {
@@ -994,7 +1019,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     }
     // Health changes are allowed only after the captured target proves that
     // another eligible, untried identity can take this request.
-    let health_record = if is_health_neutral_failure || final_eligible {
+    let health_record = if is_health_neutral_failure || final_eligible || trial_failed {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
@@ -1002,6 +1027,8 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 "request_local_response_processing"
             } else if is_health_neutral_failure {
                 "request_local_provider_compat"
+            } else if trial_failed && !final_eligible {
+                "recovery_trial_failed"
             } else {
                 "last_candidate_terminal"
             }
@@ -1016,7 +1043,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             context.failure_session_scope,
             selected,
             &source,
-            context.now_epoch_ms,
+            failure_now_ms,
         ) {
             Ok(record) => record,
             Err(Ok(policy_failure)) => {

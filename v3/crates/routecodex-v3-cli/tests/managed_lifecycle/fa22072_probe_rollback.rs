@@ -1,4 +1,5 @@
-//! Actual managed control/exec rejection must retain scheduled probe recovery.
+//! Managed restart rollback preserves the listener owner; expired cooldown
+//! recovery must use a genuine business request, never a synthetic probe.
 use super::*;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -14,9 +15,10 @@ fn business_response() -> Value {
 struct ProbePeer {
     port: u16,
     captures: mpsc::Receiver<Value>,
-    probes: Arc<AtomicUsize>,
+    business: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
-    old_closed: Arc<AtomicBool>,
+    hold_key_recovery: Arc<AtomicBool>,
+    release_held: Arc<AtomicBool>,
     total: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
     task: Option<std::thread::JoinHandle<()>>,
@@ -28,15 +30,24 @@ impl ProbePeer {
         let port = listener.local_addr().unwrap().port();
         listener.set_nonblocking(true).unwrap();
         let (tx, captures) = mpsc::channel();
-        let probes = Arc::new(AtomicUsize::new(0));
+        let business = Arc::new(AtomicUsize::new(0));
         let active = Arc::new(AtomicUsize::new(0));
-        let old_closed = Arc::new(AtomicBool::new(false));
+        let hold_key_recovery = Arc::new(AtomicBool::new(false));
+        let release_held = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let total = Arc::new(AtomicUsize::new(0));
-        let (worker_probes, worker_active, worker_closed, worker_stop, worker_total) = (
-            probes.clone(),
+        let (
+            worker_business,
+            worker_active,
+            worker_hold,
+            worker_release,
+            worker_stop,
+            worker_total,
+        ) = (
+            business.clone(),
             active.clone(),
-            old_closed.clone(),
+            hold_key_recovery.clone(),
+            release_held.clone(),
             stop.clone(),
             total.clone(),
         );
@@ -51,11 +62,12 @@ impl ProbePeer {
                     }
                     Err(error) => panic!("probe peer accept: {error}"),
                 };
-                let (tx, probes, active, closed, stop, total) = (
+                let (tx, business, active, hold, release, _stop, total) = (
                     tx.clone(),
-                    worker_probes.clone(),
+                    worker_business.clone(),
                     worker_active.clone(),
-                    worker_closed.clone(),
+                    worker_hold.clone(),
+                    worker_release.clone(),
                     worker_stop.clone(),
                     worker_total.clone(),
                 );
@@ -83,33 +95,20 @@ impl ProbePeer {
                     reader.read_exact(&mut bytes).unwrap();
                     let body: Value = serde_json::from_slice(&bytes).unwrap();
                     let probe = body.to_string().contains("ping; reply pong") || body.to_string().contains("Reply exactly OK. Do not call tools.");
-                    eprintln!("FA22072 peer complete POST /v1/responses auth_alias={auth_alias} probe={probe} content_length={} body={body}", bytes.len());
+                    assert!(!probe, "automatic recovery must not send synthetic provider traffic: {body}");
+                    eprintln!("FA22072 peer complete POST /v1/responses auth_alias={auth_alias} content_length={} body={body}", bytes.len());
                     assert_eq!(body["model"], "wire-test");
                     total.fetch_add(1, Ordering::SeqCst);
                     tx.send(serde_json::json!({"probe":probe,"body":body,"auth_alias":auth_alias})).unwrap();
-                    if probe { assert_eq!(auth_alias, "key", "probe must use cooled exact key"); }
-                    if probe && probes.fetch_add(1, Ordering::SeqCst) == 0 {
-                        // Never open a remote response gate. Cancellation must
-                        // close the actual socket and release local ownership.
-                        stream.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
-                        let mut byte = [0];
-                        while !stop.load(Ordering::SeqCst) {
-                            match stream.read(&mut byte) {
-                                Ok(0) | Err(_) if stop.load(Ordering::SeqCst) => break,
-                                Ok(0) => { eprintln!("FA22072 managed probe A exact socket EOF"); closed.store(true, Ordering::SeqCst); break; }
-                                Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
-                                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => { eprintln!("FA22072 managed probe A reset kind={:?} os={:?}: {error}", error.kind(), error.raw_os_error()); closed.store(true, Ordering::SeqCst); break; }
-                                Err(error) => panic!("unclassified held probe socket failure: {error}"),
-                                Ok(_) => panic!("unexpected bytes on held probe"),
-                            }
+                    business.fetch_add(1, Ordering::SeqCst);
+                    if auth_alias == "key" && hold.swap(false, Ordering::SeqCst) {
+                        while !release.load(Ordering::SeqCst) {
+                            sleep(Duration::from_millis(5));
                         }
-                    } else {
-                        let response = if probe { "real 2xx probe".to_string() } else {
-                            business_response().to_string()
-                        };
-                        eprintln!("FA22072 peer response probe={probe} status=200 body={response}");
-                        write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).unwrap();
                     }
+                    let response = business_response().to_string();
+                    eprintln!("FA22072 peer response status=200 business body={response}");
+                    write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).unwrap();
                     drop(reader);
                     drop(stream);
                     active.fetch_sub(1, Ordering::SeqCst);
@@ -122,28 +121,42 @@ impl ProbePeer {
         Self {
             port,
             captures,
-            probes,
+            business,
             active,
-            old_closed,
+            hold_key_recovery,
+            release_held,
             total,
             stop,
             task: Some(task),
         }
     }
-    fn next_probe(&self, duration: Duration) {
+    fn next_business(&self, duration: Duration, expected_alias: &str) {
         let deadline = Instant::now() + duration;
         loop {
-            let capture = self.captures.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("retained managed runtime must issue scheduled authenticated probe before recovery business");
-            if capture["probe"] == true {
+            let capture = self
+                .captures
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("genuine business request must reach the expected provider identity");
+            if capture["probe"] == false {
                 assert_eq!(capture["body"]["model"], "wire-test");
-                assert_eq!(capture["auth_alias"], "key");
+                assert_eq!(capture["auth_alias"], expected_alias);
                 return;
             }
         }
     }
+
+    fn hold_next_key_business(&self) {
+        self.release_held.store(false, Ordering::SeqCst);
+        self.hold_key_recovery.store(true, Ordering::SeqCst);
+    }
+
+    fn release_key_business(&self) {
+        self.release_held.store(true, Ordering::SeqCst);
+    }
 }
 impl Drop for ProbePeer {
     fn drop(&mut self) {
+        self.release_held.store(true, Ordering::SeqCst);
         self.stop.store(true, Ordering::SeqCst);
         if self.task.take().unwrap().join().is_err() {
             if std::thread::panicking() {
@@ -162,12 +175,6 @@ fn add_cooldown(port: u16, model: &str, duration_ms: u64) {
     });
 }
 
-fn trigger_probe_now(port: u16, model: &str) {
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let response = reqwest::Client::new().post(format!("http://127.0.0.1:{port}/_routecodex/health/cooldown-pool/probe")).json(&serde_json::json!({"provider_id":"rollback","interface_id":"default","auth_alias":"key","model_id":model})).send().await.unwrap();
-        assert_eq!(response.status(),200);
-    });
-}
 fn cooled(pool: &Value, model: &str) -> Value {
     pool["entries"]
         .as_array()
@@ -193,11 +200,11 @@ fn wait_until(predicate: impl Fn() -> bool) {
 }
 
 #[test]
-fn managed_control_rejection_restores_due_only_probe_owner() {
+fn managed_control_rejection_retains_business_trial_owner() {
     witness(false);
 }
 #[test]
-fn managed_native_exec_error_restores_due_only_probe_owner() {
+fn managed_native_exec_error_retains_business_trial_owner() {
     witness(true);
 }
 
@@ -250,9 +257,9 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
     let control: Value = serde_json::from_slice(&control_bytes).unwrap();
     sleep(Duration::from_millis(100));
     rollback_business(ports[0], root.path(), &state, "auto");
+    peer.next_business(Duration::from_secs(2), "key");
     eprintln!("FA22072 healthy pre-cooldown success control completed");
-    add_cooldown(ports[0], "test", 5000);
-    trigger_probe_now(ports[0], "test");
+    add_cooldown(ports[0], "test", 1500);
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let response = reqwest::Client::new().post(format!("http://127.0.0.1:{}/v1/chat/completions", ports[0]))
             .json(&serde_json::json!({"model":"auto","messages":[{"role":"user","content":"uncached connection probe"}],"stream":false}))
@@ -265,26 +272,40 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
         "FA22072 after cooled business pool={}",
         http_get_json(ports[0], "/_routecodex/health/cooldown-pool")
     );
-    peer.next_probe(Duration::from_secs(2));
+    peer.next_business(Duration::from_secs(2), "spare");
     add_cooldown(ports[0], "test", 5000);
     let before = cooled(
         &http_get_json(ports[0], "/_routecodex/health/cooldown-pool"),
         "test",
     );
-    assert_eq!(before["state"], "probing");
+    assert_ne!(before["state"], "probing");
     assert_eq!(before["interface_id"], "default");
     assert_eq!(before["auth_alias"], "key");
-    assert!(!peer.old_closed.load(Ordering::SeqCst));
-    assert_eq!(
-        peer.active.load(Ordering::SeqCst),
-        1,
-        "only complete held exact-key probe A owns peer transport"
-    );
+    assert_eq!(peer.active.load(Ordering::SeqCst), 0);
     add_cooldown(ports[0], "sibling", 60000);
     let sibling = cooled(
         &http_get_json(ports[0], "/_routecodex/health/cooldown-pool"),
         "sibling",
     );
+    sleep(Duration::from_millis(5100));
+    assert_eq!(
+        peer.business.load(Ordering::SeqCst),
+        2,
+        "no automatic synthetic call while the cooldown is active"
+    );
+    peer.hold_next_key_business();
+    let recovery_root = root.path().to_path_buf();
+    let recovery_state = state.clone();
+    let recovery = std::thread::spawn(move || {
+        rollback_business(ports[0], &recovery_root, &recovery_state, "auto");
+    });
+    peer.next_business(Duration::from_secs(2), "key");
+    let owned = cooled(
+        &http_get_json(ports[0], "/_routecodex/health/cooldown-pool"),
+        "test",
+    );
+    assert_eq!(owned["failure_count"], before["failure_count"]);
+    assert_eq!(peer.active.load(Ordering::SeqCst), 1);
     let invalid = root.path().join("invalid-exec");
     fs::write(&invalid, b"#!/nonexistent/fa22072-probe-interpreter\n").unwrap();
     fs::set_permissions(&invalid, fs::Permissions::from_mode(0o700)).unwrap();
@@ -317,27 +338,17 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
         );
         fs::remove_dir(&blocker).unwrap();
     }
-    wait_until(|| {
-        peer.old_closed.load(Ordering::SeqCst) && peer.active.load(Ordering::SeqCst) == 0
-    });
     let after = cooled(
         &http_get_json(ports[0], "/_routecodex/health/cooldown-pool"),
         "test",
     );
-    assert_ne!(after["state"], "probing");
-    assert_eq!(after["until_ms"], before["until_ms"]);
     assert_eq!(after["failure_count"], before["failure_count"]);
     for port in ports {
         assert_eq!(http_get_json(port, "/health")["status"], "ok");
     }
-    sleep(Duration::from_millis(300));
-    assert_eq!(
-        peer.probes.load(Ordering::SeqCst),
-        1,
-        "rollback must preserve future due time"
-    );
-    peer.next_probe(Duration::from_secs(8));
-    eprintln!("FA22072 scheduled exact-key B admitted after A EOF with declared one-slot capacity; no recovery business yet");
+    assert_eq!(peer.active.load(Ordering::SeqCst), 1);
+    peer.release_key_business();
+    recovery.join().unwrap();
     wait_until(|| {
         !http_get_json(ports[0], "/_routecodex/health/cooldown-pool")["entries"]
             .as_array()
@@ -351,13 +362,6 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
     );
     assert_eq!(after["until_ms"], sibling["until_ms"]);
     assert_eq!(after["failure_count"], sibling["failure_count"]);
-    rollback_business(ports[0], root.path(), &state, "auto");
-    let recovery = peer.captures.recv_timeout(Duration::from_secs(2)).unwrap();
-    assert_eq!(recovery["probe"], false);
-    assert_eq!(
-        recovery["auth_alias"], "key",
-        "released exact-auth business admission"
-    );
     assert_eq!(fs::read(owner.join("control.json")).unwrap(), control_bytes);
     let cache: Value = serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
     assert_eq!(cache["pid"].as_u64().unwrap(), u64::from(process.pid));
@@ -366,15 +370,9 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
     assert!(!owner.join("provider-handoff.json").exists());
     drop(process);
     wait_until(|| peer.active.load(Ordering::SeqCst) == 0);
-    let count = peer.probes.load(Ordering::SeqCst);
     let captures = peer.total.load(Ordering::SeqCst);
     sleep(Duration::from_millis(1100));
-    assert_eq!(count, 2);
-    assert_eq!(
-        peer.probes.load(Ordering::SeqCst),
-        count,
-        "terminal managed shutdown must suppress captures"
-    );
+    assert_eq!(peer.business.load(Ordering::SeqCst), 3);
     assert_eq!(
         peer.total.load(Ordering::SeqCst),
         captures,

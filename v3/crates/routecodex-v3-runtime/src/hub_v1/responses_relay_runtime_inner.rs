@@ -408,6 +408,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let shared_retry_policy = retry_policy.as_shared_policy();
         let provider_failure_health = provider_health.clone();
         let failure_context = V3RelayProviderFailurePolicyContext {
+            recovery_control: Some(&request_execution_control),
             manifest,
             captured_target_09: Some(&retained_expanded),
             failure_session_scope: input.failure_session_scope.clone(),
@@ -721,6 +722,25 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 .map(|history| {
                     history.capture_attempt(transport_request.body(), provider_wire_protocol)
                 });
+            if !provider_health
+                .acquire_business_recovery_trial(
+                    &request_execution_control,
+                    &selected_target_provider_id,
+                    &selected_target_interface_id,
+                    &selected_target_auth_alias,
+                    &selected_target_model_id,
+                    v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(V3ResponsesRelayRuntimeError::ExecutionControl)?,
+                )
+                .map_err(V3ResponsesRelayRuntimeError::ExecutionControl)?
+            {
+                failed_candidates.insert(
+                    crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                        &selected.candidate,
+                    ),
+                );
+                continue;
+            }
             provider_send_attempts =
                 handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
                     |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
@@ -1052,7 +1072,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         &local_tool_output_ids.consumed_ids,
                     );
                     handle_error_before_resp03!(provider_health
-                        .record_provider_success_in_failure_scope_for_interface(
+                        .record_provider_success_with_business_recovery(
+                            &request_execution_control,
                             &attempt_success_receipt,
                             &failure_context.failure_session_scope,
                             &selected_target_provider_id,
@@ -1313,7 +1334,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         &local_tool_output_ids.consumed_ids,
                     );
                     handle_error_before_resp03!(provider_health
-                        .record_provider_success_in_failure_scope_for_interface(
+                        .record_provider_success_with_business_recovery(
+                            &request_execution_control,
                             &attempt_success_receipt,
                             &failure_context.failure_session_scope,
                             &selected_target_provider_id,
