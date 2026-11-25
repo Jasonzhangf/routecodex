@@ -12,6 +12,10 @@ const repoRoot = process.env.ROUTECODEX_V3_SOURCE_ROOT
   : resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const paths = {
   fieldMatrix: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+  authoritativeContract: 'AGENTS.md',
+  developmentSkill: '.agents/skills/rcc-dev-skills/SKILL.md',
+  fieldProjectionDesign: 'docs/design/v3-protocol-request-field-projection.md',
+  fieldParityTestDesign: 'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   operationFieldProfiles: 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
   requestFieldProjectionManifest: 'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
   requestFieldProjectionModules: 'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
@@ -37,6 +41,7 @@ const projectionManifest = readYaml(paths.requestFieldProjectionManifest);
 const projectionModules = readYaml(paths.requestFieldProjectionModules);
 const failures = [];
 const helpers = attachParityHelpers({ failures, paths, operationFieldProfiles }, { current: fieldMatrix });
+const normalizedDeclaration = (value) => String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 for (const semantic of [
   'request.metadata', 'request.client_metadata', 'request.prompt_cache_key', 'request.store',
@@ -101,11 +106,85 @@ for (const value of ['mapped_exact', 'mapped_compatible_registered', 'unsupporte
   if (!JSON.stringify(contract?.projection_class_bridge ?? {}).includes(value)) failures.push(`${paths.fieldMatrix}: projection class bridge missing ${value}`);
 }
 for (const value of [
-  'no_local_business_shape_rejection', 'opaque_original_value_forwarded_with_inverse_association',
+  'complete_unmatched_business_field_warn_diagnose_omit_continue',
+  'no_local_abort_or_reselection_for_complete_unmatched_business_field',
   'ControlFieldLeak', 'recursive automatic strip', 'unknown source field ignore',
   'request.include', 'request.client_metadata', 'request.container', 'request.safetySettings', 'metadata_center', '_debug',
 ]) {
   if (!JSON.stringify(contract ?? {}).includes(value)) failures.push(`${paths.fieldMatrix}: outbound projection contract missing ${value}`);
+}
+const unmatchedRuleLocations = {
+  'protocol_priority': fieldMatrix?.protocol_priority,
+  'status_legend.covered_but_target_dependent':
+    fieldMatrix?.audit_truth_contract?.status_legend?.covered_but_target_dependent,
+  'projection_status_legend.unsupported': fieldMatrix?.audit_truth_contract?.projection_status_legend?.unsupported,
+  'outbound_projection_contract.legacy_outbound_consumption_statuses.target_unsupported':
+    fieldMatrix?.outbound_projection_contract?.legacy_outbound_consumption_statuses?.target_unsupported,
+};
+for (const [location, text] of Object.entries(unmatchedRuleLocations)) {
+  const value = normalizedDeclaration(text);
+  for (const required of ['warn', 'diagnostic evidence', 'omit', 'mapped remainder']) {
+    if (!value.includes(required)) failures.push(`${paths.fieldMatrix}: ${location} must declare ${required}`);
+  }
+  for (const forbidden of [
+    'opaque_original_value_forwarded_with_inverse_association',
+    'unmapped business values retain their original opaque value',
+    'preserve the original value opaquely and its paired inverse association',
+    'preserve non-intersection values opaquely with their inverse association',
+    'unknown business keys retain their original opaque value and inverse association',
+    'retains unmatched values opaquely',
+  ]) {
+    if (value.includes(forbidden)) failures.push(`${paths.fieldMatrix}: ${location} restores obsolete opaque forwarding`);
+  }
+}
+const matrixText = normalizedDeclaration(JSON.stringify(fieldMatrix));
+for (const forbidden of [
+  'opaque_original_value_forwarded_with_inverse_association',
+  'unmapped business values retain their original opaque value',
+  'preserve the original value opaquely and its paired inverse association',
+  'preserve non-intersection values opaquely with their inverse association',
+  'unknown business keys retain their original opaque value and inverse association',
+  'retains unmatched values opaquely',
+]) {
+  if (matrixText.includes(forbidden)) failures.push(`${paths.fieldMatrix}: stale opaque forwarding declaration ${forbidden}`);
+}
+const authoritativeContract = readFileSync(resolve(repoRoot, paths.authoritativeContract), 'utf8');
+if (authoritativeContract.includes('Preserve unknown or unrepresentable business fields as opaque data through the paired request/response cycle')) {
+  failures.push(`${paths.authoritativeContract}: stale unmatched-field opaque-forward rule`);
+}
+const projectionDesign = readFileSync(resolve(repoRoot, paths.fieldProjectionDesign), 'utf8');
+const parityTestDesign = readFileSync(resolve(repoRoot, paths.fieldParityTestDesign), 'utf8');
+for (const [path, text] of [
+  [paths.fieldProjectionDesign, projectionDesign],
+  [paths.fieldParityTestDesign, parityTestDesign],
+]) {
+  if (text.includes('UnmappedOutboundFields')) failures.push(`${path}: stale complete-unmatched field failure declaration`);
+  const normalized = normalizedDeclaration(text);
+  for (const forbidden of [
+    'unknown keys fail',
+    'fails as unmapped',
+    'provider send is forbidden',
+    'explicit unmapped error',
+    'other keys remain response context or fail per matrix',
+  ]) {
+    if (normalized.includes(forbidden)) failures.push(`${path}: stale complete-unmatched failure phrase ${forbidden}`);
+  }
+  const lower = text.toLowerCase();
+  for (const required of ['warn', 'diagnostic', 'omit', 'remainder']) {
+    if (!lower.includes(required)) failures.push(`${path}: missing nonblocking unmatched-field term ${required}`);
+  }
+  for (const required of [
+    'allowlist absence alone',
+    'scoped local diagnostic evidence',
+    'mapped remainder',
+    'malformed registered values',
+  ]) {
+    if (!lower.includes(required)) failures.push(`${path}: missing approved complete-unmatched policy term ${required}`);
+  }
+}
+const developmentSkill = readFileSync(resolve(repoRoot, paths.developmentSkill), 'utf8').toLowerCase();
+for (const required of ['inbound', 'lossless conversion', 'outbound', 'allowlist', 'scoped local diagnostic evidence', 'mapped remainder']) {
+  if (!developmentSkill.includes(required)) failures.push(`${paths.developmentSkill}: missing approved Inbound/Outbound rule term ${required}`);
 }
 const fieldMapPath = 'v3/crates/routecodex-v3-runtime/tables/request_field_map.json';
 const fieldMap = JSON.parse(readFileSync(resolve(repoRoot, fieldMapPath), 'utf8'));

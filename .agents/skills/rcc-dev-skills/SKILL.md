@@ -9,6 +9,12 @@ description: "RouteCodex V3 开发与排障：定位首次偏离和唯一 owner�
 
 纯文档/规则修改只检查受影响内容与引用。代码任务先检查受影响 DAG；不为文档编辑运行构建、安装、重启或全量 gate。
 
+## Inbound and Outbound Field Rule
+
+- Inbound performs complete, lossless conversion for parseable request and response payloads. It does not filter business fields. A missing conversion is Chat Process work and must be added, not treated as permission to reject or omit the source field.
+- Outbound applies the declared target allowlist mechanically. A complete valid business field with no target allowlist mapping produces a warning and scoped local diagnostic evidence, is omitted from provider wire, and leaves the mapped remainder running. Allowlist absence alone must not cause local abort, provider reselection, or a synthetic status.
+- Malformed registered values, invalid pairings, control leaks, source-schema invalidity, capability failures, and genuinely unrepresentable protocol boundaries keep their separate owners and outcomes; they are not allowlist-absence cases.
+
 ## Command-First Flow
 
 1. 读受影响 DAG 和当前任务笔记。DAGPipe 模块从[图入口](../../../docs/architecture/dagpipe/README.md)定位；复用未变图的有效校验。独立设计审查仅在用户或项目明确要求时启动。
