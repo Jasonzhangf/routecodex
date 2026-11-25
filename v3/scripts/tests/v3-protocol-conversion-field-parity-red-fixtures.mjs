@@ -11,6 +11,10 @@ const matrix = 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml'
 const profiles = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
 const files = [
   matrix, profiles,
+  'AGENTS.md',
+  '.agents/skills/rcc-dev-skills/SKILL.md',
+  'docs/design/v3-protocol-request-field-projection.md',
+  'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
   'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
   'docs/architecture/v3-function-map.yml',
