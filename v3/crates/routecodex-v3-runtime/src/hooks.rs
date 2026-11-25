@@ -609,18 +609,19 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             &request_body,
             &crate::hub_v1::provider_protocol_compat_id(provider_protocol),
         )
-        .and_then(|registry| {
-            registry.project_request(
-                &mut request_body,
-                &crate::hub_v1::provider_protocol_compat_id(provider_protocol),
-            )?;
+        .and_then(|mut registry| {
             if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses
                 && matches!(
                     profile,
                     crate::hub_v1::V3ProviderCompatProfileId::Passthrough
                 )
             {
-                registry.preserve_native_additional_tool_declarations(&mut request_body)?;
+                registry.project_responses_passthrough_request(&mut request_body)?;
+            } else {
+                registry.project_request(
+                    &mut request_body,
+                    &crate::hub_v1::provider_protocol_compat_id(provider_protocol),
+                )?;
             }
             Ok(registry)
         })

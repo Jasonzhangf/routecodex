@@ -12695,15 +12695,20 @@ fn namespace_public_tool_description(tool: &Value) -> Option<&str> {
 }
 
 fn namespace_public_provider_tools(body: &Value) -> Vec<Value> {
-    fn collect(tools: &[Value], prefix: &str, output: &mut Vec<Value>) {
+    fn collect(tools: &[Value], path: &mut Vec<String>, output: &mut Vec<Value>) {
         for tool in tools {
             if tool["type"] == "namespace" {
-                let namespace = format!("{prefix}{}__", tool["name"].as_str().unwrap());
-                collect(tool["tools"].as_array().unwrap(), &namespace, output);
+                path.push(tool["name"].as_str().unwrap().to_owned());
+                collect(tool["tools"].as_array().unwrap(), path, output);
+                path.pop();
             } else {
                 let mut tool = tool.clone();
-                if let Some(name) = tool["name"].as_str() {
-                    tool["name"] = json!(format!("{prefix}{name}"));
+                if !path.is_empty() {
+                    if let Some(name) = tool["name"].as_str().map(str::to_owned) {
+                        tool["name"] = json!(format!("{}__{name}", path.join("__")));
+                        tool["namespace"] = json!(path.join("."));
+                        tool["leaf"] = json!(name);
+                    }
                 }
                 output.push(tool);
             }
@@ -12716,10 +12721,118 @@ fn namespace_public_provider_tools(body: &Value) -> Vec<Value> {
         .unwrap_or_default();
     for item in body["input"].as_array().into_iter().flatten() {
         if item["type"] == "additional_tools" {
-            collect(item["tools"].as_array().unwrap(), "", &mut tools);
+            collect(
+                item["tools"].as_array().unwrap(),
+                &mut Vec::new(),
+                &mut tools,
+            );
         }
     }
     tools
+}
+
+const COLLISION_CALL: &str = "call_ns_additional_collision";
+
+fn check_collision_namespace_attempt(body: &Value, tools: &[Value]) -> Option<bool> {
+    let input = body["input"].as_array()?;
+    let latest = tools
+        .iter()
+        .find(|tool| tool["description"] == format!("NS_DECL:{COLLISION_CALL}"))?;
+    let previous = tools
+        .iter()
+        .find(|tool| tool["description"] == "Prior collision schema");
+    let alias = latest["name"].as_str();
+    let state = |id: &str, ty: &str| {
+        input
+            .iter()
+            .find(|item| item["type"] == ty && item["call_id"] == id)
+    };
+    let prior_call = state("prior_collision", "function_call");
+    let prior_output = state("prior_collision", "function_call_output");
+    let wrong_kind = state("wrong_kind_history", "function_call");
+    let carriers: Vec<_> = input
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "additional_tools")
+        .collect();
+    let local_flat_declaration = |description: &str, argument: &str| {
+        json!({
+            "type":"function", "name":"fixture__lookup_1", "description":description,
+            "opaque":argument, "parameters":{"type":"object","properties":{(argument):{"type":"integer"}}}
+        })
+    };
+    let ordered_carriers = match carriers.as_slice() {
+        [(old, old_carrier), (new, new_carrier)] => {
+            let call = input.iter().position(|item| {
+                item["call_id"] == "prior_collision" && item["type"] == "function_call"
+            });
+            let output = input.iter().position(|item| {
+                item["call_id"] == "prior_collision" && item["type"] == "function_call_output"
+            });
+            matches!((call, output), (Some(call), Some(output)) if *old < call && call < output && output < *new)
+                && old_carrier["tools"][0]
+                    == local_flat_declaration("Prior collision schema", "old_probe")
+                && new_carrier["tools"].as_array().is_some_and(|tools| {
+                    tools.contains(&local_flat_declaration(
+                        &format!("NS_DECL:{COLLISION_CALL}"),
+                        "probe",
+                    ))
+                })
+        }
+        _ => false,
+    };
+    let keeps_history = previous.is_some_and(|tool| {
+        tool["name"] == latest["name"]
+            && tool["parameters"]["properties"]["old_probe"]["type"] == "integer"
+            && tool["opaque"] == "old_probe"
+    }) && prior_call.is_some_and(|item| {
+        item["name"] == latest["name"] && item["arguments"] == "{\"old_probe\":2}"
+    }) && prior_output.is_some_and(|item| item["output"] == "prior result")
+        && wrong_kind
+            .is_some_and(|item| item["name"] == "native.keep" && item.get("namespace").is_none());
+    let has_declarations = alias == Some("fixture__lookup_1")
+        && latest["parameters"]["properties"]["probe"]["type"] == "integer"
+        && latest["opaque"] == "probe"
+        && tools.iter().any(|tool| {
+            tool["name"] == "fixture__lookup" && tool["description"] == "NS_PLAIN:fixture__lookup"
+        })
+        && tools.iter().any(|tool| {
+            tool["namespace"] == "native" && tool["leaf"] == "keep" && tool["type"] == "custom"
+        });
+    if !ordered_carriers || !keeps_history || !has_declarations {
+        return Some(false);
+    }
+    if body["tool_choice"] == "none" {
+        return Some(
+            state(COLLISION_CALL, "function_call").is_some_and(|item| {
+                item["name"] == latest["name"] && item["arguments"] == "{\"probe\":1}"
+            }) && state(COLLISION_CALL, "function_call_output").is_some_and(|item| {
+                item["output"] == "{\"handled\":\"lookup\",\"read_only\":true,\"result\":42}"
+            }) && [
+                ("wrong_kind_response", "fixture__lookup_1", "raw wrong kind"),
+                ("unemitted_alias", "native__keep", "raw undeclared spelling"),
+            ]
+            .into_iter()
+            .all(|(id, name, input)| {
+                state(id, "custom_tool_call").is_some_and(|item| {
+                    item["name"] == name
+                        && item["input"] == input
+                        && item.get("namespace").is_none()
+                }) && state(id, "custom_tool_call_output")
+                    .is_some_and(|item| item["output"] == "unsupported fixture tool")
+            }),
+        );
+    }
+    Some(
+        body["tool_choice"]
+            == json!({
+                "type":"allowed_tools","mode":"required","tools":[
+                    {"type":"function","name":"fixture__lookup_1"},
+                    {"type":"custom","namespace":"native","name":"keep"},
+                    {"type":"mcp","server_label":"remote","name":"fixture.lookup"}
+                ]
+            }),
+    )
 }
 
 async fn namespace_public_upstream(
@@ -12731,17 +12844,30 @@ async fn namespace_public_upstream(
         .captures
         .send(ProviderCapture::from_http(&headers, body.clone()))
         .unwrap();
-    let has_tool_output = body
-        .get("input")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                matches!(
-                    item.get("type").and_then(Value::as_str),
-                    Some("function_call_output" | "custom_tool_call_output")
-                )
+    let tools = namespace_public_provider_tools(&body);
+    let collision = check_collision_namespace_attempt(&body, &tools);
+    if collision == Some(false) {
+        return Response::builder()
+            .status(StatusCode::UNPROCESSABLE_ENTITY)
+            .body(Body::from(
+                "namespace declaration, selection or paired result mismatched",
+            ))
+            .unwrap();
+    }
+    let has_tool_output = if collision.is_some() {
+        body["tool_choice"] == "none"
+    } else {
+        body.get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    matches!(
+                        item.get("type").and_then(Value::as_str),
+                        Some("function_call_output" | "custom_tool_call_output")
+                    )
+                })
             })
-        });
+    };
     let output = if has_tool_output {
         json!([{
             "type": "message",
@@ -12750,18 +12876,36 @@ async fn namespace_public_upstream(
             "content": [{"type": "output_text", "text": "NS_CASE_DONE"}]
         }])
     } else {
-        let calls = namespace_public_provider_tools(&body)
+        let discovered = body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["type"] == "tool_search_output")
+            .flat_map(|item| item["tools"].as_array().into_iter().flatten())
+            .filter_map(namespace_public_tool_wire_name)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut calls = tools
             .iter()
             .filter_map(|tool| {
                 let call_id = namespace_public_tool_description(tool)?.strip_prefix("NS_DECL:")?;
-                let name = namespace_public_tool_wire_name(tool)?;
-                Some(if tool.get("type").and_then(Value::as_str) == Some("custom") {
+                let wire_name = namespace_public_tool_wire_name(tool)?;
+                let namespace = tool["namespace"].as_str().filter(|_| !discovered.contains(wire_name));
+                let name = namespace.and_then(|_| tool["leaf"].as_str()).unwrap_or(wire_name);
+                let mut call = if tool.get("type").and_then(Value::as_str) == Some("custom") {
                     json!({"type":"custom_tool_call","call_id":call_id,"name":name,"input":"raw_probe"})
                 } else {
                     json!({"type":"function_call","call_id":call_id,"name":name,"arguments":"{\"probe\":1}"})
-                })
+                };
+                if let Some(namespace) = namespace {
+                    call["namespace"] = json!(namespace);
+                }
+                Some(call)
             })
             .collect::<Vec<_>>();
+        if collision.is_some() {
+            calls.push(json!({"type":"custom_tool_call","call_id":"wrong_kind_response","name":"fixture__lookup_1","input":"raw wrong kind"}));
+            calls.push(json!({"type":"custom_tool_call","call_id":"unemitted_alias","name":"native__keep","input":"raw undeclared spelling"}));
+        }
         if calls.is_empty() {
             json!([{
                 "type": "message",
@@ -12850,6 +12994,8 @@ fn namespace_public_client_call(wire: &str, stream: bool, call_id: &str) -> Valu
                 .unwrap_or_else(|| panic!("client SSE must include {kind} for {call_id}: {wire}"));
             assert_eq!(item["item"]["namespace"], call["namespace"]);
             assert_eq!(item["item"]["name"], call["name"]);
+            assert_eq!(item["item"]["type"], call["type"]);
+            assert_eq!(item["item"]["input"], call["input"]);
             assert_eq!(item["item"]["arguments"], call["arguments"]);
         }
         call
@@ -13031,6 +13177,7 @@ async fn namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native
 }
 
 struct NamespacePublicCase {
+    native_additional: bool,
     label: &'static str,
     call_id: &'static str,
     expected_provider_name: Option<&'static str>,
@@ -13103,6 +13250,36 @@ async fn run_namespace_public_case(
                 case.label
             )
         });
+    if request["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["type"] == "tool_search_output" && item["call_id"] == "search_nested")
+    {
+        let wire_input = first_capture.body["input"].as_array().unwrap();
+        let discovery = wire_input
+            .iter()
+            .find(|item| item["type"] == "tool_search_output" && item["call_id"] == "search_nested")
+            .expect("the provider must receive the original discovery result");
+        assert!(
+            discovery["tools"].as_array().unwrap().iter().any(|tool| {
+                tool["type"] == "function"
+                    && tool["name"] == "outer__inner__leaf"
+                    && tool["description"] == "NS_DECL:call_ns_nested"
+            }),
+            "the provider must receive the declared discovery alias: {discovery}"
+        );
+        let additional = request["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "additional_tools")
+            .unwrap();
+        assert!(
+            wire_input.contains(additional),
+            "the native declaration must remain in its carrier"
+        );
+    }
     let provider_tools = namespace_public_provider_tools(&first_capture.body);
     let expected_description = format!("NS_DECL:{}", case.call_id);
     let declared = provider_tools
@@ -13168,6 +13345,20 @@ async fn run_namespace_public_case(
     }
 
     let call = namespace_public_client_call(&wire, case.stream, case.call_id);
+    let mut rejected = Vec::new();
+    if case.call_id == COLLISION_CALL {
+        for (id, name, input) in [
+            ("wrong_kind_response", "fixture__lookup_1", "raw wrong kind"),
+            ("unemitted_alias", "native__keep", "raw undeclared spelling"),
+        ] {
+            let untouched = namespace_public_client_call(&wire, case.stream, id);
+            assert_eq!(untouched["type"], "custom_tool_call");
+            assert_eq!(untouched["name"], name);
+            assert_eq!(untouched["input"], input);
+            assert!(untouched.get("namespace").is_none());
+            rejected.push(untouched);
+        }
+    }
     assert_eq!(
         call["namespace"], case.expected_namespace,
         "[{}] client identity namespace: {call}; client_wire={wire}",
@@ -13199,7 +13390,13 @@ async fn run_namespace_public_case(
         (Some(namespace), Some(name))
             if namespace == case.expected_namespace && name == case.expected_name =>
         {
-            json!({"handled": name, "read_only": true})
+            let mut result = json!({"handled": name, "read_only": true});
+            if case.call_id == COLLISION_CALL {
+                let arguments: Value =
+                    serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+                result["result"] = json!(arguments["probe"].as_i64().unwrap() + 41);
+            }
+            result
         }
         other => panic!(
             "[{}] consumer cannot dispatch namespace identity {other:?}: {call}",
@@ -13215,6 +13412,13 @@ async fn run_namespace_public_case(
         "call_id": case.call_id,
         "output": output_text
     }));
+    for rejected_call in rejected {
+        let error = json!({"type":"custom_tool_call_output", "call_id":rejected_call["call_id"], "output":"unsupported fixture tool"});
+        followup["input"]
+            .as_array_mut()
+            .unwrap()
+            .extend([rejected_call, error]);
+    }
     followup["tool_choice"] = json!("none");
     let second = client
         .post(endpoint)
@@ -13296,13 +13500,13 @@ async fn run_namespace_public_case(
         case.label,
         second_capture.body
     );
-    assert_eq!(
-        history_call["name"].as_str(),
-        Some(wire_name.as_str()),
-        "[{}] follow-up history must reuse the declared wire name: {}",
-        case.label,
-        second_capture.body
-    );
+    if case.native_additional {
+        assert_eq!(history_call["namespace"], case.expected_namespace);
+        assert_eq!(history_call["name"], case.expected_name);
+    } else {
+        assert_eq!(history_call["name"].as_str(), Some(wire_name.as_str()));
+        assert!(history_call.get("namespace").is_none());
+    }
     let history_output = second_input
         .iter()
         .find(|item| {
@@ -13383,6 +13587,7 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
     };
 
     let ordinary = NamespacePublicCase {
+        native_additional: false,
         label: "ordinary-namespace-separator",
         call_id: "call_ns_ordinary",
         expected_provider_name: Some("workspace__tools__read"),
@@ -13417,8 +13622,9 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
     )
     .await;
 
-    for stream in [false, true] {
+    for (stream, discover) in [(false, false), (true, false), (false, true), (true, true)] {
         let nested = NamespacePublicCase {
+            native_additional: true,
             label: if stream {
                 "nested-additional-tools-sse"
             } else {
@@ -13432,7 +13638,7 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
             expect_provider_choice: false,
             distinct_from_description: None,
         };
-        let nested_request = json!({
+        let mut nested_request = json!({
             "model": "client-test",
             "stream": stream,
             "input": [
@@ -13456,10 +13662,19 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
                 user_message("NS_CASE_NESTED")
             ]
         });
+        if discover {
+            let discovered = nested_request["input"][0]["tools"].clone();
+            nested_request["tools"] = json!([{"type":"tool_search","execution":"client"}]);
+            nested_request["input"].as_array_mut().unwrap().splice(0..0, [
+                json!({"type":"tool_search_call","call_id":"search_nested","execution":"client","status":"completed","arguments":{"query":"fixture leaf"}}),
+                json!({"type":"tool_search_output","call_id":"search_nested","execution":"client","status":"completed","tools":discovered})
+            ]);
+        }
         run_namespace_public_case(&client, &endpoint, &mut captures, &nested, nested_request).await;
     }
 
     let discovered = NamespacePublicCase {
+        native_additional: false,
         label: "discovered-leading-underscore-leaf",
         call_id: "call_ns_discovered",
         expected_provider_name: Some("mcp__codex_apps__gmail___archive_emails"),
@@ -13509,6 +13724,7 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
     .await;
 
     let custom = NamespacePublicCase {
+        native_additional: false,
         label: "custom-child",
         call_id: "call_ns_custom",
         expected_provider_name: Some("workspace__run"),
@@ -13536,6 +13752,7 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
     run_namespace_public_case(&client, &endpoint, &mut captures, &custom, custom_request).await;
 
     let collision = NamespacePublicCase {
+        native_additional: false,
         label: "plain-name-collision",
         call_id: "call_ns_collision",
         expected_provider_name: None,
@@ -13583,6 +13800,54 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
         collision_request,
     )
     .await;
+
+    for stream in [false, true] {
+        let case = NamespacePublicCase {
+            native_additional: false,
+            label: "additional-tools-collision-with-history",
+            call_id: COLLISION_CALL,
+            expected_provider_name: Some("fixture__lookup_1"),
+            expected_namespace: "fixture",
+            expected_name: "lookup",
+            stream,
+            expect_provider_choice: false,
+            distinct_from_description: Some("NS_PLAIN:fixture__lookup"),
+        };
+        let namespace_tool = |description: &str, argument: &str| {
+            json!({
+                "type":"namespace","name":"fixture","tools":[{
+                    "type":"function","name":"lookup","description": description,"opaque":argument,
+                    "parameters":{"type":"object","properties":{(argument):{"type":"integer"}}}
+                }]
+            })
+        };
+        let request = json!({
+            "model":"client-test","stream":stream,
+            "tools":[{"type":"function","name":"fixture__lookup","description":"NS_PLAIN:fixture__lookup","parameters":{"type":"object"}}],
+            "input":[
+                {"type":"additional_tools","role":"developer","tools":[namespace_tool("Prior collision schema", "old_probe")]},
+                user_message("NS_CASE_ADDITIONAL_COLLISION"),
+                {"type":"function_call","namespace":"fixture","name":"lookup","call_id":"prior_collision","arguments":"{\"old_probe\":2}"},
+                {"type":"function_call_output","call_id":"prior_collision","output":"prior result"},
+                {"type":"additional_tools","role":"developer","tools":[
+                    namespace_tool(&format!("NS_DECL:{COLLISION_CALL}"), "probe"),
+                    {"type":"namespace","name":"native","tools":[{"type":"custom","name":"keep","format":{"type":"text"}}]}
+                ]},
+                {"type":"function_call","name":"native.keep","call_id":"wrong_kind_history","arguments":"{}"},
+                {"type":"function_call_output","call_id":"wrong_kind_history","output":"unsupported function"}
+            ],
+            "tool_choice":{"type":"allowed_tools","mode":"required","tools":[
+                {"type":"function","namespace":"fixture","name":"lookup"},
+                {"type":"custom","namespace":"native","name":"keep"},
+                {"type":"mcp","server_label":"remote","name":"fixture.lookup"}
+            ]}
+        });
+        run_namespace_public_case(&client, &endpoint, &mut captures, &case, request).await;
+        assert!(
+            captures.try_recv().is_err(),
+            "unexpected additional provider attempt"
+        );
+    }
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

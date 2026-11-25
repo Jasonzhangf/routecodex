@@ -131,6 +131,12 @@ fn check(body: &Value, target: &str) -> Vec<String> {
         if unique.len() != names.len() {
             errors.push(format!("duplicate executable tool declarations: {names:?}"));
         }
+        if body["tool_choice"]["name"] == "math__sum_1" {
+            let choice = body["tool_choice"]["name"].as_str().unwrap();
+            if !names.iter().any(|name| name == choice) {
+                errors.push(format!("forced choice has no declaration: {choice}"));
+            }
+        }
     }
     if target != "responses" {
         let wire = body.to_string();
@@ -284,7 +290,7 @@ async fn upstream(State(state): State<Upstream>, Json(body): Json<Value>) -> Res
         .unwrap()
 }
 
-async fn run(target: &'static str, direct_mode: bool) {
+async fn run(target: &'static str, direct_mode: bool, collision: bool) {
     let _lock = LOCK.lock().await;
     let home = Home::new(target);
     let (captures, mut receiver) = mpsc::unbounded_channel();
@@ -364,15 +370,30 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
             .unwrap()
             .push(json!({"type":"function","name":"ordinary","parameters":{"type":"object"}}));
     }
+    if collision {
+        add_colliding_tool(&mut first_request);
+    } else if direct_mode {
+        first_request["tool_choice"] = json!({"type":"function","namespace":"math","name":"sum"});
+    }
     let result = client.post(&endpoint).json(&first_request).send().await;
     let capture = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
         .await
         .unwrap()
         .unwrap();
     eprintln!("SIGNATURE_TARGET_WIRE target={target} {capture}");
-    if direct_mode {
+    if collision {
+        assert_eq!(capture["body"]["tool_choice"]["name"], "math__sum_1");
+        assert_eq!(capture["body"]["input"][0]["opaque"], "retained");
+        let declarations = capture["body"]["input"][0]["tools"].as_array().unwrap();
+        assert!(declarations.iter().any(|tool| {
+            tool["name"] == "math__sum_1"
+                && tool["parameters"]["properties"]["left"]["type"] == "integer"
+        }));
+    } else if direct_mode {
         assert_eq!(capture["body"]["input"][0], first_request["input"][0]);
         assert_eq!(capture["body"]["tools"][0]["name"], "ordinary");
+        assert_eq!(capture["body"]["tool_choice"], first_request["tool_choice"]);
+        assert_native_history(&first_request, &capture["body"]);
     }
     let mut errors: Vec<String> = capture["errors"]
         .as_array()
@@ -399,6 +420,9 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
             let mut followup_request = request(calls);
             followup_request["input"].as_array_mut().unwrap().insert(0,
                 json!({"type":"additional_tools","role":"developer","tools":tools(),"opaque":"retained"}));
+            if collision {
+                add_colliding_tool(&mut followup_request);
+            }
             let followup = client
                 .post(&endpoint)
                 .json(&followup_request)
@@ -410,6 +434,9 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
             assert_eq!(followup["status"], "completed");
             let capture = receiver.recv().await.unwrap();
             assert_eq!(capture["errors"], json!([]));
+            if direct_mode && !collision {
+                assert_native_history(&followup_request, &capture["body"]);
+            }
         } else {
             let records = std::fs::read_to_string(&log).unwrap_or_default();
             eprintln!("SIGNATURE_TARGET_DROP target={target} {records}");
@@ -460,6 +487,33 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
     task.await.unwrap();
     assert!(errors.is_empty(), "target {target}: {}", errors.join("\n"));
 }
+
+fn assert_native_history(request: &Value, wire: &Value) {
+    let calls = |body: &Value| {
+        body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item["type"].as_str(),
+                    Some("function_call" | "custom_tool_call")
+                )
+            })
+            .map(|item| json!([item["call_id"], item["namespace"], item["name"]]))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(calls(wire), calls(request));
+}
+
+fn add_colliding_tool(request: &mut Value) {
+    request["tools"].as_array_mut().unwrap().push(json!({
+        "type":"function", "name":"math__sum", "description":"An unrelated standalone tool",
+        "parameters":{"type":"object","properties":{"label":{"type":"string"}}}
+    }));
+    request["tool_choice"] = json!({"type":"function","name":"math.sum"});
+}
+
 fn super_call(call: &Value) -> Value {
     calls()
         .into_iter()
@@ -469,18 +523,23 @@ fn super_call(call: &Value) -> Value {
 
 #[tokio::test]
 async fn signed_namespace_history_responses_exact_projection_consumer() {
-    run("responses", false).await;
+    run("responses", false, false).await;
 }
 
 #[tokio::test]
 async fn responses_direct_additional_tools_declarations_execute_and_follow_up_once() {
-    run("responses", true).await;
+    run("responses", true, false).await;
+}
+
+#[tokio::test]
+async fn responses_direct_additional_tool_collision_executes_and_follows_up_once() {
+    run("responses", true, true).await;
 }
 #[tokio::test]
 async fn signed_namespace_history_anthropic_declared_drop_diagnostic() {
-    run("anthropic", false).await;
+    run("anthropic", false, false).await;
 }
 #[tokio::test]
 async fn signed_namespace_history_chat_declared_drop_diagnostic() {
-    run("openai_chat", false).await;
+    run("openai_chat", false, false).await;
 }

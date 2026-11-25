@@ -90,7 +90,7 @@ pub(crate) fn apply_v3_direct_response_projection_hooks_with_identities(
     strip_client_response_id: bool,
     retain_response_cipher: bool,
     provider_protocol: V3HubProviderWireProtocol,
-    namespace_tool_identities: &std::collections::HashMap<String, (String, String)>,
+    namespace_tool_identities: &provider_compat_core::namespace_identity::NamespaceToolAliases,
 ) {
     apply_v3_direct_response_projection_hooks(
         payload,
@@ -205,7 +205,7 @@ pub struct V3DirectResponseCompatContext {
     /// client namespace + leaf). Built once from the originating request so
     /// the Direct Responses response owner restores the same identity the
     /// forward projection emitted. Never crosses a request boundary.
-    pub namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
+    pub namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
     pub(crate) runtime_timing: V3RuntimeTimingState,
 }
 

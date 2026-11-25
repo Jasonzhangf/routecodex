@@ -917,10 +917,11 @@ where
         let direct_namespace_tool_identities = response_projection_context
             .namespace_tool_identities
             .clone();
-        let direct_dsml_context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
-            C::body(&standardized),
-            &direct_namespace_tool_identities,
-        );
+        let direct_dsml_context =
+            crate::direct_response_hooks::V3DirectDsmlContext::from_request_with_aliases(
+                C::body(&standardized),
+                &direct_namespace_tool_identities,
+            );
         let mut response_projection = match C::run_response_projection(
             provider_raw,
             response_projection_context,

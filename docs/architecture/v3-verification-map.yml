@@ -2242,6 +2242,7 @@ features:
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
   - Forced choice, native Chat history and explicit namespace references project only through exact declared identities. Responses history may associate a namespace-less call only when the current declarations contain one unique same-kind identity with the exact full leaf and no same-kind plain declaration owns that name. Function and custom never cross-bind; prefixes, separators, call IDs, source item IDs and arguments grant no authority; undeclared or ambiguous references remain unchanged.
+  - Responses Direct passthrough preserves the native namespace and leaf name of references to native additional_tools declarations. A declaration whose implicit wire name collides uses the assigned alias and its own schema in the same carrier. History, forced choice, and allowed_tools use the same binding. The response inverse accepts only an emitted alias of the matching tool kind.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -2249,6 +2250,7 @@ features:
   - responses_additional_tools_refreshes_same_namespace_custom_tool_before_anthropic_projection
   - responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer
   - responses_direct_additional_tools_declarations_execute_and_follow_up_once
+  - responses_direct_additional_tool_collision_executes_and_follows_up_once
   - responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer
   - namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom
   - namespace_target_bindings_keep_kind_choice_history_and_inverse

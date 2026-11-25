@@ -25,6 +25,18 @@ pub enum ToolKind {
     Custom,
 }
 
+/// Attempt-local inverse for a tool actually emitted with a flat name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamespaceToolAlias {
+    pub namespace: String,
+    pub name: String,
+    /// Passthrough has no private tool-kind conversion. A compatibility profile
+    /// may wrap a custom call as a function and uses its existing inverse.
+    pub kind: Option<ToolKind>,
+}
+
+pub type NamespaceToolAliases = HashMap<String, NamespaceToolAlias>;
+
 type IdentityKey = (Vec<String>, String, ToolKind);
 
 /// A declared tool identity preserved from the originating request.
@@ -104,6 +116,7 @@ pub struct NamespaceToolIdentityRegistry {
     /// Every current plain tool name and namespace wire name. Alias
     /// allocation must reserve these names before assigning generated names.
     declared_wire_names: BTreeSet<String>,
+    native_only_responses_tool_names: Option<BTreeSet<String>>,
     /// Whether the current declaration grants the client executor for the
     /// standard native `tool_search` discovery tool. Declaration presence alone
     /// never grants it: the current official default is server-hosted, and an
@@ -289,31 +302,38 @@ impl NamespaceToolIdentityRegistry {
             .cloned()
             .collect();
         for identity in self.identities() {
-            let mut tool = if identity.is_namespaced() {
-                crate::namespace_tools::flatten_namespace_tool_for_provider(
-                    protocol,
-                    &identity.source_declaration(),
-                )?
-                .unwrap()
-                .remove(0)
-            } else {
-                identity.source.clone()
-            };
-            set_wire_name(&mut tool, &identity.actual_wire_name);
-            result.push(tool);
+            result.push(project_tool(protocol, identity)?);
         }
         Ok(result)
     }
 
     pub fn project_references(&self, body: &mut Value) {
-        fn rewrite(registry: &NamespaceToolIdentityRegistry, value: &mut Value) {
+        self.project_references_with_native_tools(body, None);
+    }
+
+    fn project_references_with_native_tools(
+        &self,
+        body: &mut Value,
+        native: Option<&BTreeSet<String>>,
+    ) {
+        let rewrite = |value: &mut Value| {
+            let registry = self;
+            if native.is_some()
+                && !matches!(
+                    value["type"].as_str(),
+                    Some("function" | "custom" | "function_call" | "custom_tool_call")
+                )
+            {
+                return;
+            }
             let kind = if matches!(
                 value.get("type").and_then(Value::as_str),
                 Some("custom" | "custom_tool_call")
-            ) || value
-                .pointer("/routecodex_chat_extension/responses_tool_call_type")
-                .and_then(Value::as_str)
-                == Some("custom_tool_call")
+            ) || native.is_none()
+                && value
+                    .pointer("/routecodex_chat_extension/responses_tool_call_type")
+                    .and_then(Value::as_str)
+                    == Some("custom_tool_call")
             {
                 ToolKind::Custom
             } else {
@@ -330,6 +350,9 @@ impl NamespaceToolIdentityRegistry {
             let wire = registry
                 .wire_name_for_client(namespace, name, kind)
                 .or_else(|| {
+                    if native.is_some() {
+                        return None;
+                    }
                     // Chat's registered custom wrapper is a function call on the
                     // wire. Only a unique declaration supplies the source kind.
                     let mut matches = registry.identities().filter(|identity| match namespace {
@@ -346,13 +369,26 @@ impl NamespaceToolIdentityRegistry {
                 })
                 .map(str::to_owned);
             let Some(wire) = wire else { return };
+            if native.is_some_and(|names| names.contains(&wire)) {
+                if let Some(identity) = registry.identity_for_wire_name(&wire) {
+                    set_wire_name(value, &identity.leaf_name);
+                    value["namespace"] = Value::String(identity.client_namespace());
+                    return;
+                }
+            }
             set_wire_name(value, &wire);
             if let Some(object) = value.as_object_mut() {
                 object.remove("namespace");
             }
-        }
+        };
         if let Some(choice) = body.get_mut("tool_choice") {
-            rewrite(self, choice);
+            if native.is_some() && choice["type"] == "allowed_tools" {
+                if let Some(tools) = choice.get_mut("tools").and_then(Value::as_array_mut) {
+                    tools.iter_mut().for_each(rewrite);
+                }
+            } else {
+                rewrite(choice);
+            }
         }
         for item in body
             .get_mut("input")
@@ -364,7 +400,7 @@ impl NamespaceToolIdentityRegistry {
                 item.get("type").and_then(Value::as_str),
                 Some("function_call" | "custom_tool_call" | "tool_call")
             ) {
-                rewrite(self, item);
+                rewrite(item);
             }
         }
         for message in body
@@ -379,7 +415,7 @@ impl NamespaceToolIdentityRegistry {
                 .into_iter()
                 .flatten()
             {
-                rewrite(self, call);
+                rewrite(call);
             }
         }
         for name in body
@@ -403,35 +439,55 @@ impl NamespaceToolIdentityRegistry {
             body["tools"] = Value::Array(self.project_tools(protocol, tools)?);
         }
         self.project_references(body);
-        self.project_discovered_tool_declarations(body, protocol)?;
+        self.project_discovered_tool_declarations(body, protocol)
+    }
+
+    pub fn project_responses_passthrough_request(
+        &mut self,
+        body: &mut Value,
+    ) -> Result<(), String> {
+        let protocol = "openai-responses";
+        if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+            body["tools"] = Value::Array(self.project_tools(protocol, tools)?);
+        }
+        let mut native_only = self.preserve_native_additional_tool_declarations(body)?;
+        self.project_references_with_native_tools(body, Some(&native_only));
+        self.project_discovered_tool_declarations_recording_aliases(body, protocol, |alias| {
+            native_only.remove(alias);
+        })?;
+        self.native_only_responses_tool_names = Some(native_only);
         Ok(())
     }
 
-    /// Native Responses already consumes additional_tools declarations. Keep
-    /// their original carrier and remove only their promoted root duplicates.
-    pub fn preserve_native_additional_tool_declarations(
+    /// Keep additional tools in their original carrier. A declaration whose
+    /// implicit flattened name collides uses the assigned alias in that carrier.
+    fn preserve_native_additional_tool_declarations(
         &self,
         body: &mut Value,
-    ) -> Result<(), String> {
+    ) -> Result<BTreeSet<String>, String> {
+        let mut native_names = BTreeSet::new();
         let mut additional_names = BTreeSet::new();
         for item in body
-            .get("input")
-            .and_then(Value::as_array)
+            .get_mut("input")
+            .and_then(Value::as_array_mut)
             .into_iter()
             .flatten()
         {
             if item.get("type").and_then(Value::as_str) != Some("additional_tools") {
                 continue;
             }
-            let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+            let Some(tools) = item.get_mut("tools").and_then(Value::as_array_mut) else {
                 continue;
             };
-            let additional = Self::from_tools(tools)?;
-            for key in additional.by_identity.keys() {
-                if let Some(identity) = self.by_identity.get(key) {
-                    additional_names.insert(identity.actual_wire_name.as_str());
-                }
-            }
+            let mut flat = Vec::new();
+            self.project_additional_tool_declarations(
+                tools,
+                &mut Vec::new(),
+                &mut flat,
+                &mut native_names,
+                &mut additional_names,
+            )?;
+            tools.extend(flat);
         }
         if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
             tools.retain(|tool| {
@@ -444,6 +500,88 @@ impl NamespaceToolIdentityRegistry {
                     .is_some_and(|name| additional_names.contains(name))
             });
         }
+        Ok(native_names)
+    }
+
+    fn project_additional_tool_declarations(
+        &self,
+        tools: &mut Vec<Value>,
+        namespace: &mut Vec<(String, Option<String>)>,
+        flat: &mut Vec<Value>,
+        native_names: &mut BTreeSet<String>,
+        additional_names: &mut BTreeSet<String>,
+    ) -> Result<(), String> {
+        for mut tool in std::mem::take(tools) {
+            let kind = match tool.get("type").and_then(Value::as_str) {
+                Some("namespace") => {
+                    if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                        let name = name.trim().to_owned();
+                        let description = tool
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        if let Some(children) = tool.get_mut("tools").and_then(Value::as_array_mut)
+                        {
+                            let had_tools = !children.is_empty();
+                            namespace.push((name, description));
+                            self.project_additional_tool_declarations(
+                                children,
+                                namespace,
+                                flat,
+                                native_names,
+                                additional_names,
+                            )?;
+                            namespace.pop();
+                            if had_tools && children.is_empty() {
+                                continue;
+                            }
+                        }
+                    }
+                    tools.push(tool);
+                    continue;
+                }
+                Some("function") => Some(ToolKind::Function),
+                Some("custom") => Some(ToolKind::Custom),
+                _ => None,
+            };
+            if let Some((kind, leaf)) = kind.zip(provider_function_tool_name(&tool)) {
+                let leaf = if namespace.is_empty() {
+                    leaf
+                } else {
+                    leaf.trim()
+                };
+                let path: Vec<_> = namespace.iter().map(|(name, _)| name.clone()).collect();
+                if let Some(identity) = self.by_identity.get(&(path, leaf.into(), kind)) {
+                    additional_names.insert(identity.actual_wire_name.clone());
+                    let implicit_name = if namespace.is_empty() {
+                        leaf.to_owned()
+                    } else {
+                        namespace_wire_name(&identity.namespace_segments, leaf)
+                    };
+                    if identity.actual_wire_name != implicit_name {
+                        let mut declaration = identity.clone();
+                        declaration.source = tool;
+                        declaration.namespace_descriptions = namespace
+                            .iter()
+                            .map(|(_, description)| description.clone())
+                            .collect();
+                        let mut projected = canonical_source(&declaration.source);
+                        let flat_tool = project_tool("openai-responses", &declaration)?;
+                        if let (Some(projected), Some(flat_tool)) =
+                            (projected.as_object_mut(), flat_tool.as_object())
+                        {
+                            projected.extend(flat_tool.clone());
+                        }
+                        flat.push(projected);
+                        continue;
+                    }
+                    if identity.is_namespaced() {
+                        native_names.insert(identity.actual_wire_name.clone());
+                    }
+                }
+            }
+            tools.push(tool);
+        }
         Ok(())
     }
 
@@ -454,6 +592,15 @@ impl NamespaceToolIdentityRegistry {
         &self,
         body: &mut Value,
         protocol: &str,
+    ) -> Result<(), String> {
+        self.project_discovered_tool_declarations_recording_aliases(body, protocol, |_| {})
+    }
+
+    fn project_discovered_tool_declarations_recording_aliases(
+        &self,
+        body: &mut Value,
+        protocol: &str,
+        mut record_alias: impl FnMut(&str),
     ) -> Result<(), String> {
         for item in body
             .get_mut("input")
@@ -474,6 +621,9 @@ impl NamespaceToolIdentityRegistry {
                 }
             }
             item["tools"] = Value::Array(surface.project_tools(protocol, tools)?);
+            for identity in surface.identities() {
+                record_alias(&identity.actual_wire_name);
+            }
         }
         Ok(())
     }
@@ -745,24 +895,46 @@ impl NamespaceToolIdentityRegistry {
     /// wire names and plain flat declarations are omitted, so an undeclared or
     /// colliding call is forwarded verbatim instead of being guessed.
     pub fn restore_identities(&self) -> HashMap<String, (String, String)> {
-        let mut identities = HashMap::new();
-        for (wire_name, keys) in &self.namespaced_wire_paths {
-            if keys.len() != 1 {
-                continue;
+        self.emitted_alias_identities()
+            .map(|(wire, identity)| {
+                (
+                    wire.clone(),
+                    (identity.client_namespace(), identity.leaf_name.clone()),
+                )
+            })
+            .collect()
+    }
+
+    pub fn restore_aliases(&self) -> NamespaceToolAliases {
+        self.emitted_alias_identities()
+            .map(|(wire, identity)| {
+                (
+                    wire.clone(),
+                    NamespaceToolAlias {
+                        namespace: identity.client_namespace(),
+                        name: identity.leaf_name.clone(),
+                        kind: self
+                            .native_only_responses_tool_names
+                            .as_ref()
+                            .map(|_| identity.kind),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn emitted_alias_identities(&self) -> impl Iterator<Item = (&String, &NamespaceToolIdentity)> {
+        self.namespaced_wire_paths.keys().filter_map(|wire| {
+            if self
+                .native_only_responses_tool_names
+                .as_ref()
+                .is_some_and(|names| names.contains(wire))
+            {
+                return None;
             }
-            let Some(identity) = keys.iter().next().and_then(|key| self.by_identity.get(key))
-            else {
-                continue;
-            };
-            if !identity.is_namespaced() && identity.actual_wire_name == identity.leaf_name {
-                continue;
-            }
-            identities.insert(
-                wire_name.clone(),
-                (identity.client_namespace(), identity.leaf_name.clone()),
-            );
-        }
-        identities
+            self.identity_for_wire_name(wire)
+                .map(|identity| (wire, identity))
+        })
     }
 
     fn collect_declaration(&mut self, tool: &Value) -> Result<(), String> {
@@ -965,6 +1137,21 @@ fn project_responses_history_reference(
     if let Some(object) = value.as_object_mut() {
         object.remove("namespace");
     }
+}
+
+fn project_tool(protocol: &str, identity: &NamespaceToolIdentity) -> Result<Value, String> {
+    let mut tool = if identity.is_namespaced() {
+        crate::namespace_tools::flatten_namespace_tool_for_provider(
+            protocol,
+            &identity.source_declaration(),
+        )?
+        .unwrap()
+        .remove(0)
+    } else {
+        identity.source.clone()
+    };
+    set_wire_name(&mut tool, &identity.actual_wire_name);
+    Ok(tool)
 }
 
 fn canonical_source(tool: &Value) -> Value {
@@ -1357,13 +1544,10 @@ mod tests {
                      "parameters":{"type":"object","properties":{"task":{"type":"string"}}}}
                 ]}]}]
         });
-        let registry =
+        let mut registry =
             NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
         registry
-            .project_request(&mut request, "openai-responses")
-            .unwrap();
-        registry
-            .preserve_native_additional_tool_declarations(&mut request)
+            .project_responses_passthrough_request(&mut request)
             .unwrap();
         let root = request["tools"].as_array().unwrap();
         let additional = request["input"][0]["tools"].as_array().unwrap();
