@@ -1,6 +1,8 @@
 use super::*;
+use crate::sample_retention::V3_CODEX_SAMPLE_FAILURE_RETENTION;
 use serde_json::json;
 use std::fs::Permissions;
+use std::time::{Duration, SystemTime};
 
 static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -318,8 +320,8 @@ fn retention_caps_samples_at_configured_limit() {
                     &format!("req-{index}"),
                     "request.json",
                     &json!({"n": index}),
-                    true,
-                    Some(502),
+                    false,
+                    None,
                 )
                 .unwrap();
         }
@@ -346,8 +348,8 @@ fn retention_caps_samples_across_endpoints_and_ports() {
                     &format!("req-{index}"),
                     "request.json",
                     &json!({"n": index}),
-                    true,
-                    Some(502),
+                    false,
+                    None,
                 )
                 .unwrap();
         }
@@ -761,4 +763,289 @@ fn persist_failure_ledger_bounds_records_and_summarizes_overflow() {
         V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT + 1
     );
     assert!(ledger.snapshot().is_empty());
+}
+
+#[test]
+fn failure_floor_keeps_exact_400_and_502_after_more_than_100_successes() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+        let first_persisted = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        for (request_id, status) in [("exact-400", 400_u16), ("exact-502", 502_u16)] {
+            store
+                .persist_at(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    request_id,
+                    "provider-failed-attempts.json",
+                    &json!({"request_id": request_id, "status": status}),
+                    true,
+                    Some(status),
+                    first_persisted,
+                )
+                .unwrap();
+        }
+        for index in 0..=V3_CODEX_SAMPLE_REQUEST_RETENTION {
+            store
+                .persist_at(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    &format!("success-after-failure-{index}"),
+                    "request.json",
+                    &json!({"success": index}),
+                    false,
+                    None,
+                    first_persisted + Duration::from_secs(1),
+                )
+                .unwrap();
+        }
+        for (request_id, status) in [("exact-400", 400_u16), ("exact-502", 502_u16)] {
+            let path = sample_dir(home_base)
+                .join(request_id)
+                .join("provider-failed-attempts.json");
+            let persisted: Value =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(persisted["request_id"], request_id);
+            assert_eq!(persisted["status"], status);
+        }
+        assert_eq!(fs::read_dir(sample_dir(home_base)).unwrap().count(), 102);
+    });
+}
+
+#[test]
+fn failure_first_persistence_time_is_stable_across_later_writes() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+        let first_persisted = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_001_000);
+        let first_failure_persisted = first_persisted + Duration::from_secs(30);
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "stable-floor",
+                "request.json",
+                &json!({"stage": "request"}),
+                false,
+                None,
+                first_persisted,
+            )
+            .unwrap();
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "stable-floor",
+                "error.json",
+                &json!({"status": 502}),
+                true,
+                Some(502),
+                first_failure_persisted,
+            )
+            .unwrap();
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "stable-floor",
+                "provider-failed-attempts.json",
+                &json!({"status": 502}),
+                true,
+                Some(502),
+                first_failure_persisted + Duration::from_secs(30),
+            )
+            .unwrap();
+        assert_eq!(
+            read_v3_codex_sample_retention_kind(&sample_dir(home_base).join("stable-floor")),
+            V3CodexSampleRetentionKind::Failure {
+                first_persisted: first_failure_persisted
+            }
+        );
+    });
+}
+
+#[test]
+fn success_eviction_uses_stable_first_persistence_order() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, 2, false);
+        let first_persisted = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_001_500);
+        for (index, persisted_at) in [
+            ("oldest-success", first_persisted),
+            ("middle-success", first_persisted + Duration::from_secs(1)),
+        ] {
+            store
+                .persist_at(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    index,
+                    "request.json",
+                    &json!({"request_id": index}),
+                    false,
+                    None,
+                    persisted_at,
+                )
+                .unwrap();
+        }
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "oldest-success",
+                "response.json",
+                &json!({"late_write": true}),
+                false,
+                None,
+                first_persisted + Duration::from_secs(2),
+            )
+            .unwrap();
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "newest-success",
+                "request.json",
+                &json!({"request_id": "newest-success"}),
+                false,
+                None,
+                first_persisted + Duration::from_secs(3),
+            )
+            .unwrap();
+
+        assert!(!sample_dir(home_base).join("oldest-success").exists());
+        assert!(sample_dir(home_base).join("middle-success").exists());
+        assert!(sample_dir(home_base).join("newest-success").exists());
+    });
+}
+
+#[test]
+fn expired_failures_are_evicted_oldest_first() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+        let first_persisted = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_002_000);
+        let expiration_check = first_persisted + Duration::from_secs(1_801);
+        for (request_id, persisted_at) in [
+            ("expired-oldest", first_persisted),
+            ("expired-middle", first_persisted + Duration::from_secs(1)),
+        ] {
+            store
+                .persist_at(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    request_id,
+                    "error.json",
+                    &json!({"request_id": request_id, "status": 502}),
+                    true,
+                    Some(502),
+                    persisted_at,
+                )
+                .unwrap();
+        }
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "still-in-floor",
+                "error.json",
+                &json!({"request_id": "still-in-floor", "status": 502}),
+                true,
+                Some(502),
+                first_persisted + Duration::from_secs(1_740),
+            )
+            .unwrap();
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "retention-trigger-success",
+                "request.json",
+                &json!({"success": true}),
+                false,
+                None,
+                expiration_check,
+            )
+            .unwrap();
+        assert!(!sample_dir(home_base).join("expired-oldest").exists());
+        assert!(!sample_dir(home_base).join("expired-middle").exists());
+        assert!(sample_dir(home_base).join("still-in-floor").exists());
+    });
+}
+
+#[test]
+fn failure_reserve_saturation_skips_only_diagnostics_and_reports_overflow() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+        let first_persisted = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_003_000);
+        fill_failure_reserve(&store, first_persisted);
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "overflow-request",
+                "error.json",
+                &json!({"status": 502}),
+                true,
+                Some(502),
+                first_persisted + Duration::from_secs(1),
+            )
+            .unwrap();
+        assert!(!sample_dir(home_base).join("overflow-request").exists());
+        let failures = store.persist_failures();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].request_id, "overflow-request");
+        assert_eq!(failures[0].file_name, "error.json");
+        assert!(failures[0].reason.contains("failure reserve full"));
+        let reserve_dirs = fs::read_dir(sample_dir(home_base))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .count();
+        assert_eq!(reserve_dirs, V3_CODEX_SAMPLE_FAILURE_RETENTION);
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "business-after-overflow",
+                "request.json",
+                &json!({"success": true}),
+                false,
+                None,
+                first_persisted + Duration::from_secs(2),
+            )
+            .unwrap();
+        assert!(sample_dir(home_base)
+            .join("business-after-overflow/request.json")
+            .exists());
+    });
+}
+
+fn fill_failure_reserve(store: &V3CodexSampleStore, first_persisted: SystemTime) {
+    (0..256).for_each(|index| persist_failure(store, index, first_persisted));
+}
+
+fn persist_failure(store: &V3CodexSampleStore, index: usize, first_persisted: SystemTime) {
+    let request_id = index.to_string();
+    store
+        .persist_at(
+            10000,
+            "responses",
+            "/v1/responses",
+            &request_id,
+            "error.json",
+            &json!({"status": 502}),
+            true,
+            Some(502),
+            first_persisted,
+        )
+        .unwrap();
 }
