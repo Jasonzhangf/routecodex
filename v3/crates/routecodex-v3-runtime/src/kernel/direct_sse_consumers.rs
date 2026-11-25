@@ -58,7 +58,8 @@ pub(crate) struct V3DirectSseContentConsumer {
     pub(crate) tool_thinking_enabled: bool,
     pub(crate) tool_thinking_argument_buffers: Vec<String>,
     pub(crate) request_id: Option<String>,
-    pub(crate) namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
+    pub(crate) namespace_tool_identities:
+        provider_compat_core::namespace_identity::NamespaceToolAliases,
     pub(crate) stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
