@@ -7,6 +7,8 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "test-health-observer"))]
+use std::sync::Mutex;
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
 #[cfg(test)]
@@ -27,6 +29,59 @@ enum V3ProviderHealthPersistenceCommand {
         V3ProviderRateLimitPersistenceEntries,
     ),
     Flush(mpsc::Sender<Result<(), String>>),
+    #[cfg(any(test, feature = "test-health-observer"))]
+    HoldNextFlushReceipt(V3ProviderHealthPersistenceReceiptHoldReceiver),
+}
+
+#[cfg(any(test, feature = "test-health-observer"))]
+#[derive(Debug)]
+struct V3ProviderHealthPersistenceReceiptHoldReceiver {
+    reached: mpsc::SyncSender<()>,
+    release: mpsc::Receiver<()>,
+}
+
+#[cfg(any(test, feature = "test-health-observer"))]
+#[derive(Debug)]
+pub(super) struct V3ProviderHealthPersistenceReceiptHold {
+    reached: Mutex<mpsc::Receiver<()>>,
+    release: Mutex<Option<mpsc::SyncSender<()>>>,
+}
+
+#[cfg(any(test, feature = "test-health-observer"))]
+impl V3ProviderHealthPersistenceReceiptHold {
+    pub(super) fn wait_until_receipt_is_held(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<(), String> {
+        self.reached
+            .lock()
+            .map_err(|error| format!("persistence receipt hold lock poisoned: {error}"))?
+            .recv_timeout(timeout)
+            .map_err(|error| format!("persistence receipt hold was not reached: {error}"))
+    }
+
+    pub(super) fn release(&self) -> Result<(), String> {
+        let sender = self
+            .release
+            .lock()
+            .map_err(|error| format!("persistence receipt release lock poisoned: {error}"))?
+            .take()
+            .ok_or_else(|| "persistence receipt hold was already released".to_string())?;
+        sender
+            .try_send(())
+            .map_err(|_| "persistence receipt hold is no longer waiting".to_string())
+    }
+}
+
+#[cfg(any(test, feature = "test-health-observer"))]
+impl Drop for V3ProviderHealthPersistenceReceiptHold {
+    fn drop(&mut self) {
+        if let Ok(mut release) = self.release.lock() {
+            if let Some(sender) = release.take() {
+                let _ = sender.try_send(());
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +129,8 @@ impl V3ProviderHealthPersistenceWriter {
         let work: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
             let mut persisted_entries = coordinator.persisted_entries();
             let mut persisted_episodes = coordinator.persisted_rate_limit_episodes();
+            #[cfg(any(test, feature = "test-health-observer"))]
+            let mut receipt_hold = None;
             while let Ok(command) = receiver.recv() {
                 match command {
                     V3ProviderHealthPersistenceCommand::Replace(entries, episodes) => {
@@ -111,7 +168,16 @@ impl V3ProviderHealthPersistenceWriter {
                             ),
                         }
                     }
+                    #[cfg(any(test, feature = "test-health-observer"))]
+                    V3ProviderHealthPersistenceCommand::HoldNextFlushReceipt(hold) => {
+                        receipt_hold = Some(hold);
+                    }
                     V3ProviderHealthPersistenceCommand::Flush(receipt) => {
+                        #[cfg(any(test, feature = "test-health-observer"))]
+                        if let Some(hold) = receipt_hold.take() {
+                            let _ = hold.reached.try_send(());
+                            let _ = hold.release.recv();
+                        }
                         let result = writer_alarm
                             .read()
                             .map_err(|error| {
@@ -138,6 +204,30 @@ impl V3ProviderHealthPersistenceWriter {
         spawned
             .map_err(|error| format!("provider health persistence writer start failed: {error}"))?;
         Ok(Self { sender, alarm })
+    }
+
+    #[cfg(any(test, feature = "test-health-observer"))]
+    pub(super) fn hold_next_flush_receipt(
+        &self,
+    ) -> Result<V3ProviderHealthPersistenceReceiptHold, String> {
+        // Each signal is one-shot. Buffer it so dropping the controller before
+        // the writer reaches Flush cannot block ordinary test unwinding.
+        let (reached_sender, reached_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::sync_channel(1);
+        self.sender
+            .try_send(V3ProviderHealthPersistenceCommand::HoldNextFlushReceipt(
+                V3ProviderHealthPersistenceReceiptHoldReceiver {
+                    reached: reached_sender,
+                    release: release_receiver,
+                },
+            ))
+            .map_err(|error| {
+                format!("provider health persistence receipt hold was not queued: {error}")
+            })?;
+        Ok(V3ProviderHealthPersistenceReceiptHold {
+            reached: Mutex::new(reached_receiver),
+            release: Mutex::new(Some(release_sender)),
+        })
     }
 
     fn enqueue(
