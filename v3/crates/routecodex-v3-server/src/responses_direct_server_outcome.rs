@@ -179,6 +179,15 @@ pub(super) fn execute_responses_direct_server_outcome<'a>(
     request_purpose: V3RequestPurpose,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = V3ResponsesDirectServerOutcome> + Send + 'a>>
 {
+    #[cfg(test)]
+    if observability_accumulator.is_some() {
+        if let Some(plan) = responses_protocol_plan {
+            state.observe_responses_handoff(
+                &plan.decision.target,
+                V3EntryProtocolExecutionMode::Direct,
+            );
+        }
+    }
     // Construct this future outside the shared protocol-dispatch poll frame.
     Box::pin(execute_responses_direct_server_outcome_inner(
         state,
@@ -370,6 +379,8 @@ async fn execute_responses_direct_server_outcome_inner(
         }
     };
     if let Some(handoff) = output.protocol_relay_handoff {
+        #[cfg(test)]
+        state.observe_responses_handoff(&handoff.target, V3EntryProtocolExecutionMode::Relay);
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
             failure_session_scope: provider_failure_session_scope,

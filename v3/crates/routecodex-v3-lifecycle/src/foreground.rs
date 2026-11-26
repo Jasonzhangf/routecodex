@@ -4,17 +4,9 @@ pub(crate) fn exec_foreground_start(
     executable_path: &Path,
     declaration: &V3ManagedInstanceDeclaration,
     lifecycle: &V3ManagedLifecycle,
-    instance_dir: &Path,
 ) -> Result<(), V3LifecycleError> {
     let mut command = build_foreground_exec_command(executable_path, declaration, lifecycle);
-    let error = command.exec();
-    let _ = write_status(
-        instance_dir,
-        &declaration.instance_id,
-        V3ManagedRunState::Failed,
-        Some(format!("exec start failed: {error}")),
-    );
-    Err(V3LifecycleError::Io(error))
+    Err(V3LifecycleError::Io(command.exec()))
 }
 
 pub(crate) fn build_foreground_exec_command(

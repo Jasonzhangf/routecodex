@@ -71,11 +71,15 @@ impl V3ActiveKeyEpisode {
     /// Call at the actual send boundary, after checking current health and
     /// cancellation. Selection/planning never consumes retry budget.
     pub fn begin_attempt(&mut self) -> Option<()> {
-        if self.closed || self.sends > u64::from(self.selection.retries) {
+        if !self.can_begin_attempt() {
             return None;
         }
         self.sends += 1;
         Some(())
+    }
+
+    pub fn can_begin_attempt(&self) -> bool {
+        !self.closed && self.sends <= u64::from(self.selection.retries)
     }
 
     pub fn can_retry(&self, still_eligible: bool) -> bool {

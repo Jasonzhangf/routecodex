@@ -194,7 +194,7 @@ impl ResponsesTransport for CompleteHttp502Transport {
 }
 
 #[tokio::test]
-async fn truncated_http_200_records_precool_on_exact_identity_and_isolates_other_identities() {
+async fn truncated_http_200_records_failure_on_exact_identity_and_isolates_other_identities() {
     let server_id = "truncated_200_identity";
     let manifest = manifest(server_id);
     let provider_health =
@@ -243,12 +243,10 @@ async fn truncated_http_200_records_precool_on_exact_identity_and_isolates_other
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    // The failure is owned by the declared pre-cool observation threshold, not
-    // an immediate cooldown: one observed truncated transport failure records a
-    // pre_cool_observation with no cooldown_until, exactly like every other
-    // ordinary non429 failure.
-    assert_eq!(event.failure_count, 0);
-    assert_eq!(event.health_state, "pre_cool_observation");
+    // One ordinary non-429 failure increments the exact identity's streak
+    // without starting a cooldown below the declared threshold.
+    assert_eq!(event.failure_count, 1);
+    assert_eq!(event.health_state, "provider_failure_observed");
     assert_eq!(event.cooldown_until_ms, None);
 
     let now = u64::MAX;
@@ -257,7 +255,7 @@ async fn truncated_http_200_records_precool_on_exact_identity_and_isolates_other
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
-        "the exact failed identity must stay routable during pre-cool observation"
+        "the exact failed identity must stay routable below the cooldown threshold"
     );
     assert!(
         provider_health

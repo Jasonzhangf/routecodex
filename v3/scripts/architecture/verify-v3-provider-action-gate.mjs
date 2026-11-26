@@ -13,6 +13,7 @@ const failures = [];
 const files = {
   gate: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
   policy: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+  policyHealth: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
   policyTests: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
   error: 'v3/crates/routecodex-v3-error/src/lib.rs',
   direct: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',

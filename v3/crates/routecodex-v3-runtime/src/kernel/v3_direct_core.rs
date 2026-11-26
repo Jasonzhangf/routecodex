@@ -242,15 +242,31 @@ where
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut active_episode = None::<V3ActiveKeyEpisode>;
-    let active_dispatch_clock = std::time::Instant::now();
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
+    let mut initial_selection_time = Some(now_epoch_ms);
     let mut provider_request_snapshot = None;
     let mut provider_response_snapshot = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
+        let now_epoch_ms = if let Some(initial) = initial_selection_time.take() {
+            initial
+        } else {
+            match v3_direct_selection_now_ms(&provider_health) {
+                Ok(now_ms) => now_ms,
+                Err(error) => {
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        runtime_source("V3Target10ConcreteProviderSelected", error),
+                        None,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
+                }
+            }
+        };
+        let active_dispatch_clock = std::time::Instant::now();
         let expands_target = matches!(
             target_source,
             crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(_)
@@ -270,7 +286,7 @@ where
             now_epoch_ms,
             0,
             allow_exhaustion_rescue_probe,
-            retry_selected.take(),
+            retry_selected.take().map(|s| crate::operation_runner::plan_execution::V3PreferredSelection::pending(s, active_episode.as_ref())),
             crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: C::HUB_ENTRY_PROTOCOL,
                 allowed_modes: allowed_modes.clone(),
@@ -322,6 +338,7 @@ where
                     unavailable_candidates: error.attempted_candidates.clone(),
                     ..V3RuntimeObservability::default()
                 };
+                let (_, source, witness) = request_execution_control.take_failure_for_exhaustion(source);
                 return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                     source.map_or_else(
                         || {
@@ -337,7 +354,7 @@ where
                         },
                         Ok,
                     ),
-                    last_external_http,
+                    witness,
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                     Some(exhausted_observability),
@@ -531,25 +548,17 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
-        if !crate::provider_failure_runtime_policy::selected_target_has_current_witness(
-            C::policy_target(&policy), &expanded, active_keys.as_deref(), &provider_health,
-            &direct_failure_session_scope,
+        match crate::provider_failure_runtime_policy::prepare_selected_dispatch(
+            C::policy_target(&policy), Some(&expanded), active_keys.as_deref(), active_episode.as_mut(),
+            &request_execution_control, &provider_health, &direct_failure_session_scope, &mut failed_candidates,
             now_epoch_ms.saturating_add(active_dispatch_clock.elapsed().as_millis() as u64),
         ) {
-            failed_candidates.insert(candidate_key(&C::policy_target(&policy).candidate));
-            retry_selected = None;
-            continue;
-        }
-        if let (Some(state), Some(episode)) = (active_keys.as_ref(), active_episode.as_mut()) {
-            if !crate::provider_failure_runtime_policy::active_key_selection_is_dispatchable(
-                &episode.selection, &C::policy_target(&policy).candidate, state, &provider_health,
-                &direct_failure_session_scope, now_epoch_ms.saturating_add(active_dispatch_clock.elapsed().as_millis() as u64),
-            ) || episode.begin_attempt().is_none() {
-                episode.cancel();
-                failed_candidates.insert(candidate_key(&C::policy_target(&policy).candidate));
-                retry_selected = None;
-                continue;
-            }
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => return direct_runtime_helpers_stream::source_failure_output(
+                runtime_source("V3ProviderHealthStateMutated", error), None, trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            ),
         }
         send_attempts =
             match attempt_budget.admit_transport_attempt() {
@@ -586,6 +595,7 @@ where
             );
         }
         last_external_http = None;
+        request_execution_control.begin_actual_send();
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(error) => {
@@ -656,10 +666,10 @@ where
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
+                        recovery_control: Some(&request_execution_control),
                         availability: &availability,
                         expanded: Some(&expanded),
                         provider_pinned: false,
-                        now_epoch_ms,
                     },
                     C::policy_target(&policy),
                     source,
@@ -671,7 +681,7 @@ where
                     },
                     active_keys.as_deref(),
                     active_episode.as_mut(),
-                    true,
+                    last_external_http.as_ref(),
                 )
                 .await
                 {
@@ -870,10 +880,10 @@ where
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,
                     provider_health: &provider_health,
+                    recovery_control: Some(&request_execution_control),
                     availability: &availability,
                     expanded: Some(&expanded),
                     provider_pinned: false,
-                    now_epoch_ms,
                 },
                 C::policy_target(&policy),
                 source,
@@ -885,7 +895,7 @@ where
                 },
                 active_keys.as_deref(),
                 active_episode.as_mut(),
-                true,
+                last_external_http.as_ref(),
             )
             .await
             {
@@ -1053,10 +1063,10 @@ where
                         &V3DirectProviderFailurePolicyContext {
                             failure_session_scope: &direct_failure_session_scope,
                             provider_health: &provider_health,
+                            recovery_control: Some(&request_execution_control),
                             availability: &availability,
                             expanded: Some(&expanded),
                             provider_pinned: false,
-                            now_epoch_ms,
                         },
                         C::policy_target(&policy),
                         source,
@@ -1068,7 +1078,7 @@ where
                         },
                         active_keys.as_deref(),
                         active_episode.as_mut(),
-                        true,
+                        last_external_http.as_ref(),
                     )
                     .await
                     {
@@ -1254,10 +1264,10 @@ where
                             &V3DirectProviderFailurePolicyContext {
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
+                                recovery_control: Some(&request_execution_control),
                                 availability: &availability,
                                 expanded: Some(&expanded),
                                 provider_pinned: false,
-                                now_epoch_ms,
                             },
                             C::policy_target(&policy),
                             source,
@@ -1269,7 +1279,7 @@ where
                             },
                             active_keys.as_deref(),
                             active_episode.as_mut(),
-                            true,
+                            last_external_http.as_ref(),
                         )
                         .await
                         {
@@ -1423,10 +1433,10 @@ where
                             &V3DirectProviderFailurePolicyContext {
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
+                                recovery_control: Some(&request_execution_control),
                                 availability: &availability,
                                 expanded: Some(&expanded),
                                 provider_pinned: false,
-                                now_epoch_ms,
                             },
                             C::policy_target(&policy),
                             source,
@@ -1438,7 +1448,7 @@ where
                             },
                             active_keys.as_deref(),
                             active_episode.as_mut(),
-                            true,
+                            last_external_http.as_ref(),
                         )
                         .await
                         {
@@ -1576,6 +1586,7 @@ where
             if let Err(error) = record_v3_direct_provider_success(
                 &attempt_success_receipt,
                 &provider_health,
+                &request_execution_control,
                 &direct_failure_session_scope,
                 C::policy_target(&policy),
                 now_epoch_ms,

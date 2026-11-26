@@ -261,10 +261,10 @@ async fn peer_handler(
         input_value: body.get("input").cloned().unwrap_or(Value::Null),
     });
 
-    if probe {
+    if probe || input == "owned recovery" {
         peer.probe_entered.add_permits(1);
         peer.probe_release.acquire().await.unwrap().forget();
-        return probe_json(peer.label);
+        return provider_sse(peer.label, &model);
     }
 
     if input.contains("r1-holder") {
@@ -781,7 +781,25 @@ targets = [
     let endpoint = format!("{base}/v1/responses");
     let client = client();
 
-    seed_exact_probe(&client, &base, "leading").await;
+    let added = client.post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+        .json(&json!({"provider_id":"leading","interface_id":"default","auth_alias":"key","model_id":"model","kind":"probe","duration_ms":1}))
+        .send().await.unwrap();
+    assert_eq!(added.status(), StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let recovery = tokio::spawn({
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        async move {
+            send_stream(
+                &client,
+                &endpoint,
+                "recovery-session",
+                "owned recovery",
+                None,
+            )
+            .await
+        }
+    });
     let probe_held = wait_for_semaphore(&leading.probe_entered, Duration::from_secs(5)).await;
     let mut target = tokio::spawn({
         let client = client.clone();
@@ -799,6 +817,8 @@ targets = [
         None
     };
     leading.probe_release.add_permits(1);
+    let recovery_outcome = timeout(BUSINESS_TIMEOUT, recovery).await.unwrap().unwrap();
+    assert_business_sse(&recovery_outcome, "leading-business-ok");
     if !healthy_reached_before_release {
         target.abort();
         let _ = target.await;
@@ -818,8 +838,12 @@ targets = [
     assert!(
         leading_captures
             .iter()
-            .any(|capture| capture.probe && capture.input.contains(PROBE_MARKER)),
+            .any(|capture| !capture.probe && capture.input == "owned recovery"),
         "the leading identity must receive its exact probe: {leading_captures:?}"
+    );
+    assert!(
+        leading_captures.iter().all(|capture| !capture.probe),
+        "automatic recovery cannot send synthetic traffic"
     );
     assert!(
         !leading_captures
@@ -867,8 +891,7 @@ targets = [
 
     seed_exact_probe(&client, &base, "alpha").await;
     seed_exact_probe(&client, &base, "beta").await;
-    let alpha_probe_held = wait_for_semaphore(&alpha.probe_entered, Duration::from_secs(5)).await;
-    let beta_probe_held = wait_for_semaphore(&beta.probe_entered, Duration::from_secs(5)).await;
+    // Neither active cooldown is eligible yet. No synthetic request is sent.
 
     let mut request = tokio::spawn({
         let client = client.clone();
@@ -897,18 +920,8 @@ targets = [
     );
     stop_all(handle, vec![alpha, beta]).await;
 
-    assert!(alpha_probe_held, "{:?}", captures.0);
-    assert!(beta_probe_held, "{:?}", captures.1);
-    assert!(
-        captures.0.iter().any(|capture| capture.probe),
-        "{:?}",
-        captures.0
-    );
-    assert!(
-        captures.1.iter().any(|capture| capture.probe),
-        "{:?}",
-        captures.1
-    );
+    assert!(captures.0.is_empty(), "{:?}", captures.0);
+    assert!(captures.1.is_empty(), "{:?}", captures.1);
     let outcome = outcome.unwrap_or_else(|_| {
         panic!(
             "desired contract failed: all-unavailable request stayed open while held exact probes remained unreleased"

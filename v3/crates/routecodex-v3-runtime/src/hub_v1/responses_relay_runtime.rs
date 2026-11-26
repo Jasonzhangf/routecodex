@@ -488,8 +488,8 @@ async fn handle_v3_responses_relay_provider_failure(
             return Ok(Some(failure));
         }
     };
-    if let Some(custody) = state.failure_custody.as_deref_mut() {
-        custody.record(
+    if let Some(control) = context.recovery_control {
+        control.record_failure(
             &selected,
             &result.event.diagnostic_source,
             state.last_external_http.as_ref(),
@@ -554,7 +554,8 @@ async fn handle_v3_responses_relay_provider_failure(
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
             )
             .available;
-            let eligible = !feedback.stale
+            let eligible = !result.business_trial_failed
+                && !feedback.stale
                 && !feedback.transitioned
                 && active_keys.selection_current(&episode.selection)
                 && health;
@@ -1464,6 +1465,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         assert!(failure.error_operator_fault.is_none());
 
         let context = V3RelayProviderFailurePolicyContext {
+            recovery_control: None,
             manifest: &manifest,
             captured_target_09: None,
             failure_session_scope: failure_session_scope.clone(),
@@ -1479,7 +1481,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
         let mut state = V3ResponsesRelayProviderRetryState {
-            failure_custody: None,
             active_keys: None,
             active_episode: None,
             active_attempt_dispatched: false,
@@ -1602,6 +1603,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             response_processing_code: None,
         };
         let context = V3RelayProviderFailurePolicyContext {
+            recovery_control: None,
             manifest: &manifest,
             captured_target_09: None,
             failure_session_scope: failure_session_scope.clone(),
@@ -1617,7 +1619,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
         let mut state = V3ResponsesRelayProviderRetryState {
-            failure_custody: None,
             active_keys: None,
             active_episode: None,
             active_attempt_dispatched: false,

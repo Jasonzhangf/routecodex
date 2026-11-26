@@ -395,7 +395,6 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         path: "/v1/responses".to_string(),
         body: json!({"model":"client-model","input":"hello"}),
     };
-    let continuation_request = raw.clone();
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         raw.clone(),
@@ -451,17 +450,9 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         .candidates
         .iter()
         .any(|candidate| candidate.provider_id == "chat"));
-    let continued = plan_v3_responses_protocol_execution_with_provider_health(
-        &manifest,
-        continuation_request,
-        health,
-        0,
-    ).expect("the shared typed health owner must survive protocol handoff");
-    assert_eq!(continued.decision.target.candidate.provider_id, "chat",
-        "pending failure must remain excluded when Relay selects from the same captured identities");
     assert_eq!(handoff.provider_failure_events.len(), 1);
-    assert_eq!(handoff.provider_failure_events[0].health_state, "pre_cool_observation",
-        "recoverable exclusion stays in the exact health owner instead of becoming a permanent request-shape exclusion");
+    assert_eq!(handoff.provider_failure_events[0].health_state, "provider_failure_observed",
+        "recoverable failure is recorded by the exact health owner without a cooldown below threshold");
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         1,

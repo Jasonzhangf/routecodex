@@ -722,12 +722,10 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
         diagnostic.source_stage, "V3ProviderReqOutbound09TransportRequest",
         "the partial frame must be observed as business content before the untyped failure"
     );
-    // The failure is owned by the declared pre-cool observation threshold, not
-    // an immediate cooldown: one observed failure records a pre_cool_observation
-    // with no cooldown_until, exactly like every other ordinary non429 failure.
+    // One ordinary non-429 failure remains below the declared cooldown threshold.
     assert_eq!(
-        failure.health_state, "pre_cool_observation",
-        "an untyped disconnect after partial content must enter the declared pre-cool observation"
+        failure.health_state, "provider_failure_observed",
+        "an untyped disconnect after partial content is recorded below threshold"
     );
     assert_eq!(
         failure.cooldown_until_ms, None,
@@ -2494,7 +2492,9 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let cooldown_ms = routecodex_v3_error::V3_PROVIDER_HEALTH_COOLDOWN_MS;
-    let seed_now_ms = probe_now_ms().saturating_sub(cooldown_ms);
+    let seed_now_ms = probe_now_ms()
+        .saturating_sub(cooldown_ms)
+        .saturating_add(1_000);
     provider_health
         .store()
         .record_provider_cooldown_failure(
@@ -2531,7 +2531,7 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     let probe_health = provider_health.runtime_health();
     probe_health
         .run_due_provider_health_probes(
-            probe_now_ms(),
+            u64::MAX,
             true,
             |provider_id, interface_id, auth_alias, model_id| {
                 let manifest = manifest.clone();

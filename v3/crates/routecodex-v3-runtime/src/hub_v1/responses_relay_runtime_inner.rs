@@ -311,7 +311,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     allow_exhaustion_rescue_probe,
                     retry_selected
                         .take()
-                        .or_else(|| initial_selected_target.take()),
+                        .or_else(|| initial_selected_target.take()).map(crate::operation_runner::plan_execution::V3PreferredSelection::Fresh),
                     V3PlanExecutionModePolicy::DirectEntry {
                         entry_protocol: V3HubEntryProtocol::Responses,
                         allowed_modes: allowed_execution_modes.clone(),
@@ -361,9 +361,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         matched_policy: None,
                         response_processing_code: None,
                     };
+                    let (_, source, witness) = request_execution_control.take_failure_for_exhaustion(source);
                     return Ok(provider_failure_output(
                         super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
-                            failure, source, None,
+                            failure, source, witness,
                         ),
                         trace,
                         0,
@@ -404,7 +405,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         trace.push("V3HubReqExecution05Planned");
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
         let mut last_external_http = None;
-        let mut failure_custody = super::relay_runtime_shared::V3RelayFailureCustody::default();
         let mut active_episode = None::<routecodex_v3_target::V3ActiveKeyEpisode>;
         let mut active_attempt_dispatched = false;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -413,6 +413,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let shared_retry_policy = retry_policy.as_shared_policy();
         let provider_failure_health = provider_health.clone();
         let failure_context = V3RelayProviderFailurePolicyContext {
+            recovery_control: Some(&request_execution_control),
             manifest,
             captured_target_09: Some(&retained_expanded),
             failure_session_scope: input.failure_session_scope.clone(),
@@ -426,7 +427,12 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             {
                 (selected, protocol_decision)
             } else {
-                let preferred_selected = retry_selected.take();
+                let preferred_selected = retry_selected.take().map(|s| {
+                    crate::operation_runner::plan_execution::V3PreferredSelection::pending(
+                        s,
+                        active_episode.as_ref(),
+                    )
+                });
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
                     crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
@@ -479,7 +485,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         source,
                         ..
                     }) => {
-                        let (_, source, witness) = failure_custody.into_exhaustion(source, last_external_http.take());
+                        let (_, source, witness) = request_execution_control.take_failure_for_exhaustion(source);
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,
@@ -638,7 +644,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
-                                failure_custody: Some(&mut failure_custody),
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -740,37 +745,21 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 .map(|history| {
                     history.capture_attempt(transport_request.body(), provider_wire_protocol)
                 });
-            if !crate::provider_failure_runtime_policy::selected_target_has_current_witness(
+            if !crate::provider_failure_runtime_policy::prepare_selected_dispatch(
                 &selected,
-                &retained_expanded,
+                Some(&retained_expanded),
                 active_keys.as_deref(),
+                active_episode.as_mut(),
+                &request_execution_control,
                 &provider_health,
                 &input.failure_session_scope,
+                &mut failed_candidates,
                 v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
-            ) {
-                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                retry_selected = None;
-                continue;
-            }
-            if let (Some(active_keys), Some(episode)) =
-                (active_keys.as_deref(), active_episode.as_mut())
+            )
+            .map_err(V3ResponsesRelayRuntimeError::Target)?
             {
-                if !crate::provider_failure_runtime_policy::active_key_selection_is_dispatchable(
-                    &episode.selection,
-                    &selected.candidate,
-                    active_keys,
-                    &provider_health,
-                    &input.failure_session_scope,
-                    v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
-                ) || episode.begin_attempt().is_none()
-                {
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                    retry_selected = None;
-                    continue;
-                }
-                active_attempt_dispatched = true;
+                continue;
             }
             provider_send_attempts =
                 handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
@@ -780,7 +769,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
             last_external_http = None;
-            failure_custody = super::relay_runtime_shared::V3RelayFailureCustody::default();
+            request_execution_control.begin_actual_send();
+            active_attempt_dispatched = true;
             let transport_result = match tokio::time::timeout(
                 v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
                 transport.send(transport_request),
@@ -846,7 +836,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
-                                failure_custody: Some(&mut failure_custody),
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -894,7 +883,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
-                                failure_custody: Some(&mut failure_custody),
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -955,7 +943,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
-                                        failure_custody: Some(&mut failure_custody),
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -1023,7 +1010,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 selected,
                                 failure,
                                 &mut V3ResponsesRelayProviderRetryState {
-                                    failure_custody: Some(&mut failure_custody),
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
@@ -1090,7 +1076,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         selected,
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
-                                            failure_custody: Some(&mut failure_custody),
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
@@ -1125,7 +1110,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         &local_tool_output_ids.consumed_ids,
                     );
                     handle_error_before_resp03!(provider_health
-                        .record_provider_success_in_failure_scope_for_interface(
+                        .record_provider_success_with_business_recovery(
+                            &request_execution_control,
                             &attempt_success_receipt,
                             &failure_context.failure_session_scope,
                             &selected_target_provider_id,
@@ -1288,7 +1274,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
-                                        failure_custody: Some(&mut failure_custody),
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -1366,7 +1351,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         selected,
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
-                                            failure_custody: Some(&mut failure_custody),
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
@@ -1401,7 +1385,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         &local_tool_output_ids.consumed_ids,
                     );
                     handle_error_before_resp03!(provider_health
-                        .record_provider_success_in_failure_scope_for_interface(
+                        .record_provider_success_with_business_recovery(
+                            &request_execution_control,
                             &attempt_success_receipt,
                             &failure_context.failure_session_scope,
                             &selected_target_provider_id,

@@ -41,6 +41,7 @@ pub struct V3ProviderHealthProbePermit {
     expected_generation: u64,
     purpose: V3ProviderProbePurpose,
     pub(crate) acquisition_id: V3ProbeAcquisitionId,
+    pub(crate) business_cooldown_until_ms: Option<u64>,
 }
 
 /// Physical probe purpose for one owned acquisition.
@@ -52,9 +53,20 @@ pub struct V3ProviderHealthProbePermit {
 pub enum V3ProviderProbePurpose {
     /// Recovery probe for an identity already visible in the cooldown pool.
     CooldownRecovery,
+    /// Exclusive ownership of an expired cooldown by one genuine business
+    /// request. Only that request's governed success may clear the episode.
+    BusinessRecovery,
     /// Observation probe for a healthy/held identity before any cooling
     /// decision. It shares the same physical slot but holds no cooldown entry.
     PrecoolObservation,
+}
+
+/// Result of trying to attach a real business attempt to an expired cooldown.
+#[derive(Debug)]
+pub enum V3ProviderBusinessRecoveryAcquisition {
+    NotRequired,
+    Acquired(V3ProviderHealthProbePermit),
+    Contended,
 }
 
 /// Typed result of closing one owned pre-cool observation probe.
@@ -118,6 +130,7 @@ impl V3ProviderHealthProbePermit {
             expected_generation,
             purpose,
             acquisition_id,
+            business_cooldown_until_ms: None,
         }
     }
 

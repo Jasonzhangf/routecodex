@@ -23,6 +23,8 @@ const SECOND: &[u8] = b"{\"error\":{\"type\":\"server_error\",\"code\":\"server_
 #[derive(Debug, Clone, Copy)]
 enum Entry {
     Responses,
+    Direct,
+    ChatDirect,
     Chat,
     Gemini,
     Anthropic,
@@ -31,6 +33,7 @@ enum Entry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scenario {
     SkipRetry,
+    TailRetry,
     SecondHttp,
     SecondTransport,
     SecondTruncated,
@@ -68,28 +71,34 @@ fn episode(keys: &V3ActiveKeySelectionState) -> V3ActiveKeyEpisode {
 
 #[derive(Debug)]
 struct FourthFailureClock {
+    transition_read: Option<usize>,
     keys: Arc<V3ActiveKeySelectionState>,
     armed: AtomicBool,
     reads: AtomicUsize,
     pending: Mutex<Option<V3ActiveKeyEpisode>>,
-    transition: Mutex<Option<(usize, V3ActiveKeyFailureFeedback)>>,
+    transition: Mutex<Option<(Option<usize>, V3ActiveKeyFailureFeedback)>>,
+}
+impl FourthFailureClock {
+    fn finish_sibling(&self, read: Option<usize>) {
+        if let Some(mut sibling) = self.pending.lock().unwrap().take() {
+            let feedback = self.keys.record_delivery_failure(&mut sibling).unwrap();
+            *self.transition.lock().unwrap() = Some((read, feedback));
+        }
+    }
 }
 impl V3ProviderHealthObservationClock for FourthFailureClock {
     fn now_epoch_ms(&self) -> u64 {
         if self.armed.load(Ordering::SeqCst) {
             let read = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
-            if read == 2 {
-                if let Some(mut sibling) = self.pending.lock().unwrap().take() {
-                    let feedback = self.keys.record_delivery_failure(&mut sibling).unwrap();
-                    *self.transition.lock().unwrap() = Some((read, feedback));
-                }
+            if Some(read) == self.transition_read {
+                self.finish_sibling(Some(read));
             }
         }
         1_800_000_000_000
     }
 }
 
-fn manifest(port: u16) -> V3Config05ManifestPublished {
+fn manifest(port: u16, action: &str, mode: &str, protocol: &str) -> V3Config05ManifestPublished {
     let source = format!(
         r#"
 version = 3
@@ -99,12 +108,12 @@ port = 5555
 routing_group = "witness"
 endpoints = ["responses", "openai_chat", "gemini", "anthropic"]
 [servers.witness.execution]
-allowed_modes = ["relay"]
+allowed_modes = ["{mode}"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{}}
 [providers.witness]
-type = "responses"
+type = "{protocol}"
 base_url = "http://127.0.0.1:{port}/v1"
 default_model = "wire"
 auth = {{type="api_key",entries=[{{alias="A",api_key="witness-test-A"}}]}}
@@ -113,7 +122,7 @@ wire_name = "wire"
 capabilities = ["text", "tools"]
 [route_groups.witness.pools.default]
 selection = {{strategy="active_queue"}}
-active_keys = {{members=[{{provider="witness",alias="A"}}],retries=1,on_failure="hold"}}
+active_keys = {{members=[{{provider="witness",alias="A"}}],retries=1,on_failure="{action}"}}
 targets = [{{kind="provider_model",provider="witness",model="wire",key="A",priority=1}}]
 "#
     );
@@ -125,9 +134,36 @@ async fn execute(
     manifest: &V3Config05ManifestPublished,
     health: &V3ResponsesRelayProviderHealthHandle,
     keys: Arc<V3ActiveKeySelectionState>,
+    clock: Arc<FourthFailureClock>,
 ) -> Option<V3ProviderTerminalDisposition> {
     let session = V3ProviderFailureSessionScope::new("witness", "witness", "subject").unwrap();
     match entry {
+        Entry::ChatDirect => {
+            let mut raw = build_v3_server_03_http_request_raw("witness".into(), session.with_transport_handoff_scope("subject",5555,1).unwrap(),
+                "subject".into(),"exec".into(),"POST".into(),"/v1/chat/completions".into(),json!({"model":"client","messages":[{"role":"user","content":"hello"}]}));
+            raw.port=Some(5555);
+            raw.pipeline_id=Some("subject".into());
+            let sink: V3RuntimeProviderFailureEventSink=Arc::new(move |_,_|clock.finish_sibling(None));
+            execute_v3_direct_runtime_kernel_core_with_active_keys::<V3ChatDirectCodec,_>((),manifest,raw,default_responses_transport(),
+                health.runtime_health(),1_800_000_000_000,false,Some(&sink),None,Some(keys)).await.terminal_disposition
+        }
+        Entry::Direct => {
+            let mut raw = build_v3_server_03_http_request_raw(
+                "witness".into(), session.with_transport_handoff_scope("subject", 5555, 1).unwrap(), "subject".into(), "exec".into(),
+                "POST".into(), "/v1/responses".into(), json!({"model":"client","input":"hello","stream":false})
+            );
+            raw.port = Some(5555);
+            raw.pipeline_id = Some("subject".into());
+            let shared = V3ResponsesDirectRuntimeSharedState::new(health.runtime_health())
+                .with_active_keys(Some(keys)).with_provider_failure_event_sink(Some(Arc::new(move |_, _| {
+                    clock.finish_sibling(None);
+                })));
+            let result = execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
+                shared, manifest, raw, register_responses_direct_hooks(),
+                &routecodex_v3_debug::V3DebugRuntime::new(Default::default()).unwrap(), 1_800_000_000_000
+            ).await;
+            result.terminal_disposition
+        }
         Entry::Responses => execute_v3_responses_relay_runtime_with_transport_health(manifest, V3ResponsesRelayRuntimeInput {
             server_id: "witness".into(), failure_session_scope: session, request_id: "subject".into(), payload: json!({"model":"client","input":"hello","stream":false}),
         }, default_responses_transport(), health).await.unwrap().terminal_disposition,
@@ -153,13 +189,18 @@ async fn verify(entry: Entry, scenario: Scenario) {
                 alias: "A".into(),
             }],
             retries: 1,
-            on_failure: V3ActiveKeyFailureAction::Hold,
+            on_failure: if scenario == Scenario::TailRetry {
+                V3ActiveKeyFailureAction::Tail
+            } else {
+                V3ActiveKeyFailureAction::Hold
+            },
         },
         V3SelectionStrategy::ActiveQueue,
         &[identity()],
     )
     .unwrap();
-    let pending = if scenario == Scenario::SkipRetry {
+    let skipped = matches!(scenario, Scenario::SkipRetry | Scenario::TailRetry);
+    let pending = if skipped {
         for _ in 0..2 {
             keys.record_delivery_failure(&mut episode(&keys)).unwrap();
         }
@@ -168,6 +209,11 @@ async fn verify(entry: Entry, scenario: Scenario) {
         None
     };
     let clock = Arc::new(FourthFailureClock {
+        transition_read: match (entry, scenario) {
+            (Entry::Direct | Entry::ChatDirect, _) => None,
+            (_, Scenario::TailRetry) => Some(3),
+            _ => Some(2),
+        },
         keys: keys.clone(),
         armed: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
@@ -227,13 +273,32 @@ async fn verify(entry: Entry, scenario: Scenario) {
             socket.shutdown().await.unwrap();
         }
     });
-    let manifest = manifest(addr.port());
+    let mode = if matches!(entry, Entry::Direct | Entry::ChatDirect) {
+        "direct"
+    } else {
+        "relay"
+    };
+    let protocol = if matches!(entry, Entry::ChatDirect) {
+        "openai_chat"
+    } else {
+        "responses"
+    };
+    let manifest = manifest(
+        addr.port(),
+        if scenario == Scenario::TailRetry {
+            "tail"
+        } else {
+            "hold"
+        },
+        mode,
+        protocol,
+    );
     let health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest)
         .with_observation_clock(clock.clone())
         .with_active_keys(Some(keys.clone()));
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        execute(entry, &manifest, &health, keys.clone()),
+        execute(entry, &manifest, &health, keys.clone(), clock.clone()),
     )
     .await;
     task.abort();
@@ -247,41 +312,45 @@ async fn verify(entry: Entry, scenario: Scenario) {
     let calls = calls.lock().unwrap();
     assert_eq!(
         calls.len(),
-        if scenario == Scenario::SkipRetry {
-            1
-        } else {
-            2
-        },
+        if skipped { 1 } else { 2 },
         "{entry:?} {scenario:?}"
     );
     for request in calls.iter() {
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: bearer witness-test-a"));
-        assert!(request.starts_with("POST /v1/responses "), "{request}");
+        let prefix = if matches!(entry, Entry::ChatDirect) {
+            "POST /v1/chat/completions "
+        } else {
+            "POST /v1/responses "
+        };
+        assert!(request.starts_with(prefix), "{request}");
         assert!(request.contains("\"model\":\"wire\""));
     }
-    if scenario == Scenario::SkipRetry {
+    if skipped {
         let feedback = clock
             .transition
             .lock()
             .unwrap()
             .clone()
             .expect("sibling fourth failure ran");
-        assert_eq!(feedback.0, 2);
+        assert_eq!(feedback.0, clock.transition_read);
         assert!(feedback.1.applied && feedback.1.transitioned);
         assert_eq!(feedback.1.consecutive_failures, 4);
-        assert!(keys.snapshot(&scope()).unwrap().held.contains(&identity()));
+        assert_eq!(
+            keys.snapshot(&scope()).unwrap().held.contains(&identity()),
+            scenario == Scenario::SkipRetry
+        );
     } else {
         assert!(clock.transition.lock().unwrap().is_none());
         assert!(keys.snapshot(&scope()).unwrap().held.is_empty());
     }
     match scenario {
-        Scenario::SkipRetry | Scenario::SecondHttp => {
+        Scenario::SkipRetry | Scenario::TailRetry | Scenario::SecondHttp => {
             let Some(V3ProviderTerminalDisposition::ProjectExternalHttp(witness)) = output else {
                 panic!("{entry:?} {scenario:?}: final actual HTTP error must qualify: {output:?}");
             };
-            let first = scenario == Scenario::SkipRetry;
+            let first = skipped;
             assert_eq!(witness.status(), if first { 503 } else { 502 });
             assert_eq!(witness.body(), if first { FIRST } else { SECOND });
             assert_eq!(witness.body_read_failure(), None);
@@ -301,6 +370,23 @@ async fn verify(entry: Entry, scenario: Scenario) {
     }
 }
 
+#[tokio::test]
+async fn stale_failed_tail_retry_cannot_reopen_singleton() {
+    for entry in [
+        Entry::Direct,
+        Entry::ChatDirect,
+        Entry::Responses,
+        Entry::Chat,
+        Entry::Gemini,
+        Entry::Anthropic,
+    ] {
+        verify(entry, Scenario::TailRetry).await;
+    }
+}
+#[tokio::test]
+async fn direct_skipped_retry_preserves_final_actual_http() {
+    verify(Entry::Direct, Scenario::SkipRetry).await;
+}
 #[tokio::test]
 async fn responses_skipped_retry_preserves_final_actual_http_witness() {
     verify(Entry::Responses, Scenario::SkipRetry).await;

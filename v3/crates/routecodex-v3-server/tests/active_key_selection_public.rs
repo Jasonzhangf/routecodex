@@ -31,6 +31,9 @@ mod review_regressions;
 #[path = "active_key_selection_public/business_recovery.rs"]
 mod business_recovery;
 
+#[path = "active_key_selection_public/final_boundaries.rs"]
+mod final_boundaries;
+
 // The filter lets CI expose Relay reds even while a Direct assertion fails.
 fn paths() -> Vec<bool> {
     match std::env::var("ACTIVE_PUBLIC_PATH").as_deref() {
@@ -639,6 +642,7 @@ async fn corrupt_hold_state_fails_startup_without_releasing_or_leaking_listener(
     entry.script("A", &[Outcome::Http(500); 4]);
     entry.request("corrupt-hold").await;
     entry.handle.take().unwrap().shutdown().await;
+    wait_for_listener_close(entry.ports[0]).await;
     let config = routecodex_v3_config::default_v3_config_path(std::path::PathBuf::from(
         std::env::var_os("HOME").unwrap(),
     ));
@@ -1056,29 +1060,74 @@ async fn same_protocol_generic_direct_retries_then_holds_and_releases_the_key() 
 async fn cancellation_does_not_count_as_a_delivery_failure_or_hold_a_key() {
     let _home = LOCK.lock().await;
     for chat in paths() {
-        let entry = Entry::start_with_members("active_queue", 3, "hold", chat, &["A"]).await;
-        entry.script("A", &[Outcome::Slow; 4]);
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(50))
-            .build()
-            .unwrap();
+        let mut entry = Entry::start_with_members("active_queue", 3, "hold", chat, &["A"]).await;
+        entry.script("A", &[Outcome::GatedOk; 4]);
+        let gate = business_recovery::GateOwner::new();
+        let client = reqwest::Client::new();
+        let mut cancelled = Vec::new();
         for i in 0..4 {
-            let response = client
-                .post(format!("{}/v1/responses", entry.base))
-                .header("x-session-id", format!("cancel-{i}"))
-                .json(&json!({"model":"client","input":"cancel me"}))
-                .send()
-                .await;
-            assert!(response.is_err_and(|error| error.is_timeout()));
+            let request = tokio::spawn(
+                client
+                    .post(format!("{}/v1/responses", entry.base))
+                    .header("x-session-id", format!("cancel-{i}"))
+                    .json(&json!({"model":"client","input":format!("cancel input {i}")}))
+                    .send(),
+            );
+            gate.entered().await;
+            request.abort();
+            cancelled.push(request.await.is_err_and(|error| error.is_cancelled()));
         }
-        assert_eq!(
-            entry.calls(),
-            ["A", "A", "A", "A"],
-            "each cancelled request reached Provider once and was never replayed"
-        );
-        assert_eq!(entry.queue().await["pools"][0]["held"], json!([]));
-        assert_eq!(text(&entry.request("after-cancel").await), "A");
+        let held = entry.queue().await;
+        let follow_up = entry
+            .send("after-cancel", json!("after cancellation"))
+            .await;
+        for _ in 0..4 {
+            gate.release();
+        }
+        let recorder = Arc::clone(&entry.state);
+        let prepared = tokio::time::timeout(
+            Duration::from_secs(5),
+            entry.handle.take().unwrap().prepare_for_exec(),
+        )
+        .await
+        .expect("accepted proxy work must finish after gated replies are released");
+        drop(prepared);
         entry.stop().await;
+        let calls = recorder.script.lock().unwrap().calls.clone();
+        eprintln!(
+            "final Provider aliases after shutdown: {:?}",
+            calls.iter().map(|(alias, _)| alias).collect::<Vec<_>>()
+        );
+        assert!(cancelled.into_iter().all(|cancelled| cancelled));
+        assert_eq!(
+            calls
+                .iter()
+                .map(|(alias, _)| alias.as_str())
+                .collect::<Vec<_>>(),
+            ["A", "A", "A", "A", "A"],
+            "each cancelled request and the follow-up reached Provider once"
+        );
+        for i in 0..4 {
+            let input = format!("cancel input {i}");
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|(_, body)| body.to_string().contains(&input))
+                    .count(),
+                1,
+                "cancelled input must never be replayed: {input}"
+            );
+        }
+        assert_eq!(held["pools"][0]["held"], json!([]));
+        assert!(calls
+            .last()
+            .unwrap()
+            .1
+            .to_string()
+            .contains("after cancellation"));
+        let (status, body) = follow_up.unwrap();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(text(&body), "A");
     }
 }
 
@@ -1207,18 +1256,19 @@ fn browser_fixture_manifest(
 
 #[cfg(unix)]
 async fn browser_fixture_shutdown(handle: V3ServerAggregateHandle, config: &std::path::Path) {
-    let record = config
-        .parent()
-        .unwrap()
-        .join("active-key-control-config.toml-active_public.json");
+    let paths = routecodex_v3_config::v3_active_key_control_paths(config, "active_public").unwrap();
     let endpoint: Value =
-        serde_json::from_slice(&std::fs::read(&record).expect("owned control record")).unwrap();
+        serde_json::from_slice(&paths.read().expect("owned control record")).unwrap();
     let control = endpoint["control_addr"].as_str().unwrap().parse().unwrap();
-    handle.shutdown().await;
+    assert!(handle.shutdown().await.is_empty());
     wait_for_listener_address_close(control).await;
     assert!(
-        !record.exists(),
+        matches!(paths.read(), Err(error) if error.kind() == std::io::ErrorKind::NotFound),
         "owned control endpoint record must close with the listener"
+    );
+    assert!(
+        !paths.root.exists(),
+        "owned empty control directory chain must close"
     );
     eprintln!("browser control cleanup: endpoint={control} record_absent=true");
 }
@@ -1364,6 +1414,9 @@ async fn active_key_browser_fixture() {
         std::env::var_os("HOME").unwrap(),
     ));
     let config_dir = root.parent().unwrap();
+    let canonical_root = std::env::var_os("ACTIVE_BROWSER_CANONICAL_BASENAME")
+        .map(|basename| config_dir.join(basename))
+        .unwrap_or_else(|| root.clone());
     std::fs::create_dir_all(config_dir.join("provider/controlled")).unwrap();
     let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_port = upstream_listener.local_addr().unwrap().port();
@@ -1413,7 +1466,7 @@ supportsStreaming = true
         ),
     )
     .unwrap();
-    std::fs::write(&root, format!(r#"version = 3
+    std::fs::write(&canonical_root, format!(r#"version = 3
 [servers.active_public]
 bind = "{business_ip}"
 port = {business_port}
@@ -1422,6 +1475,9 @@ selection = {{ strategy = "active_queue" }}
 active_keys = {{ members = [{{provider="controlled",alias="A"}},{{provider="controlled",alias="B"}}], retries=3, on_failure="hold" }}
 tiers = [[{{ use = "controlled/wire" }}]]
 "#)).unwrap();
+    if canonical_root != root {
+        std::os::unix::fs::symlink(&canonical_root, &root).unwrap();
+    }
     let admin = routecodex_v3_admin::AppState::new(root.clone());
     let upstream_state = Arc::new(Upstream {
         script: Mutex::new(Script::default()),
@@ -1517,7 +1573,7 @@ print(json.dumps(result))
     });
     let info = json!({"pid":std::process::id(),"admin":format!("http://127.0.0.1:{admin_port}"),
         "business":format!("http://{}",std::net::SocketAddr::new(business_ip,business_port)),"control":format!("http://127.0.0.1:{control_port}"),
-        "config_path":root,"token_path":config_dir.join("state/admin-token"),
+        "config_path":root,"canonical_config_path":canonical_root,"token_path":config_dir.join("state/admin-token"),
         "lifecycle":"test-only adapter reconstructs the real isolated RCC listener; installed services untouched"});
     std::fs::write(info_path, serde_json::to_vec_pretty(&info).unwrap()).unwrap();
     eprintln!("active-key browser fixture ready: admin={admin_port} business={business_port} control={control_port}");

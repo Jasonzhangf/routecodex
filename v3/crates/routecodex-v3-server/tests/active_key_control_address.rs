@@ -1,283 +1,4 @@
-use axum::{
-    body::Body, extract::State, http::HeaderMap, response::Response, routing::post, Json, Router,
-};
-use routecodex_v3_server::{spawn_v3_server_aggregate_with_admin, V3ServerAggregateHandle};
-use serde_json::{json, Value};
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-#[path = "support/fa22072_test_home.rs"]
-mod test_home;
-static LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
-
-struct Upstream {
-    fail_a: bool,
-    calls: Mutex<Vec<(String, Value)>>,
-}
-async fn upstream(
-    State(state): State<Arc<Upstream>>,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Response {
-    let alias = headers["authorization"]
-        .to_str()
-        .unwrap()
-        .strip_prefix("Bearer control-fixture-")
-        .unwrap();
-    state.calls.lock().unwrap().push((alias.to_string(), body));
-    if state.fail_a && alias == "A" {
-        return Response::builder()
-            .status(500)
-            .header("content-type", "application/json")
-            .body(Body::from(
-                json!({"error":{"message":"controlled A delivery failure","type":"server_error"}})
-                    .to_string(),
-            ))
-            .unwrap();
-    }
-    Json(
-        json!({"id":"r-control","object":"response","status":"completed","model":"wire",
-        "output":[{"id":"m-control","type":"message","role":"assistant","status":"completed",
-        "content":[{"type":"output_text","text":alias,"annotations":[]}]}],
-        "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}),
-    )
-    .into_response()
-}
-use axum::response::IntoResponse;
-
-fn assigned_ipv4() -> Option<IpAddr> {
-    // UDP connect selects a local route without sending a datagram.
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("192.0.2.1:9").ok()?;
-    let ip = socket.local_addr().ok()?.ip();
-    (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
-}
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .unwrap()
-}
-async fn response(request: reqwest::RequestBuilder) -> Result<(u16, Value), String> {
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    let status = response.status().as_u16();
-    let body = response.text().await.map_err(|error| error.to_string())?;
-    let body = serde_json::from_str(&body).unwrap_or(Value::String(body));
-    Ok((status, body))
-}
-async fn closed(address: SocketAddr) -> bool {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while tokio::net::TcpStream::connect(address).await.is_ok() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .is_ok()
-}
-struct Fixture {
-    _refill_override: RefillOverride,
-    handle: Option<V3ServerAggregateHandle>,
-    upstream_task: tokio::task::JoinHandle<()>,
-    admin_task: tokio::task::JoinHandle<()>,
-    upstream_addr: SocketAddr,
-    business: SocketAddr,
-    control: Option<SocketAddr>,
-    admin: SocketAddr,
-    token: String,
-    group: String,
-    record_path: PathBuf,
-    calls: Arc<Upstream>,
-}
-struct RefillOverride;
-impl Drop for RefillOverride {
-    fn drop(&mut self) {
-        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
-    }
-}
-enum Close {
-    Shutdown,
-    Drop,
-    Exec,
-}
-impl Fixture {
-    async fn start(bind: IpAddr, fail_publish: bool) -> Self {
-        // This suite measures selection controls. Bounded refill has separate
-        // public coverage and otherwise adds a declared second provider call.
-        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-        let refill_override = RefillOverride;
-        let root = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".rcc");
-        std::fs::create_dir_all(root.join("provider/controlled")).unwrap();
-        let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let upstream_addr = upstream_listener.local_addr().unwrap();
-        let reservation = tokio::net::TcpListener::bind(SocketAddr::new(bind, 0))
-            .await
-            .unwrap();
-        let port = reservation.local_addr().unwrap().port();
-        drop(reservation);
-        assert!(![4444, 7777].contains(&port));
-        for alias in ["A", "B"] {
-            std::fs::write(
-                root.join(format!("{alias}.token")),
-                format!("control-fixture-{alias}"),
-            )
-            .unwrap();
-        }
-        std::fs::write(
-            root.join("provider/controlled/config.v2.toml"),
-            format!(
-                r#"version = "2.0.0"
-providerId = "controlled"
-[provider]
-id = "controlled"
-enabled = true
-type = "responses"
-baseURL = "http://{upstream_addr}/v1"
-defaultModel = "wire"
-[provider.auth]
-type = "apikey"
-entries = [{{alias="A",tokenFile="{}"}},{{alias="B",tokenFile="{}"}}]
-[provider.models.wire]
-wireName = "wire"
-capabilities = ["text"]
-supportsStreaming = true
-"#,
-                root.join("A.token").display(),
-                root.join("B.token").display()
-            ),
-        )
-        .unwrap();
-        let config = root.join("config.toml");
-        std::fs::write(&config,format!(r#"version = 3
-[servers.selected]
-bind = "{bind}"
-port = {port}
-[servers.selected.routes.default]
-selection = {{ strategy = "active_queue" }}
-active_keys = {{members=[{{provider="controlled",alias="A"}},{{provider="controlled",alias="B"}}],retries=3,on_failure="hold"}}
-tiers = [[{{use="controlled/wire"}}]]
-"#)).unwrap();
-        let state = routecodex_v3_admin::AppState::new(config.clone());
-        let manifest = state
-            .store
-            .validate(&state.store.read_authoring().unwrap())
-            .unwrap();
-        let group = manifest.servers["selected"].routing_group.clone();
-        let calls = Arc::new(Upstream {
-            fail_a: !fail_publish,
-            calls: Mutex::new(Vec::new()),
-        });
-        let app = Router::new()
-            .route("/v1/responses", post(upstream))
-            .with_state(calls.clone());
-        let upstream_task =
-            tokio::spawn(async move { axum::serve(upstream_listener, app).await.unwrap() });
-        let record_path = root.join("active-key-control-config.toml-selected.json");
-        if fail_publish {
-            std::fs::write(&record_path, b"foreign endpoint record").unwrap();
-        }
-        let handle = spawn_v3_server_aggregate_with_admin(manifest, None, Some(config.clone()))
-            .await
-            .unwrap();
-        assert_eq!(
-            handle.listeners.len(),
-            1,
-            "companion must not enter business listener list"
-        );
-        let actual = handle.listeners[0].addr;
-        let destination_ip = if actual.ip().is_unspecified() {
-            if actual.is_ipv4() {
-                IpAddr::V4(Ipv4Addr::LOCALHOST)
-            } else {
-                "::1".parse().unwrap()
-            }
-        } else {
-            actual.ip()
-        };
-        let business = SocketAddr::new(destination_ip, actual.port());
-        let control = if fail_publish {
-            None
-        } else {
-            let record: Value =
-                serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
-            assert_eq!(record["business_addr"], actual.to_string());
-            Some(record["control_addr"].as_str().unwrap().parse().unwrap())
-        };
-        let token = std::fs::read_to_string(root.join("state/admin-token"))
-            .unwrap()
-            .trim()
-            .to_string();
-        let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let admin = admin_listener.local_addr().unwrap();
-        let admin_task = tokio::spawn(async move {
-            axum::serve(admin_listener, routecodex_v3_admin::router(state))
-                .await
-                .unwrap()
-        });
-        Self {
-            _refill_override: refill_override,
-            handle: Some(handle),
-            upstream_task,
-            admin_task,
-            upstream_addr,
-            business,
-            control,
-            admin,
-            token,
-            group,
-            record_path,
-            calls,
-        }
-    }
-    async fn business(&self) -> Result<(u16, Value), String> {
-        response(
-            client()
-                .post(format!("http://{}/v1/responses", self.business))
-                .header("x-session-id", "control-address-fixture")
-                .json(&json!({"model":"client","input":"ordinary text"})),
-        )
-        .await
-    }
-    async fn status(&self) -> Result<(u16, Value), String> {
-        response(client().get(format!(
-            "http://{}/api/routes/active-keys?server_id=selected",
-            self.admin
-        )))
-        .await
-    }
-    async fn release(&self, pool: &str) -> Result<(u16, Value), String> {
-        response(client().post(format!("http://{}/api/routes/active-keys/release",self.admin))
-            .header("x-routecodex-admin-token",&self.token).json(&json!({"server_id":"selected",
-            "routing_group_id":self.group,"pool_id":pool,"provider_id":"controlled","interface_id":"default","model_id":"wire","auth_alias":"A"}))).await
-    }
-    async fn finish(mut self, how: Close) -> (bool, bool) {
-        let handle = self.handle.take().unwrap();
-        match how {
-            Close::Shutdown => {
-                assert!(handle.shutdown().await.is_empty());
-            }
-            Close::Drop => drop(handle),
-            Close::Exec => {
-                drop(handle.prepare_for_exec().await);
-            }
-        }
-        self.admin_task.abort();
-        self.upstream_task.abort();
-        let _ = self.admin_task.await;
-        let _ = self.upstream_task.await;
-        let mut released = closed(self.business).await
-            && closed(self.admin).await
-            && closed(self.upstream_addr).await;
-        if let Some(control) = self.control {
-            released &= closed(control).await;
-        }
-        (released, !self.record_path.exists())
-    }
-}
+include!("support/active_key_control_fixture.rs");
 
 #[tokio::test]
 async fn real_admin_status_and_exact_release_follow_the_selected_listener_control() {
@@ -361,6 +82,406 @@ async fn real_admin_status_and_exact_release_follow_the_selected_listener_contro
             eprintln!("VERIFIED exact/wildcard bind={bind} control={companion}; actual Admin release and cleanup");
         }
     }
+}
+
+#[tokio::test]
+async fn bracketed_ipv6_bind_keeps_legacy_business_and_real_admin_controls() {
+    let _home = LOCK.lock().await;
+    let fixture = Fixture::start_with_bind_text("::1".parse().unwrap(), "[::1]", false).await;
+    let business = fixture.business().await;
+    let status = fixture.status().await;
+    let released = fixture.release("default").await;
+    let after = fixture.status().await;
+    let calls = fixture.calls.calls.lock().unwrap().len();
+    let cleanup = fixture.finish(Close::Shutdown).await;
+    assert_eq!(cleanup, (true, true));
+    assert_eq!(business.unwrap().0, 200);
+    assert_eq!(status.unwrap().1["pools"][0]["held"][0]["auth_alias"], "A");
+    assert_eq!(released.unwrap().1["released"], true);
+    assert_eq!(after.unwrap().1["pools"][0]["held"], json!([]));
+    assert_eq!(calls, 5);
+}
+
+#[tokio::test]
+async fn colliding_config_listener_components_keep_independent_real_admin_controls() {
+    let _home = LOCK.lock().await;
+    let bind = assigned_ipv4().expect("real non-loopback address for companion acceptance");
+    for reverse in [false, true] {
+        let a = Fixture::start_named(bind, &bind.to_string(), false, "a-b.toml", "c").await;
+        let b = Fixture::start_named(bind, &bind.to_string(), false, "a", "b.toml-c").await;
+        let business_a = a.business().await;
+        let business_b = b.business().await;
+        let status_a = a.status().await;
+        let status_b = b.status().await;
+        let have_both = a.control.is_some() && b.control.is_some();
+        let names = (a.record_path.clone(), b.record_path.clone());
+        let (closing, survivor) = if reverse { (b, a) } else { (a, b) };
+        let first_release = closing.release("default").await;
+        let first_after = closing.status().await;
+        let survivor_before = survivor.status().await;
+        let survivor_path = survivor.record_path.clone();
+        let survivor_addr = survivor.control;
+        let first_cleanup = closing.finish(Close::Shutdown).await;
+        let retained = survivor_path.exists();
+        let survivor_status = survivor.status().await;
+        let second_release = survivor.release("default").await;
+        let second_after = survivor.status().await;
+        let survivor_socket_live = match survivor_addr {
+            Some(addr) => tokio::net::TcpStream::connect(addr).await.is_ok(),
+            None => false,
+        };
+        let second_cleanup = survivor.finish(Close::Shutdown).await;
+        assert_eq!(first_cleanup, (true, true));
+        assert_eq!(second_cleanup, (true, true));
+        assert!(
+            have_both,
+            "both distinct canonical config/listener owners require independent companions"
+        );
+        assert!(names
+            .0
+            .ends_with(".active-key-control/a-b.toml/listener/s-63/endpoint.json"));
+        assert!(names
+            .1
+            .ends_with(".active-key-control/a/listener/s-622e746f6d6c2d63/endpoint.json"));
+        assert_eq!(
+            business_a.unwrap().1["output"][0]["content"][0]["text"],
+            "B"
+        );
+        assert_eq!(
+            business_b.unwrap().1["output"][0]["content"][0]["text"],
+            "B"
+        );
+        assert_eq!(
+            status_a.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+            "A"
+        );
+        assert_eq!(
+            status_b.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+            "A"
+        );
+        assert_eq!(first_release.unwrap().1["released"], true);
+        assert_eq!(first_after.unwrap().1["pools"][0]["held"], json!([]));
+        assert_eq!(
+            survivor_before.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+            "A"
+        );
+        assert!(
+            retained && survivor_socket_live,
+            "closing one owner must preserve the other's endpoint and socket"
+        );
+        assert_eq!(survivor_status.unwrap().0, 200);
+        assert_eq!(second_release.unwrap().1["released"], true);
+        assert_eq!(second_after.unwrap().1["pools"][0]["held"], json!([]));
+    }
+}
+
+#[tokio::test]
+async fn long_canonical_config_name_keeps_real_admin_status_release_and_cleanup() {
+    let _home = LOCK.lock().await;
+    let bind = assigned_ipv4().expect("real non-loopback address for companion acceptance");
+    let name = format!("a{}.toml", "-".repeat(80));
+    for close in [Close::Shutdown, Close::Drop, Close::Exec] {
+        let mut fixture = Fixture::start_named(bind, &bind.to_string(), false, &name, "c").await;
+        let root = fixture.record_root.clone();
+        let relative = fixture.record_path.strip_prefix(&root).unwrap();
+        assert_eq!(
+            relative.components().next().unwrap().as_os_str(),
+            std::ffi::OsStr::new(&name)
+        );
+        assert!(relative.components().all(|component| component
+            .as_os_str()
+            .as_encoded_bytes()
+            .len()
+            <= 255));
+        let business = fixture.business().await;
+        let status = fixture.status().await;
+        let control = fixture.control;
+        fixture.reload().await;
+        let retained = fixture.status().await;
+        let release = fixture.release("default").await;
+        let after = fixture.status().await;
+        let cleanup = fixture.finish(close).await;
+        assert_eq!(cleanup, (true, true));
+        assert!(
+            control.is_some(),
+            "a legal canonical filename requires a discoverable companion"
+        );
+        assert_eq!(business.unwrap().1["output"][0]["content"][0]["text"], "B");
+        let (status_code, status) = status.unwrap();
+        assert_eq!(status_code, 200);
+        assert_eq!(status["pools"][0]["held"][0]["auth_alias"], "A");
+        assert_eq!(
+            retained.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+            "A"
+        );
+        assert_eq!(release.unwrap().1["released"], true);
+        assert_eq!(after.unwrap().1["pools"][0]["held"], json!([]));
+        assert!(
+            !root.exists(),
+            "the final owner must prune its empty control directory chain"
+        );
+    }
+}
+
+#[tokio::test]
+async fn shared_canonical_config_keeps_chunked_listener_owners_independent() {
+    let _home = LOCK.lock().await;
+    let bind = assigned_ipv4().expect("real non-loopback address for companion acceptance");
+    let first_id = "x".repeat(60);
+    let second_id = format!("{first_id}x");
+    for reverse in [false, true] {
+        let reservation = tokio::net::TcpListener::bind(SocketAddr::new(bind, 0))
+            .await
+            .unwrap();
+        let second_port = reservation.local_addr().unwrap().port();
+        drop(reservation);
+        let first = Fixture::start_named_with_peer(
+            bind,
+            &bind.to_string(),
+            false,
+            "shared.toml",
+            &first_id,
+            None,
+            Some((&second_id, second_port)),
+        )
+        .await;
+        let second = Fixture::start_named_with_peer(
+            bind,
+            &bind.to_string(),
+            false,
+            "shared.toml",
+            &second_id,
+            Some(second_port),
+            Some((&first_id, first.business.port())),
+        )
+        .await;
+        assert_eq!(first.record_root, second.record_root);
+        assert_ne!(first.record_path, second.record_path);
+        assert!(second
+            .record_path
+            .starts_with(first.record_path.parent().unwrap()));
+        let root = first.record_root.clone();
+        let first_business = first.business().await;
+        let second_business = second.business().await;
+        let (closing, survivor) = if reverse {
+            (second, first)
+        } else {
+            (first, second)
+        };
+        let closing_record = closing.record_path.clone();
+        let first_cleanup = closing.finish(Close::Shutdown).await;
+        let survivor_record = survivor.record_path.exists();
+        let survivor_status = survivor.status().await;
+        let survivor_release = survivor.release("default").await;
+        let survivor_after = survivor.status().await;
+        let survivor_control_live = match survivor.control {
+            Some(addr) => tokio::net::TcpStream::connect(addr).await.is_ok(),
+            None => false,
+        };
+        let final_cleanup = survivor.finish(Close::Shutdown).await;
+        assert_eq!(first_cleanup, (true, true));
+        assert_eq!(final_cleanup, (true, true));
+        assert!(!closing_record.exists());
+        assert!(
+            !root.exists(),
+            "last owner must prune the complete empty scoped chain"
+        );
+        assert!(survivor_record && survivor_control_live);
+        assert_eq!(
+            first_business.unwrap().1["output"][0]["content"][0]["text"],
+            "B"
+        );
+        assert_eq!(
+            second_business.unwrap().1["output"][0]["content"][0]["text"],
+            "B"
+        );
+        assert_eq!(
+            survivor_status.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+            "A"
+        );
+        assert_eq!(survivor_release.unwrap().1["released"], true);
+        assert_eq!(survivor_after.unwrap().1["pools"][0]["held"], json!([]));
+    }
+}
+
+#[tokio::test]
+async fn failed_chunked_publication_preserves_live_sibling_and_foreign_leaf() {
+    let _home = LOCK.lock().await;
+    let bind = assigned_ipv4().expect("real non-loopback address for companion acceptance");
+    let first_id = "q".repeat(60);
+    let failed_id = format!("{first_id}q");
+    let reservation = tokio::net::TcpListener::bind(SocketAddr::new(bind, 0))
+        .await
+        .unwrap();
+    let failed_port = reservation.local_addr().unwrap().port();
+    drop(reservation);
+    let first = Fixture::start_named_with_peer(
+        bind,
+        &bind.to_string(),
+        false,
+        "shared-failure.toml",
+        &first_id,
+        None,
+        Some((&failed_id, failed_port)),
+    )
+    .await;
+    let failed = Fixture::start_named_with_peer(
+        bind,
+        &bind.to_string(),
+        true,
+        "shared-failure.toml",
+        &failed_id,
+        Some(failed_port),
+        Some((&first_id, first.business.port())),
+    )
+    .await;
+    let first_business = first.business().await;
+    let failed_business = failed.business().await;
+    let foreign = failed.record_path.clone();
+    let root = failed.record_root.clone();
+    let failed_control = failed.control;
+    let failed_cleanup = failed.finish(Close::Shutdown).await;
+    let retained = first.status().await;
+    let release = first.release("default").await;
+    let first_cleanup = first.finish(Close::Shutdown).await;
+    let foreign_bytes = std::fs::read(&foreign).unwrap();
+    assert_eq!(failed_cleanup, (true, false));
+    assert_eq!(first_cleanup, (true, true));
+    assert!(failed_control.is_none());
+    assert_eq!(
+        first_business.unwrap().1["output"][0]["content"][0]["text"],
+        "B"
+    );
+    assert_eq!(
+        failed_business.unwrap().1["output"][0]["content"][0]["text"],
+        "A"
+    );
+    assert_eq!(
+        retained.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+        "A"
+    );
+    assert_eq!(release.unwrap().1["released"], true);
+    assert_eq!(foreign_bytes, b"foreign endpoint record");
+    // This foreign leaf was explicitly created by this fixture. Both actual
+    // owners are now closed; only the fixture may remove its retained input.
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn case_distinct_listener_ids_keep_independent_real_admin_controls() {
+    let _home = LOCK.lock().await;
+    let bind = assigned_ipv4().expect("real non-loopback address for companion acceptance");
+    for reverse in [false, true] {
+        let reservation = tokio::net::TcpListener::bind(SocketAddr::new(bind, 0))
+            .await
+            .unwrap();
+        let second_port = reservation.local_addr().unwrap().port();
+        drop(reservation);
+        let first = Fixture::start_named_with_peer(
+            bind,
+            &bind.to_string(),
+            false,
+            "case-scope.toml",
+            "edge",
+            None,
+            Some(("Edge", second_port)),
+        )
+        .await;
+        let second = Fixture::start_named_with_peer(
+            bind,
+            &bind.to_string(),
+            false,
+            "case-scope.toml",
+            "Edge",
+            Some(second_port),
+            Some(("edge", first.business.port())),
+        )
+        .await;
+        let first_business = first.business().await;
+        let second_business = second.business().await;
+        let first_status = first.status().await;
+        let second_status = second.status().await;
+        let both = first.control.is_some() && second.control.is_some();
+        let (closing, survivor) = if reverse {
+            (second, first)
+        } else {
+            (first, second)
+        };
+        let first_release = closing.release("default").await;
+        let first_cleanup = closing.finish(Close::Shutdown).await;
+        let survivor_status = survivor.status().await;
+        let survivor_release = survivor.release("default").await;
+        let survivor_after = survivor.status().await;
+        let second_cleanup = survivor.finish(Close::Shutdown).await;
+        assert!(first_cleanup.0 && second_cleanup.0);
+        assert!(
+            both,
+            "case-distinct IDs must publish independent companions"
+        );
+        assert_eq!(
+            first_business.unwrap().1["output"][0]["content"][0]["text"],
+            "B"
+        );
+        assert_eq!(
+            second_business.unwrap().1["output"][0]["content"][0]["text"],
+            "B"
+        );
+        assert_eq!(first_status.unwrap().0, 200);
+        assert_eq!(second_status.unwrap().0, 200);
+        assert_eq!(first_release.unwrap().1["released"], true);
+        assert_eq!(
+            survivor_status.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+            "A"
+        );
+        assert_eq!(survivor_release.unwrap().1["released"], true);
+        assert_eq!(survivor_after.unwrap().1["pools"][0]["held"], json!([]));
+        assert!(first_cleanup.1 && second_cleanup.1);
+    }
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn record_path_above_syscall_limit_keeps_real_admin_controls() {
+    let _home = LOCK.lock().await;
+    let bind = assigned_ipv4().expect("real non-loopback address for companion acceptance");
+    let limit_output = std::process::Command::new("getconf")
+        .arg("PATH_MAX")
+        .arg(std::env::var_os("HOME").unwrap())
+        .output()
+        .unwrap();
+    assert!(limit_output.status.success());
+    let limit = String::from_utf8(limit_output.stdout)
+        .unwrap()
+        .trim()
+        .parse::<usize>()
+        .unwrap();
+    let config_name = format!("{}.toml", "c".repeat(240));
+    let server_id = "-".repeat(limit / 2 + 100);
+    let mut fixture =
+        Fixture::start_named(bind, &bind.to_string(), false, &config_name, &server_id).await;
+    assert!(fixture.record_path.as_os_str().as_encoded_bytes().len() > limit);
+    let business = fixture.business().await;
+    let status = fixture.status().await;
+    let control = fixture.control;
+    fixture.reload().await;
+    let reconstructed = fixture.status().await;
+    let release = fixture.release("default").await;
+    let after = fixture.status().await;
+    let cleanup = fixture.finish(Close::Shutdown).await;
+    assert!(cleanup.0);
+    assert!(
+        control.is_some(),
+        "legal components require directory-relative publication beyond PATH_MAX"
+    );
+    assert_eq!(business.unwrap().1["output"][0]["content"][0]["text"], "B");
+    assert_eq!(status.unwrap().1["pools"][0]["held"][0]["auth_alias"], "A");
+    assert_eq!(
+        reconstructed.unwrap().1["pools"][0]["held"][0]["auth_alias"],
+        "A"
+    );
+    assert_eq!(release.unwrap().1["released"], true);
+    assert_eq!(after.unwrap().1["pools"][0]["held"], json!([]));
+    assert!(cleanup.1);
 }
 
 #[tokio::test]

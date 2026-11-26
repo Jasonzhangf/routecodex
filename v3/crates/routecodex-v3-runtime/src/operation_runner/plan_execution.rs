@@ -24,6 +24,28 @@ const OPERATOR_NAME: &str = "routecodex.v3.operation.plan_execution";
 const OPERATOR_VERSION: &str = "1";
 
 #[derive(Clone)]
+pub(crate) enum V3PreferredSelection {
+    Fresh(V3Target10ConcreteProviderSelected),
+    FailedRetry(V3Target10ConcreteProviderSelected),
+}
+
+impl V3PreferredSelection {
+    pub(crate) fn pending(
+        selected: V3Target10ConcreteProviderSelected,
+        episode: Option<&routecodex_v3_target::V3ActiveKeyEpisode>,
+    ) -> Self {
+        if episode.is_some_and(|episode| {
+            episode.can_retry(true)
+                && selected.active_selection.as_ref() == Some(&episode.selection)
+        }) {
+            Self::FailedRetry(selected)
+        } else {
+            Self::Fresh(selected)
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) enum V3PlanExecutionTargetSource {
     OpaqueHit(V3Router07OpaqueTargetHitOnce),
     Expanded(V3Target09CandidateSetExpanded),
@@ -110,7 +132,7 @@ struct PlanExecutionOperator {
     request_local_excluded_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
-    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    preferred_selected: Option<V3PreferredSelection>,
     mode_policy: V3PlanExecutionModePolicy,
     side_output: Arc<Mutex<Option<PlanExecutionOperatorOutput>>>,
 }
@@ -126,7 +148,7 @@ impl PlanExecutionOperator {
         request_local_excluded_candidates: BTreeSet<String>,
         now_ms: u64,
         deterministic_sample: u64,
-        preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+        preferred_selected: Option<V3PreferredSelection>,
         mode_policy: V3PlanExecutionModePolicy,
         side_output: Arc<Mutex<Option<PlanExecutionOperatorOutput>>>,
     ) -> Self {
@@ -191,91 +213,86 @@ impl PlanExecutionOperator {
         // Selection remains immediate and never waits. Declared candidates are
         // not excluded by local capacity state; a real Provider failure switches
         // to the next declared candidate on the following iteration.
-        let selected = match self.preferred_selected.clone().filter(|preferred| {
-            !self.request_local_excluded_candidates.contains(
-                &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
-                    &preferred.candidate,
-                ),
-            ) && crate::provider_failure_runtime_policy::selected_target_has_current_witness(
-                preferred,
-                &expanded,
-                self.active_keys.as_deref(),
-                &self.provider_health,
-                &self.failure_session_scope,
-                self.now_ms,
-            )
-        }) {
-            Some(preferred) => preferred,
-            None => {
-                let excluded_active = self.active_keys.as_ref().map(|_| {
+        let mut exclusions = self.request_local_excluded_candidates.clone();
+        let mut preferred = self.preferred_selected.clone();
+        let selected = loop {
+            let failed_retry = matches!(preferred, Some(V3PreferredSelection::FailedRetry(_)));
+            let choice = match preferred.take() {
+                Some(
+                    V3PreferredSelection::Fresh(choice) | V3PreferredSelection::FailedRetry(choice),
+                ) => choice,
+                None => {
+                    let excluded_active = self.active_keys.as_ref().map(|_| {
                     expanded
                         .candidates
                         .iter()
                         .filter(|candidate| {
-                            self.request_local_excluded_candidates.contains(
+                            exclusions.contains(
                                 &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate),
                             )
                         })
                         .map(|candidate| candidate.active_key_identity())
                         .collect()
                 });
-                let active_context = match (self.active_keys.as_deref(), excluded_active.as_ref()) {
-                    (Some(state), Some(excluded)) => Some(V3ActiveKeySelectionContext {
-                        listener_id: self.failure_session_scope.server_id(),
-                        session_id: self
-                            .failure_session_scope
-                            .is_client_session()
-                            .then_some(self.failure_session_scope.session_id()),
-                        state,
-                        excluded,
-                    }),
-                    _ => None,
-                };
-                match select_v3_target_with_session_then_global(
-                    &V3TargetInterpreter::default(),
-                    expanded.clone(),
-                    &self.failure_session_scope,
-                    &self
-                        .provider_health
-                        .session_bound_availability(&self.failure_session_scope),
-                    &self.provider_health,
-                    &self.request_local_excluded_candidates,
-                    self.now_ms,
-                    self.deterministic_sample,
-                    active_context.as_ref(),
-                ) {
-                    Ok(selected) => selected,
-                    Err(exhaustion) => {
-                        return PlanExecutionOperatorOutput::Exhausted {
-                            expanded,
-                            exhaustion,
-                            source: None,
-                            request_local_excluded_candidates: self
-                                .request_local_excluded_candidates
-                                .clone(),
+                    let active_context =
+                        match (self.active_keys.as_deref(), excluded_active.as_ref()) {
+                            (Some(state), Some(excluded)) => Some(V3ActiveKeySelectionContext {
+                                listener_id: self.failure_session_scope.server_id(),
+                                session_id: self
+                                    .failure_session_scope
+                                    .is_client_session()
+                                    .then_some(self.failure_session_scope.session_id()),
+                                state,
+                                excluded,
+                            }),
+                            _ => None,
+                        };
+                    match select_v3_target_with_session_then_global(
+                        &V3TargetInterpreter::default(),
+                        expanded.clone(),
+                        &self.failure_session_scope,
+                        &self
+                            .provider_health
+                            .session_bound_availability(&self.failure_session_scope),
+                        &self.provider_health,
+                        &exclusions,
+                        self.now_ms,
+                        self.deterministic_sample,
+                        active_context.as_ref(),
+                    ) {
+                        Ok(selected) => selected,
+                        Err(exhaustion) => {
+                            return PlanExecutionOperatorOutput::Exhausted {
+                                expanded,
+                                exhaustion,
+                                source: None,
+                                request_local_excluded_candidates: exclusions,
+                            }
                         }
                     }
                 }
-            }
-        };
-        if !crate::provider_failure_runtime_policy::selected_target_has_current_witness(
-            &selected,
-            &expanded,
-            self.active_keys.as_deref(),
-            &self.provider_health,
-            &self.failure_session_scope,
-            self.now_ms,
-        ) {
-            return PlanExecutionOperatorOutput::Exhausted {
-                exhaustion: V3TargetExhaustion {
-                    route: Box::new(expanded.route.clone()),
-                    attempted_candidates: selected.unavailable_candidates,
-                },
-                expanded,
-                source: None,
-                request_local_excluded_candidates: self.request_local_excluded_candidates.clone(),
             };
+            let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                &choice.candidate,
+            );
+            if exclusions.contains(&key) {
+                continue;
+            }
+            let invalidation = crate::provider_failure_runtime_policy::selection_invalidation(
+                &choice,
+                &expanded,
+                self.active_keys.as_deref(),
+                &self.provider_health,
+                &self.failure_session_scope,
+                self.now_ms,
+            );
+            let Some(reason) = invalidation else {
+                break choice;
+            };
+            if failed_retry || reason == crate::provider_failure_runtime_policy::V3SelectionInvalidation::HealthUnavailable {
+            exclusions.insert(key);
         }
+        };
         let decision = match self.decide_execution_mode(selected) {
             Ok(decision) => decision,
             Err(Ok(source)) => return PlanExecutionOperatorOutput::Failed(source),
@@ -286,15 +303,13 @@ impl PlanExecutionOperator {
                 PlanExecutionOperatorOutput::Preplanned {
                     expanded,
                     decision,
-                    request_local_excluded_candidates: self
-                        .request_local_excluded_candidates
-                        .clone(),
+                    request_local_excluded_candidates: exclusions,
                 }
             }
             V3PlanExecutionPhase::AdmitAtExecution => PlanExecutionOperatorOutput::Selected {
                 expanded,
                 decision,
-                request_local_excluded_candidates: self.request_local_excluded_candidates.clone(),
+                request_local_excluded_candidates: exclusions,
             },
         }
     }
@@ -360,7 +375,7 @@ pub(crate) fn run_v3_plan_execution_operator(
         request_local_excluded_candidates,
         now_ms,
         deterministic_sample,
-        preferred_selected,
+        preferred_selected.map(V3PreferredSelection::Fresh),
         mode_policy,
     )
 }
@@ -388,7 +403,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_active_keys(
         request_local_excluded_candidates,
         now_ms,
         deterministic_sample,
-        preferred_selected,
+        preferred_selected.map(V3PreferredSelection::Fresh),
         mode_policy,
     )
 }
@@ -403,7 +418,7 @@ fn run_v3_plan_execution_operator_with_selection_state(
     request_local_excluded_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
-    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    preferred_selected: Option<V3PreferredSelection>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
@@ -698,7 +713,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
         now_ms,
         deterministic_sample,
         _allow_exhaustion_rescue_probe,
-        preferred_selected,
+        preferred_selected.map(V3PreferredSelection::Fresh),
         mode_policy,
     )
 }
@@ -716,7 +731,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes_active_keys<'a>(
     now_ms: u64,
     deterministic_sample: u64,
     _allow_exhaustion_rescue_probe: bool,
-    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    preferred_selected: Option<V3PreferredSelection>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> std::pin::Pin<
     Box<
@@ -728,7 +743,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes_active_keys<'a>(
 > {
     Box::pin(async move {
         let _ = request_local_busy_candidates;
-        let outcome = run_v3_plan_execution_operator_with_active_keys(
+        let outcome = run_v3_plan_execution_operator_with_selection_state(
             target_resolved_request,
             manifest.clone(),
             target_source,
@@ -923,6 +938,65 @@ targets = [
         V3PlanExecutionModePolicy::RelayOnly {
             entry_protocol: V3HubEntryProtocol::Responses,
         }
+    }
+
+    #[test]
+    fn direct_reselection_ignores_a_preferred_candidate_after_its_window_closes() {
+        let mut manifest = multi_provider_manifest(&["windowed", "next"]);
+        manifest
+            .providers
+            .get_mut("windowed")
+            .unwrap()
+            .models
+            .get_mut("gpt-test")
+            .unwrap()
+            .availability = Some(
+            routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+                timezone: "UTC".into(),
+                guard_minutes: 0,
+                periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+                    start: "00:00".into(),
+                    end: "00:01".into(),
+                }],
+            },
+        );
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let scope =
+            V3ProviderFailureSessionScope::new("test", "default", "window-reselection").unwrap();
+        let request = json!({"model":"client-model", "input":"opaque"});
+        let expanded = expanded_from_hit(&manifest, opaque_hit(&manifest, &request));
+        let V3PlanExecutionOutcome::Selected { plan, .. } = run_v3_plan_execution_operator(
+            request.clone(),
+            manifest.clone(),
+            V3PlanExecutionTargetSource::Expanded(expanded.clone()),
+            scope.clone(),
+            health.clone(),
+            BTreeSet::new(),
+            0,
+            0,
+            None,
+            direct_policy(),
+        )
+        .unwrap() else {
+            panic!("the initial target must be selected");
+        };
+        assert_eq!(plan.selected.candidate.provider_id, "windowed");
+        let V3PlanExecutionOutcome::Selected { plan, .. } = run_v3_plan_execution_operator(
+            request,
+            manifest,
+            V3PlanExecutionTargetSource::Expanded(expanded),
+            scope,
+            health,
+            BTreeSet::new(),
+            120_000,
+            0,
+            Some(plan.selected),
+            direct_policy(),
+        )
+        .unwrap() else {
+            panic!("the next eligible candidate must be selected");
+        };
+        assert_eq!(plan.selected.candidate.provider_id, "next");
     }
 
     fn opaque_hit(

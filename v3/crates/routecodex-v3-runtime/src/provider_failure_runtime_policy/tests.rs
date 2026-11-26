@@ -316,6 +316,7 @@ async fn legacy_failure_never_prefers_an_unwitnessed_active_successor() {
         "active successor observation: expanded={expanded:?}"
     );
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&expanded),
         failure_session_scope: test_provider_failure_scope(
@@ -397,18 +398,13 @@ async fn legacy_failure_never_prefers_an_unwitnessed_active_successor() {
     )
     .unwrap();
     assert_eq!(successor.occurrence.pool_id, "default");
-    assert!(selected_target_has_current_witness(
-        &successor,
-        &expanded,
-        Some(&keys),
-        &health,
-        &scope,
-        1
-    ));
+    assert!(
+        selection_invalidation(&successor, &expanded, Some(&keys), &health, &scope, 1).is_none()
+    );
     let mut untagged = successor.clone();
     untagged.active_selection = None;
     assert!(
-        !selected_target_has_current_witness(&untagged, &expanded, Some(&keys), &health, &scope, 1),
+        selection_invalidation(&untagged, &expanded, Some(&keys), &health, &scope, 1).is_some(),
         "None must not bypass an active occurrence's dispatch guard"
     );
     let mut episode =
@@ -514,9 +510,9 @@ fn active_dispatch_observes_health_changes_after_selection_without_spending_a_se
         "session",
     )
     .unwrap();
-    assert!(active_key_selection_is_dispatchable(
-        &selection, candidate, &keys, &health, &session, 1
-    ));
+    assert!(
+        active_selection_invalidation(&selection, candidate, &keys, &health, &session, 1).is_none()
+    );
     health
         .store()
         .record_provider_cooldown_failure(
@@ -529,19 +525,121 @@ fn active_dispatch_observes_health_changes_after_selection_without_spending_a_se
         )
         .unwrap();
     let mut episode = V3ActiveKeyEpisode::new(selection);
-    if active_key_selection_is_dispatchable(
-        &episode.selection,
-        candidate,
-        &keys,
-        &health,
-        &session,
-        3,
-    ) {
+    if active_selection_invalidation(&episode.selection, candidate, &keys, &health, &session, 3)
+        .is_none()
+    {
         episode.begin_attempt();
     }
     assert!(
         !keys.accepted_success(&mut episode).unwrap(),
         "a newly unavailable identity must not spend an actual send or accept success"
+    );
+}
+
+#[test]
+fn hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch() {
+    use routecodex_v3_config::{
+        V3ActiveKeyFailureAction, V3ActiveKeyMember, V3ActiveKeyPolicy, V3SelectionStrategy,
+    };
+    use routecodex_v3_target::{V3ActiveKeyEpisode, V3ActiveKeyScope, V3ActiveKeySelectionState};
+    let manifest =
+        global_pool_alive_manifest_with_rescue_timeout("post-acquire-selection", Some(60_000));
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let V3RelayProviderTargetResolution::Selected(mut selected) = resolve_target(
+        &manifest,
+        "post-acquire-selection",
+        &BTreeSet::new(),
+        &health,
+    ) else {
+        panic!("healthy target")
+    };
+    let identity = selected.candidate.active_key_identity();
+    let scope = V3ActiveKeyScope {
+        listener_id: "post-acquire-selection".into(),
+        routing_group_id: "post-acquire-selection".into(),
+        pool_id: "default".into(),
+    };
+    let keys = V3ActiveKeySelectionState::default();
+    keys.configure(
+        scope.clone(),
+        V3ActiveKeyPolicy {
+            members: vec![V3ActiveKeyMember {
+                provider: identity.provider_id.clone(),
+                alias: identity.auth_alias.clone(),
+            }],
+            retries: 3,
+            on_failure: V3ActiveKeyFailureAction::Hold,
+        },
+        V3SelectionStrategy::ActiveQueue,
+        &[identity.clone()],
+    )
+    .unwrap();
+    let selection = keys
+        .choose(
+            &scope,
+            &BTreeSet::from([identity.clone()]),
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+    selected.active_selection = Some(selection.clone());
+    let mut unsent = V3ActiveKeyEpisode::new(selection.clone());
+    let control = crate::execution_control::V3RequestExecutionControl::from_manifest(
+        &manifest,
+        "post-acquire-selection",
+    )
+    .unwrap();
+    health
+        .store()
+        .add_cooldown_entry_for_interface(
+            &identity.provider_id,
+            &identity.interface_id,
+            Some(&identity.auth_alias),
+            Some(&identity.model_id),
+            "probe",
+            1000,
+            1000,
+        )
+        .unwrap();
+    assert!(control
+        .acquire_business_recovery_trial(
+            &health.store(),
+            &identity.provider_id,
+            &identity.interface_id,
+            &identity.auth_alias,
+            &identity.model_id,
+            2000
+        )
+        .unwrap());
+    for _ in 0..4 {
+        let mut sibling = V3ActiveKeyEpisode::new(selection.clone());
+        sibling.begin_attempt().unwrap();
+        keys.record_delivery_failure(&mut sibling).unwrap();
+    }
+    assert!(
+        !begin_v3_active_dispatch(&selected, Some(&keys), Some(&mut unsent), &control, 2000)
+            .unwrap(),
+        "hold after acquisition must reject the unsent generation"
+    );
+    assert!(!keys.accepted_success(&mut unsent).unwrap());
+    let other = crate::execution_control::V3RequestExecutionControl::from_manifest(
+        &manifest,
+        "post-acquire-selection",
+    )
+    .unwrap();
+    assert!(
+        other
+            .acquire_business_recovery_trial(
+                &health.store(),
+                &identity.provider_id,
+                &identity.interface_id,
+                &identity.auth_alias,
+                &identity.model_id,
+                2000
+            )
+            .unwrap(),
+        "no-send rejection must release its trial without deferring cadence"
     );
 }
 
@@ -900,9 +998,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // A generic provider rejection is still an ordinary recoverable failure: it
-    // waits for the declared observation and commits the typed threshold only
-    // after that observation fails.
+    // Generic provider rejection counts once and remains below the threshold.
     for attempt in 0..2 {
         let now_ms = 20_000 + attempt as u64;
         let record = health
@@ -923,10 +1019,11 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         assert_eq!(
-            record.failure_count, 0,
-            "generic rejection remains an uncommitted policy fixture; attempt={attempt}"
+            record.failure_count,
+            attempt + 1,
+            "generic rejection counts once; attempt={attempt}"
         );
-        assert_eq!(record.state, "pre_cool_observation");
+        assert_eq!(record.state, "provider_failure_observed");
         let available = health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), now_ms)
@@ -936,7 +1033,6 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             "generic rejection must stay available before its observation; attempt={attempt}"
         );
     }
-    complete_due_precool_failures(&health, 20_010).await;
     assert!(
         health
             .store()
@@ -1338,6 +1434,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(
@@ -1425,6 +1522,7 @@ async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection
         .expect("capture Target09 before execution");
     manifest.providers.clear();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -1602,6 +1700,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -1651,23 +1750,21 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     assert!(!state
         .failed_candidates
         .contains(&"first:default:key2:gpt-test".to_string()));
-    assert_eq!(result.event.health_record.state, "pre_cool_observation");
     assert_eq!(
-        result.event.health_record.failure_count, 0,
-        "a held transport failure must not count before its observation"
+        result.event.health_record.state,
+        "provider_failure_observed"
+    );
+    assert_eq!(
+        result.event.health_record.failure_count, 1,
+        "the actual transport failure counts once"
     );
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    // Only the failed exact identity is held; its sibling key and the other
-    // provider stay eligible for the same request.
-    let held = health.availability("first", Some("key1"), Some("gpt-test"), 10_000);
     assert!(
-        !held.available,
-        "the failed exact key must be held by its own observation"
+        health
+            .availability("first", Some("key1"), Some("gpt-test"), 10_000)
+            .available,
+        "one failure must leave the key available to independent requests"
     );
-    assert!(held
-        .blocked_scopes
-        .iter()
-        .any(|blocked| blocked == "provider_pre_cool_observation"));
     assert!(
         health
             .availability("first", Some("key2"), Some("gpt-test"), 10_000)
@@ -1773,6 +1870,7 @@ public_code = "E_PATH_RATE_LIMIT"
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-path-project")
@@ -1880,6 +1978,7 @@ targets = [
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
@@ -1935,6 +2034,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-codec")

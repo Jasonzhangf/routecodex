@@ -38,6 +38,26 @@ Error observes eligible occurrences without moving queue cursors or assigning
 affinity. A fresh active successor must pass Target selection and carry its
 selection witness before dispatch.
 
+A fresh selection that loses its supplying occurrence returns to Target. It
+does not mark an unsent identity as a failed delivery. An untouched declaration
+of that identity can still serve the request. A pending retry after an actual
+failure has different custody: losing its witness closes that failed episode
+and excludes the full identity for the rest of this request. A tail transition
+cannot grant that request a new episode or retry budget.
+
+Runtime request control retains the last actual failure's identity, canonical
+typed source and complete HTTP witness across Direct/Relay handoffs. Selection,
+invalidation and handoff do not replace it. The next actual transport invocation
+does replace it. An independent local error keeps its own terminal cause.
+Error alone qualifies real final HTTP projection.
+
+A consumed failed recovery trial ends the request's active episode, including
+the final-only health-neutral case. No-send health contention causes selection
+invalidation and leaves Provider failure accounting and another owner's trial
+untouched. Plans without an active pool rank the existing merged candidate view.
+Their provider-priority schedule uses that same merged view to build its tier
+table. Active plans retain occurrence-local schedule tiers.
+
 `on_failure` is `hold` or `tail`; its default is `hold`. A held member waits for
 manual release. A tail member can be selected by a later independent request
 when queue order and health permit it. Neither action cycles an exhausted member
@@ -75,6 +95,14 @@ background probe is not accepted business success.
 The fourth failure can close an episode before its configured retry budget is
 used. A later request cannot restart the shared streak merely by creating a new
 episode. Queue counters never substitute for Provider health counters.
+
+Provider cooldown recovery uses an exclusively owned real business attempt when
+its minimum time and cadence are due. Runtime validates active membership, the
+selection generation and retry budget before acquiring that trial. A held key
+cannot acquire it. Other requests immediately use eligible declared successors.
+Only a complete accepted business success settles the health trial. Failed
+trials retain their cooldown and can end an active retry episode early. Queue
+release changes no health restriction or recovery cadence.
 
 ## Concurrency and persistence
 
@@ -137,6 +165,55 @@ carries address and lifecycle ownership only. It carries no scheduling state.
 Control startup/publication failure leaves business serving available and makes
 control unavailability explicit. Aggregate shutdown, exec close and drop release
 owned companion sockets/tasks and remove only their own endpoint records.
+
+Config derives one shared control location under
+`<canonical-parent>/.active-key-control/<canonical-basename>/listener/`.
+The basename remains its original legal filesystem component. Listener bytes
+are split into chunks of at most 60 bytes, encoded as lowercase hex and prefixed `s-`,
+then followed by the fixed `endpoint.json` leaf. Each generated component is
+bounded and distinct under case-insensitive lookup. Every byte is encoded. Ordinary
+`config.toml` symlinks retain their canonical config scope.
+
+Only Server creates these directories and publishes the record. Its owner
+removes the matching record and prunes empty scoped directories up to and
+including the `.active-key-control` boundary. It never recursively removes them.
+A foreign record, another listener and a longer listener's continuation path
+remain untouched. Publication failures preserve their actual error and close
+only the failed companion. Admin path discovery creates nothing.
+
+Storage opens the valid canonical parent once, then traverses only bounded
+components through directory handles. Composed path strings are diagnostic
+addresses, not filesystem syscall inputs. A stable `.active-key-control.lock`
+file in that parent serializes publication and compare/remove/prune, including
+directory preparation. Reads take a shared lock. Server creates the lock file
+without truncation; Admin opens an existing one. The empty lock file belongs
+to the shared config namespace and remains after an individual endpoint closes.
+No lock spans HTTP, Provider or business-routing work.
+
+Asynchronous discovery, publication and explicit cleanup use a one-second lock
+acquisition deadline. They poll the OS try-lock with an asynchronous timer.
+Opening handles and complete locked transactions run outside the business worker.
+Cancellation or expiry before acquisition leaves no waiter that can mutate later.
+An acquired transaction finishes before its result is reported. Discovery timeout
+returns an explicit control 503. Only actual NotFound permits absent-record handling.
+Business accept starts before the bounded publication batch.
+
+Port-scoped release matches each actual listener's ID and bound address. It closes
+only that listener's control owner. Failed stopped owners remain retryable on the
+same port request; siblings continue serving. Managed acknowledgement follows the
+cleanup outcome. Explicit shutdown and exec close report control cleanup separately
+from sample persistence. Synchronous Drop tries cleanup once, then reports any
+retained record. It never waits for a lock or creates a detached cleanup task.
+
+Actual managed restart uses borrowed exec preparation. It captures exact endpoint
+ownership in the existing typed exec envelope without changing original files or
+transports. Rejected exec and pre-exec cancellation retain the original controls.
+After verified managed-owner adoption, the successor compares and replaces only
+the complete inherited record under its namespace transaction. It retires inherited
+addresses no longer used, preserves foreign records and retains unresolved cleanup
+responsibility. Ordinary startup still creates records exclusively. Queue and health
+state do not enter this transport handoff. Managed startup supplies its declared
+canonical config even when no Admin listener is enabled.
 
 ## Ownership and acceptance
 

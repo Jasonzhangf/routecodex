@@ -36,6 +36,7 @@ targets = [
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(

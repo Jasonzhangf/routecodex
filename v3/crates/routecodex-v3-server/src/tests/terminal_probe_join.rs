@@ -82,10 +82,12 @@ codex_samples=false
         let handle = spawn_v3_server_aggregate(manifest.clone()).await.unwrap();
         let healths = handle.provider_health.clone();
         let client = reqwest::Client::new();
+        let mut diagnostics = Vec::new();
         for listener in &handle.listeners {
             let base = format!("http://{}/_routecodex/health/cooldown-pool", listener.addr);
             assert!(client.post(format!("{base}/add")).json(&json!({"provider_id":"test","interface_id":"default","auth_alias":"key","model_id":"main","kind":"probe","duration_ms":600000})).send().await.unwrap().status().is_success());
-            assert!(client.post(format!("{base}/probe")).json(&json!({"provider_id":"test","interface_id":"default","auth_alias":"key","model_id":"main"})).send().await.unwrap().status().is_success());
+            let diagnostic = client.post(format!("{base}/probe")).json(&json!({"provider_id":"test","interface_id":"default","auth_alias":"key","model_id":"main","allow_paid_diagnostic":true}));
+            diagnostics.push(tokio::spawn(diagnostic.send()));
         }
         tokio::time::timeout(Duration::from_secs(5), entered.acquire_many(2))
             .await
@@ -94,10 +96,11 @@ codex_samples=false
             .forget();
         for health in &healths {
             assert!(
-                serde_json::to_value(health.store().cooldown_entries(u64::MAX))
+                !serde_json::to_value(health.store().cooldown_entries(u64::MAX))
                     .unwrap()
                     .to_string()
-                    .contains("probing")
+                    .contains("probing"),
+                "paid diagnostics must not acquire health permits"
             );
         }
         if terminal_exec {
@@ -118,6 +121,10 @@ codex_samples=false
                 "terminal join must release scheduler registration"
             );
             drop(registration);
+        }
+        for diagnostic in diagnostics {
+            diagnostic.abort();
+            let _ = diagnostic.await;
         }
     }
     upstream_task.abort();

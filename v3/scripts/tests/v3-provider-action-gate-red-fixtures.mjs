@@ -97,6 +97,12 @@ function removeEdge(document, chainId, stepId) {
 }
 const cases = [
   {
+    name: 'Direct inner policy bypasses the owning failure recorder',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+    mutate: (source) => source.replace('match record_v3_direct_provider_failure_record(', 'match bypassed_direct_failure_record('),
+    diagnostic: /v3-provider-action-gate-36:.*does not call record_v3_direct_provider_failure_record/u,
+  },
+  {
     name: 'Direct provider action gate revives the removed handoff-budget executor',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
     mutate: (source) => source.replaceAll(

@@ -36,6 +36,9 @@ mod hooks_target_restart;
 #[path = "managed_lifecycle/fa22072_probe_rollback.rs"]
 mod fa22072_probe_rollback;
 
+#[path = "managed_lifecycle/active_key_control_release.rs"]
+mod active_key_control_release;
+
 struct P0ManagedProcess {
     pid: u32,
 }
@@ -1115,6 +1118,7 @@ struct CapturedChild {
     child: Option<Child>,
     stdout: Option<JoinHandle<Vec<u8>>>,
     stderr: Option<JoinHandle<Vec<u8>>>,
+    files: Option<[PathBuf; 2]>,
 }
 
 impl CapturedChild {
@@ -1123,6 +1127,7 @@ impl CapturedChild {
         let mut stderr = child.stderr.take().unwrap();
         Self {
             child: Some(child),
+            files: None,
             stdout: Some(thread::spawn(move || {
                 let mut bytes = Vec::new();
                 stdout.read_to_end(&mut bytes).unwrap();
@@ -1138,8 +1143,14 @@ impl CapturedChild {
 
     fn finish(mut self) -> Output {
         let status = self.child.as_mut().unwrap().wait().unwrap();
-        let stdout = self.stdout.take().unwrap().join().unwrap();
-        let stderr = self.stderr.take().unwrap().join().unwrap();
+        let [stdout, stderr] = if let Some(files) = self.files.take() {
+            files.map(|path| fs::read(path).unwrap())
+        } else {
+            [
+                self.stdout.take().unwrap().join().unwrap(),
+                self.stderr.take().unwrap().join().unwrap(),
+            ]
+        };
         self.child.take();
         Output {
             status,
@@ -3406,14 +3417,36 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
 
 #[test]
 fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
+    use active_key_control_release::{http, runtime, ActiveProvider};
+    use std::os::unix::fs::MetadataExt;
     let _guard = lifecycle_test_guard();
-    let root = TempDir::new().unwrap();
+    let root = TempDir::new_in("/tmp").unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
-    let config = write_config(&root, ports);
+    let provider = ActiveProvider::start();
+    provider
+        .fail
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let config = write_config_with_provider(&root, ports, false, true, Some(provider.port));
     let binary = env!("CARGO_BIN_EXE_rccv3");
-
-    let start = run(binary, &state_root, &config, "start");
+    let command = |op: &str| {
+        let mut cmd = managed_test_command(binary, &state_root);
+        cmd.args(["server", op, "--config"]).arg(&config);
+        if op != "start" {
+            cmd.args(["--timeout-ms", "15000"]);
+        }
+        cmd.env("HOME", root.path().join("home"))
+            .env("TMPDIR", root.path())
+            .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+            .env(
+                "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+                request_counter_file(&state_root),
+            )
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .output()
+            .unwrap()
+    };
+    let start = command("start");
     assert!(
         start.status.success(),
         "{}",
@@ -3427,12 +3460,37 @@ fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
     let first_pid: Value =
         serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
     let stale_pid = first_pid["pid"].as_u64().unwrap();
+    let proof = || {
+        ["instance.json", "status.json", "pid.cache", "control.json"]
+            .map(|name| fs::read(instance_dir.join(name)).ok())
+    };
+    let before = proof();
+    let status: Value = serde_json::from_slice(before[1].as_ref().unwrap()).unwrap();
+    assert_eq!(status["state"], "running");
+    let control: Value = serde_json::from_slice(before[3].as_ref().unwrap()).unwrap();
+    let socket = PathBuf::from(control["socket_path"].as_str().unwrap());
+    let inode = socket.symlink_metadata().unwrap().ino();
     kill_explicit_pid(stale_pid);
+    assert!(wait_for_explicit_pid_exit(
+        stale_pid,
+        Duration::from_secs(5)
+    ));
     for port in ports {
         wait_port(port, false);
     }
 
-    let recovered = run_with_timeout(binary, &state_root, &config, "restart", 15_000);
+    let lock = fs::File::open(instance_dir.join("status.lock")).unwrap();
+    lock.lock().unwrap();
+    let mut retained = true;
+    for attempt in 1..=2 {
+        let failed = command("restart");
+        let error = String::from_utf8_lossy(&failed.stderr);
+        let same = proof() == before && socket.symlink_metadata().is_ok_and(|m| m.ino() == inode);
+        eprintln!("dead Running pid={stale_pid} root={} ports={ports:?} attempt={attempt} status_lock_error={error} retained={same}", root.path().display());
+        retained &= !failed.status.success() && error.contains("status file lock") && same;
+    }
+    drop(lock);
+    let recovered = command("restart");
     assert!(
         recovered.status.success(),
         "{}",
@@ -3450,7 +3508,14 @@ fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
         wait_port(port, true);
     }
 
-    let stop = run_with_timeout(binary, &state_root, &config, "stop", 15_000);
+    let business = http(
+        &runtime(),
+        ([127, 0, 0, 1], ports[0]).into(),
+        "POST",
+        "/v1/responses",
+        Some(serde_json::json!({"model":"test","input":"fresh after restart","stream":false})),
+    );
+    let stop = command("stop");
     assert!(
         stop.status.success(),
         "{}",
@@ -3460,6 +3525,27 @@ fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
         wait_port(port, false);
     }
     scan_instance_files_for_secret(&instance_dir);
+    assert!(wait_for_explicit_pid_exit(
+        second_pid["pid"].as_u64().unwrap(),
+        Duration::from_secs(5)
+    ));
+    let visits = provider.visits.clone();
+    drop(provider);
+    let closed = !socket.exists()
+        && ["pid.cache", "control.json", "lifecycle.lock"]
+            .iter()
+            .all(|name| !instance_dir.join(name).exists());
+    root.close().unwrap();
+    assert!(retained && closed);
+    let (status, body) = business.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body["id"], "active-managed");
+    assert_eq!(body["status"], "completed");
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "fresh after restart"
+    );
+    assert_eq!(visits.lock().unwrap().as_slice(), ["fresh after restart"]);
 }
 
 #[test]
@@ -4304,6 +4390,10 @@ fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
         String::from_utf8_lossy(&stop.stderr)
     );
     assert_stop_stdout(&stop, "forced server stop");
+    assert!(!last_json(&stop)["detail"]
+        .as_str()
+        .unwrap()
+        .contains("pending active-key control cleanup"));
     let killed = occupied.wait().unwrap();
     assert!(
         !killed.success(),

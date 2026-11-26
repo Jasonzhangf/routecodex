@@ -1,4 +1,5 @@
 mod active_key_control;
+pub use active_key_control::{V3ActiveKeyControlExecHandoff, V3ActiveKeyControlStartup};
 mod aggregate_probe_lifecycle;
 mod client_sse_transport;
 mod client_transport_observation;
@@ -184,6 +185,43 @@ where
     }
 }
 
+#[cfg(test)]
+type V3ResponsesHandoffObserver = dyn Fn(
+        &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+        V3EntryProtocolExecutionMode,
+        &V3ActiveKeySelectionState,
+    ) + Send
+    + Sync;
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+struct V3ResponsesHandoffObserverSlot(Arc<Mutex<Option<Arc<V3ResponsesHandoffObserver>>>>);
+
+#[cfg(test)]
+impl fmt::Debug for V3ResponsesHandoffObserverSlot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("V3ResponsesHandoffObserverSlot")
+    }
+}
+
+#[cfg(test)]
+impl V3ListenerState {
+    fn observe_responses_handoff(
+        &self,
+        selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+        mode: V3EntryProtocolExecutionMode,
+    ) {
+        let observer = self.responses_handoff_observer.0.lock().unwrap().clone();
+        if let Some(observer) = observer {
+            observer(
+                selected,
+                mode,
+                self.active_keys.as_deref().expect("listener active keys"),
+            );
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct V3ListenerState {
     server: V3ServerManifest,
@@ -196,6 +234,9 @@ pub(crate) struct V3ListenerState {
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     active_keys: Option<Arc<V3ActiveKeySelectionState>>,
+    active_key_control_revoked: Arc<std::sync::RwLock<bool>>,
+    #[cfg(test)]
+    responses_handoff_observer: V3ResponsesHandoffObserverSlot,
     image_history: routecodex_v3_runtime::V3SuccessfulImageHistory,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
@@ -252,11 +293,20 @@ pub struct V3ListenerHandle {
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
     accept_state: Arc<V3ListenerAcceptState>,
+    active_key_control_revoked: Arc<std::sync::RwLock<bool>>,
+}
+
+impl V3ListenerHandle {
+    fn revoke_active_key_controls(&self) {
+        *self.active_key_control_revoked.write().unwrap() = true;
+    }
 }
 
 #[derive(Debug)]
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
+    #[cfg(test)]
+    responses_handoff_observer: V3ResponsesHandoffObserverSlot,
     probe_lifecycle: aggregate_probe_lifecycle::AggregateProbeLifecycle,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
@@ -264,54 +314,178 @@ pub struct V3ServerAggregateHandle {
     observability_writers: Vec<V3WebuiObservability>,
     codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
     active_key_controls: Vec<ActiveKeyControlOwner>,
+    active_key_control_startup_details: Vec<String>,
 }
 
 #[derive(Debug)]
 struct ActiveKeyControlOwner {
-    task: ActiveKeyControlTask,
-    record_path: PathBuf,
+    transport: Option<ActiveKeyControlTransport>,
+    record_paths: routecodex_v3_config::V3ActiveKeyControlPaths,
     record: active_key_control::ActiveKeyControlEndpointRecord,
-    shutdown: Option<oneshot::Sender<()>>,
-    broker: Option<V3FrontTransportBroker>,
+    record_pending: bool,
+    record_live: bool,
 }
 
 #[derive(Debug)]
-enum ActiveKeyControlTask {
-    Serving(tokio::task::JoinHandle<()>),
-    RecordOnly,
+struct ActiveKeyControlTransport {
+    task: tokio::task::JoinHandle<()>,
+    shutdown: Option<oneshot::Sender<()>>,
+    broker: V3FrontTransportBroker,
 }
 
-impl ActiveKeyControlOwner {
-    fn close(&mut self) {
-        if let ActiveKeyControlTask::Serving(task) = &self.task {
-            task.abort();
-        }
+impl ActiveKeyControlTransport {
+    fn close_transports_now(&mut self) {
+        self.task.abort();
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
-        if let Some(broker) = self.broker.take() {
-            broker.close_active_client_transports();
+        self.broker.close_active_client_transports();
+    }
+
+    async fn close(&mut self) {
+        self.close_transports_now();
+        let _ = (&mut self.task).await;
+    }
+}
+
+impl Drop for ActiveKeyControlTransport {
+    fn drop(&mut self) {
+        self.close_transports_now();
+    }
+}
+
+impl ActiveKeyControlOwner {
+    fn close_transports_now(&mut self) {
+        self.record_live = false;
+        if let Some(transport) = self.transport.as_mut() {
+            transport.close_transports_now();
         }
-        if let Err(error) = active_key_control::remove_owned_record(&self.record_path, &self.record)
-        {
-            eprintln!(
-                "V3 active-key control record cleanup failed at {}: {error}",
-                self.record_path.display()
-            );
+    }
+
+    async fn close_until(&mut self, deadline: tokio::time::Instant) -> io::Result<()> {
+        if let Some(mut transport) = self.transport.take() {
+            transport.close().await;
+        }
+        if self.record_pending {
+            active_key_control::remove_owned_record_until(
+                &self.record_paths,
+                &self.record,
+                deadline,
+            )
+            .await?;
+            self.record_pending = false;
+        }
+        Ok(())
+    }
+
+    fn cleanup_failure(&self, error: io::Error) -> V3ActiveKeyControlCleanupFailure {
+        V3ActiveKeyControlCleanupFailure {
+            pending: self.record_pending,
+            server_id: self.record.server_id.clone(),
+            business_addr: self.record.business_addr,
+            record_path: self.record_paths.record.clone(),
+            error,
         }
     }
 }
 
 impl Drop for ActiveKeyControlOwner {
     fn drop(&mut self) {
-        self.close();
+        self.close_transports_now();
+        if self.record_pending {
+            if let Err(error) =
+                active_key_control::try_remove_owned_record(&self.record_paths, &self.record)
+            {
+                eprintln!("{}", self.cleanup_failure(error));
+            }
+        }
     }
+}
+
+const ACTIVE_KEY_CONTROL_ACQUISITION_BUDGET: Duration = Duration::from_secs(1);
+
+#[derive(Debug)]
+pub struct V3ActiveKeyControlCleanupFailure {
+    pub pending: bool,
+    pub server_id: String,
+    pub business_addr: SocketAddr,
+    pub record_path: PathBuf,
+    pub error: io::Error,
+}
+
+impl std::fmt::Display for V3ActiveKeyControlCleanupFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "V3 active-key control record cleanup failed for {} at {} ({}): {}",
+            self.server_id,
+            self.business_addr,
+            self.record_path.display(),
+            self.error
+        )
+    }
+}
+
+impl std::error::Error for V3ActiveKeyControlCleanupFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct V3ServerCloseReport {
+    pub pending_controls: Option<V3ActiveKeyControlExecHandoff>,
+    pub control_disposition_error: Option<io::Error>,
+    pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
+    pub control_cleanup_failures: Vec<V3ActiveKeyControlCleanupFailure>,
+}
+
+impl V3ServerCloseReport {
+    pub fn is_empty(&self) -> bool {
+        self.codex_sample_persist_failures.is_empty()
+            && self.control_cleanup_failures.is_empty()
+            && self.control_disposition_error.is_none()
+    }
+}
+
+impl std::fmt::Display for V3ServerCloseReport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut details = Vec::new();
+        if let Some(error) = &self.control_disposition_error {
+            details.push(format!("active-key control disposition failed: {error}"));
+        }
+        if !self.codex_sample_persist_failures.is_empty() {
+            details.push(format!(
+                "codex sample persistence shutdown failed: {}",
+                self.codex_sample_persist_failures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+        details.extend(
+            self.control_cleanup_failures
+                .iter()
+                .map(ToString::to_string),
+        );
+        formatter.write_str(&details.join("; "))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct V3ListenerPortCloseReport {
+    pub released_ports: Vec<u16>,
+    pub control_cleanup_failures: Vec<V3ActiveKeyControlCleanupFailure>,
 }
 
 #[derive(Debug)]
 pub struct V3ServerExecPreparation {
     pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
     pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
+    pub control_cleanup_failures: Vec<V3ActiveKeyControlCleanupFailure>,
+    pub control_disposition_error: Option<io::Error>,
+    pub active_key_control_handoff: Option<V3ActiveKeyControlExecHandoff>,
     _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
     _maintenance_guard: Option<V3ServerMaintenanceGuard>,
     _probe_quiescence_guard: Option<aggregate_probe_lifecycle::ProbeQuiescenceGuard>,
@@ -385,6 +559,9 @@ impl V3ServerAggregateHandle {
         Ok(V3ServerExecPreparation {
             front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
             codex_sample_persist_failures,
+            control_cleanup_failures: Vec::new(),
+            control_disposition_error: None,
+            active_key_control_handoff: self.exact_active_key_custody(),
             _codex_sample_exec_guard: codex_sample_exec_guard,
             _maintenance_guard: None,
             _probe_quiescence_guard: Some(probe_quiescence_guard),
@@ -393,6 +570,10 @@ impl V3ServerAggregateHandle {
 
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
+    }
+
+    pub fn active_key_control_startup_details(&self) -> &[String] {
+        &self.active_key_control_startup_details
     }
 
     #[doc(hidden)]
@@ -404,7 +585,8 @@ impl V3ServerAggregateHandle {
             .await
     }
 
-    pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
+    pub async fn shutdown(mut self) -> V3ServerCloseReport {
+        let mut report = self.close_active_key_controls().await;
         self.probe_lifecycle.terminate();
         self.probe_lifecycle.join().await;
         let mut persistence_failures = self.close_runtime_persistence().await;
@@ -417,14 +599,17 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
-        self.close_active_key_controls();
         persistence_failures.extend(codex_sample_persist_failures);
-        persistence_failures
+        report.codex_sample_persist_failures = persistence_failures;
+        report
     }
 
     /// Stop new business dispatch, wait for accepted requests to finish, then
     /// close the remaining idle transports before exec replacement.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
+        for listener in &self.listeners {
+            listener.revoke_active_key_controls();
+        }
         self.probe_lifecycle.terminate();
         let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
         self.probe_lifecycle.join().await;
@@ -433,7 +618,7 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
-        self.close_active_key_controls();
+        let close = self.close_active_key_controls().await;
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -448,6 +633,9 @@ impl V3ServerAggregateHandle {
         V3ServerExecPreparation {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
+            control_cleanup_failures: close.control_cleanup_failures,
+            control_disposition_error: close.control_disposition_error,
+            active_key_control_handoff: close.pending_controls,
             _codex_sample_exec_guard: None,
             _maintenance_guard: Some(maintenance_guard),
             _probe_quiescence_guard: None,
@@ -482,8 +670,28 @@ impl V3ServerAggregateHandle {
         failures
     }
 
-    fn close_active_key_controls(&mut self) {
+    pub async fn close_active_key_controls(&mut self) -> V3ServerCloseReport {
+        for listener in &self.listeners {
+            listener.revoke_active_key_controls();
+        }
+        let mut custody = self.exact_active_key_custody().unwrap_or_default();
+        for owner in &mut self.active_key_controls {
+            owner.close_transports_now();
+        }
+        for owner in &mut self.active_key_controls {
+            if let Some(mut transport) = owner.transport.take() {
+                transport.close().await;
+            }
+            owner.record_pending = false;
+        }
         self.active_key_controls.clear();
+        let mut report = V3ServerCloseReport::default();
+        match custody.retire_failed_startup().await {
+            Ok(failures) => report.control_cleanup_failures = failures,
+            Err(error) => report.control_disposition_error = Some(error),
+        }
+        report.pending_controls = (!custody.is_empty()).then_some(custody);
+        report
     }
 
     pub fn restore_front_checkpoints(
@@ -494,27 +702,70 @@ impl V3ServerAggregateHandle {
             .restore_checkpoints(checkpoints, Instant::now())
     }
 
-    pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
-        let mut released = Vec::new();
-        for listener in &mut self.listeners {
-            if listener.server_id == "admin_webui" {
-                continue;
-            }
-            if !ports.contains(&listener.addr.port()) {
-                continue;
-            }
+    pub async fn shutdown_listener_ports(
+        &mut self,
+        ports: &BTreeSet<u16>,
+    ) -> V3ListenerPortCloseReport {
+        let mut report = V3ListenerPortCloseReport::default();
+        let mut selected = BTreeSet::new();
+        for listener in self.listeners.iter_mut().filter(|listener| {
+            listener.server_id != "admin_webui" && ports.contains(&listener.addr.port())
+        }) {
+            listener.revoke_active_key_controls();
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
-                released.push(listener.addr.port());
+            }
+            selected.insert((listener.server_id.as_str(), listener.addr));
+            report.released_ports.push(listener.addr.port());
+        }
+        let deadline = tokio::time::Instant::now() + ACTIVE_KEY_CONTROL_ACQUISITION_BUDGET;
+        let matches_listener = |owner: &ActiveKeyControlOwner| {
+            selected.contains(&(owner.record.server_id.as_str(), owner.record.business_addr))
+                // A pending inherited owner can outlive its listener declaration.
+                || (!owner.record_live && ports.contains(&owner.record.business_addr.port()))
+        };
+        for owner in self
+            .active_key_controls
+            .iter_mut()
+            .filter(|owner| matches_listener(owner))
+        {
+            owner.close_transports_now();
+        }
+        for owner in self
+            .active_key_controls
+            .iter_mut()
+            .filter(|owner| matches_listener(owner))
+        {
+            if let Err(error) = owner.close_until(deadline).await {
+                report
+                    .control_cleanup_failures
+                    .push(owner.cleanup_failure(error));
             }
         }
-        released
+        self.active_key_controls
+            .retain(|owner| owner.record_pending);
+        report
+    }
+
+    pub fn retained_active_key_cleanup_ports(&self) -> impl Iterator<Item = u16> + '_ {
+        self.active_key_controls
+            .iter()
+            .filter(|owner| owner.record_pending && !owner.record_live)
+            .map(|owner| owner.record.business_addr.port())
+    }
+
+    pub fn exact_active_key_custody(&self) -> Option<V3ActiveKeyControlExecHandoff> {
+        V3ActiveKeyControlExecHandoff::capture(&self.active_key_controls)
     }
 
     pub fn has_active_listener(&self) -> bool {
         self.listeners
             .iter()
             .any(|listener| listener.shutdown.is_some())
+    }
+
+    pub fn listener_release_is_complete(&self) -> bool {
+        !self.has_active_listener() && self.active_key_controls.is_empty()
     }
 
     /// Total `accept()` failures observed by the listener tasks.
@@ -540,6 +791,19 @@ impl V3ServerAggregateHandle {
 impl Drop for V3ServerAggregateHandle {
     fn drop(&mut self) {
         self.probe_lifecycle.terminate();
+        if self
+            .listeners
+            .iter()
+            .any(|listener| listener.shutdown.is_some())
+        {
+            for listener in &mut self.listeners {
+                listener.revoke_active_key_controls();
+                if let Some(shutdown) = listener.shutdown.take() {
+                    let _ = shutdown.send(());
+                }
+            }
+            self.front_transport_broker.close_active_client_transports();
+        }
         self.active_key_controls.clear();
     }
 }
@@ -570,7 +834,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
-    spawn_v3_server_aggregate_with_health_dependencies(
+    spawn_v3_server_aggregate_for_managed_startup(
         manifest,
         admin_webui,
         admin_config_path,
@@ -580,12 +844,38 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     .await
 }
 
+/// Start the explicitly verified successor supplied by managed Lifecycle.
+pub async fn spawn_v3_server_aggregate_for_managed_startup(
+    manifest: V3Config05ManifestPublished,
+    admin_webui: Option<V3AdminWebuiManifest>,
+    admin_config_path: Option<PathBuf>,
+    hooks_sidecar_socket: Option<PathBuf>,
+    active_key_startup: Option<&V3ActiveKeyControlStartup>,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    spawn_v3_server_aggregate_with_health_dependencies(
+        manifest,
+        admin_webui,
+        admin_config_path,
+        hooks_sidecar_socket,
+        None,
+        active_key_startup,
+    )
+    .await
+}
+
 pub async fn spawn_v3_server_aggregate_with_health_observation_clock(
     manifest: V3Config05ManifestPublished,
     clock: Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
-    spawn_v3_server_aggregate_with_health_dependencies(manifest, None, None, None, Some(clock))
-        .await
+    spawn_v3_server_aggregate_with_health_dependencies(
+        manifest,
+        None,
+        None,
+        None,
+        Some(clock),
+        None,
+    )
+    .await
 }
 
 async fn spawn_v3_server_aggregate_with_health_dependencies(
@@ -594,7 +884,14 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
     observation_clock: Option<Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>>,
+    active_key_startup: Option<&V3ActiveKeyControlStartup>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    let mut inherited = active_key_startup
+        .map(V3ActiveKeyControlStartup::inherited_owners)
+        .transpose()?
+        .unwrap_or_default();
+    #[cfg(test)]
+    let mut control_storage_observer = active_key_control::take_storage_boundary_observer();
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
@@ -635,11 +932,15 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     let admin_config_path_for_router = admin_config_path.clone();
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
-        let ip: std::net::IpAddr = server
-            .bind
-            .parse()
+        let addr = format!("{}:{}", server.bind, server.port)
+            .parse::<SocketAddr>()
+            .or_else(|_| {
+                server
+                    .bind
+                    .parse()
+                    .map(|ip| SocketAddr::new(ip, server.port))
+            })
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let addr = SocketAddr::new(ip, server.port);
         let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await?;
         let bound_addr = listener.local_addr()?;
         bound.push((server, listener, bound_addr));
@@ -653,9 +954,11 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 "admin_webui requires a canonical config path",
             ))
         } else {
-            match admin.bind.parse::<std::net::IpAddr>() {
-                Ok(ip) => {
-                    let addr = SocketAddr::new(ip, admin.port);
+            match format!("{}:{}", admin.bind, admin.port)
+                .parse::<SocketAddr>()
+                .or_else(|_| admin.bind.parse().map(|ip| SocketAddr::new(ip, admin.port)))
+            {
+                Ok(addr) => {
                     match bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await {
                         Ok(listener) => listener
                             .local_addr()
@@ -692,6 +995,8 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
+    #[cfg(test)]
+    let responses_handoff_observer = V3ResponsesHandoffObserverSlot::default();
     let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
     // Generation zero is reserved for an uninitialized handoff carrier. A
     // listener may accept requests as soon as it binds, so the normal startup
@@ -730,9 +1035,10 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     let mut observability_writers = Vec::with_capacity(bound.len());
     let mut pending_listener_tasks = Vec::with_capacity(bound.len());
     let mut provider_health_handles = Vec::with_capacity(bound.len());
-    let mut active_key_controls = Vec::new();
+    let mut pending_active_key_controls = Vec::new();
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
+        let active_key_control_revoked = Arc::new(std::sync::RwLock::new(false));
         let app = if server_id == "admin_webui" {
             let config_path = admin_config_path_for_router.clone().ok_or_else(|| {
                 std::io::Error::new(
@@ -798,6 +1104,9 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 codex_sample_store: codex_sample_store.clone(),
                 provider_health: listener_provider_health,
                 active_keys,
+                active_key_control_revoked: Arc::clone(&active_key_control_revoked),
+                #[cfg(test)]
+                responses_handoff_observer: responses_handoff_observer.clone(),
                 image_history: Default::default(),
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 request_activity_gate: Arc::clone(&request_activity_gate),
@@ -805,30 +1114,7 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 webui_observability,
             });
             if listener_state.active_keys.is_some() {
-                let control_bind = active_key_control::control_bind_address(addr);
-                if let Some(control_bind) = control_bind {
-                    match publish_active_key_control_record(
-                        canonical_admin_config_path.as_deref(), &server_id, addr, control_bind,
-                    ) {
-                        Ok(owner) => active_key_controls.push(owner),
-                        Err(error) => eprintln!("V3 active-key control unavailable for {server_id} at {addr}: {error}; business listener remains active"),
-                    }
-                } else {
-                    match start_active_key_control_companion(
-                        &listener_state,
-                        active_key_control::companion_bind_address(),
-                        canonical_admin_config_path.as_deref(),
-                        &server_id,
-                        addr,
-                    )
-                    .await
-                    {
-                        Ok(owner) => active_key_controls.push(owner),
-                        Err(error) => eprintln!(
-                            "V3 active-key control unavailable for {server_id} at {addr}: {error}; business listener remains active"
-                        ),
-                    }
-                }
+                pending_active_key_controls.push((Arc::clone(&listener_state), addr));
             }
             build_v3_listener_router((*listener_state).clone())
         };
@@ -848,6 +1134,7 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
             addr,
             shutdown: Some(shutdown_tx),
             accept_state,
+            active_key_control_revoked,
         });
     }
     for listener in &listeners {
@@ -911,16 +1198,106 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
         provider_health_handles.clone(),
     )
     .map_err(std::io::Error::other)?;
-    Ok(V3ServerAggregateHandle {
+    let mut handle = V3ServerAggregateHandle {
         listeners,
+        #[cfg(test)]
+        responses_handoff_observer,
         probe_lifecycle,
         request_activity_gate,
         front_transport_broker,
         provider_health: provider_health_handles,
         observability_writers,
         codex_sample_persist_worker,
-        active_key_controls,
-    })
+        active_key_controls: Vec::new(),
+        active_key_control_startup_details: Vec::new(),
+    };
+    let deadline = tokio::time::Instant::now() + ACTIVE_KEY_CONTROL_ACQUISITION_BUDGET;
+    for owner in &mut inherited {
+        owner.record_pending = true;
+    }
+    for (listener_state, addr) in pending_active_key_controls {
+        let server_id = &listener_state.server.id;
+        let result = async {
+            let paths = resolve_active_key_control_paths(
+                canonical_admin_config_path.as_deref(),
+                server_id,
+                deadline,
+            )
+            .await?;
+            let mut predecessor = inherited
+                .iter()
+                .position(|owner| owner.record_paths == paths)
+                .map(|index| inherited.swap_remove(index));
+            let published =
+                if let Some(control_addr) = active_key_control::control_bind_address(addr) {
+                    active_key_control::publish_startup_record(
+                        paths,
+                        active_key_control::make_record(server_id, addr, control_addr),
+                        deadline,
+                        predecessor.as_mut(),
+                        active_key_startup,
+                        #[cfg(test)]
+                        control_storage_observer.take(),
+                    )
+                    .await
+                } else {
+                    start_active_key_control_companion(
+                        &listener_state,
+                        paths,
+                        addr,
+                        deadline,
+                        predecessor.as_mut(),
+                        active_key_startup,
+                        #[cfg(test)]
+                        control_storage_observer.take(),
+                    )
+                    .await
+                };
+            handle
+                .active_key_controls
+                .extend(predecessor.filter(|owner| owner.record_pending));
+            published
+        }
+        .await;
+        match result {
+            Ok(owner) => handle.active_key_controls.push(owner),
+            Err(error) => report_active_key_control_startup_failure(
+                &mut handle,
+                format!("V3 active-key control unavailable for {server_id} at {addr}: {error}"),
+            ),
+        }
+    }
+    for mut owner in inherited {
+        if let Err(error) = active_key_control::retire_inherited_record_until(
+            &mut owner,
+            deadline,
+            active_key_startup,
+        )
+        .await
+        {
+            report_active_key_control_startup_failure(
+                &mut handle,
+                format!(
+                    "V3 active-key control unavailable for inherited retirement: {}",
+                    owner.cleanup_failure(error)
+                ),
+            );
+        }
+        if owner.record_pending {
+            handle.active_key_controls.push(owner);
+        }
+    }
+    if let Some(startup) = active_key_startup {
+        startup
+            .snapshot()
+            .retain_unrepresented_owners(&mut handle.active_key_controls)?;
+    }
+    Ok(handle)
+}
+
+fn report_active_key_control_startup_failure(handle: &mut V3ServerAggregateHandle, detail: String) {
+    eprintln!("{detail}; business listeners remain active");
+    handle.active_key_control_startup_details.push(detail);
 }
 
 pub async fn serve_v3_server_aggregate_until_shutdown(
@@ -932,14 +1309,7 @@ pub async fn serve_v3_server_aggregate_until_shutdown(
     if failures.is_empty() {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!(
-            "codex sample persistence failed during server shutdown: {}",
-            failures
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        )))
+        Err(std::io::Error::other(failures.to_string()))
     }
 }
 
@@ -1239,11 +1609,14 @@ fn active_keys_control_router(state: Arc<V3ListenerState>) -> Router {
 
 async fn start_active_key_control_companion(
     state: &Arc<V3ListenerState>,
-    bind: SocketAddr,
-    config_path: Option<&std::path::Path>,
-    server_id: &str,
+    paths: routecodex_v3_config::V3ActiveKeyControlPaths,
     business_addr: SocketAddr,
+    deadline: tokio::time::Instant,
+    inherited: Option<&mut ActiveKeyControlOwner>,
+    startup: Option<&V3ActiveKeyControlStartup>,
+    #[cfg(test)] observer: Option<active_key_control::StorageBoundaryObserver>,
 ) -> io::Result<ActiveKeyControlOwner> {
+    let bind = active_key_control::companion_bind_address();
     let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(bind)).await?;
     let control_addr = listener.local_addr()?;
     if !control_addr.ip().is_loopback() {
@@ -1252,14 +1625,6 @@ async fn start_active_key_control_companion(
             "active-key control companion did not bind loopback",
         ));
     }
-    let config_path = config_path.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "canonical config path is unavailable",
-        )
-    })?;
-    let record_path = active_key_control::record_path(config_path, server_id)?;
-    let record = active_key_control::make_record(server_id, business_addr, control_addr);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = active_keys_control_router(Arc::clone(state));
     let broker = V3FrontTransportBroker::default();
@@ -1270,42 +1635,66 @@ async fn start_active_key_control_companion(
         broker.clone(),
         Arc::new(V3ListenerAcceptState::new()),
     ));
-    if let Err(error) = active_key_control::publish_record(&record_path, &record) {
-        task.abort();
-        broker.close_active_client_transports();
-        return Err(error);
-    }
-    Ok(ActiveKeyControlOwner {
-        task: ActiveKeyControlTask::Serving(task),
-        record_path,
-        record,
+    let mut transport = ActiveKeyControlTransport {
+        task,
         shutdown: Some(shutdown_tx),
-        broker: Some(broker),
-    })
+        broker,
+    };
+    let result = active_key_control::publish_startup_record(
+        paths,
+        active_key_control::make_record(&state.server.id, business_addr, control_addr),
+        deadline,
+        inherited,
+        startup,
+        #[cfg(test)]
+        observer,
+    )
+    .await;
+    match result {
+        Ok(mut owner) => {
+            owner.transport = Some(transport);
+            Ok(owner)
+        }
+        Err(error) => {
+            transport.close().await;
+            Err(error)
+        }
+    }
 }
 
-fn publish_active_key_control_record(
+async fn resolve_active_key_control_paths(
     config_path: Option<&std::path::Path>,
     server_id: &str,
-    business_addr: SocketAddr,
-    control_addr: SocketAddr,
-) -> io::Result<ActiveKeyControlOwner> {
+    deadline: tokio::time::Instant,
+) -> io::Result<routecodex_v3_config::V3ActiveKeyControlPaths> {
+    if tokio::time::Instant::now() >= deadline {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "active-key control publication acquisition deadline elapsed",
+        ));
+    }
     let config_path = config_path.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "canonical config path is unavailable",
         )
     })?;
-    let record_path = active_key_control::record_path(config_path, server_id)?;
-    let record = active_key_control::make_record(server_id, business_addr, control_addr);
-    active_key_control::publish_record(&record_path, &record)?;
-    Ok(ActiveKeyControlOwner {
-        task: ActiveKeyControlTask::RecordOnly,
-        record_path,
-        record,
-        shutdown: None,
-        broker: None,
-    })
+    let config_path = config_path.to_path_buf();
+    let server_id = server_id.to_owned();
+    tokio::time::timeout_at(
+        deadline,
+        tokio::task::spawn_blocking(move || {
+            active_key_control::record_path(&config_path, &server_id)
+        }),
+    )
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "active-key control publication acquisition deadline elapsed",
+        )
+    })?
+    .map_err(io::Error::other)?
 }
 
 async fn active_keys_status(
@@ -1314,6 +1703,13 @@ async fn active_keys_status(
 ) -> Response<Body> {
     if !remote.ip().is_loopback() {
         return json_response(403, json!({"error":"loopback_only"}));
+    }
+    let access = state.active_key_control_revoked.read().unwrap();
+    if *access {
+        return json_response(
+            410,
+            json!({"error":"active key controls have been released"}),
+        );
     }
     let Some(active_keys) = &state.active_keys else {
         return json_response(200, json!({"pools":[]}));
@@ -1399,6 +1795,13 @@ async fn active_keys_release(
         model_id: body.model_id,
         auth_alias: body.auth_alias,
     };
+    let access = state.active_key_control_revoked.read().unwrap();
+    if *access {
+        return json_response(
+            410,
+            json!({"error":"active key controls have been released"}),
+        );
+    }
     match active_keys.release(&scope, &identity) {
         Ok(changed) => json_response(
             200,

@@ -227,6 +227,7 @@ async fn fa22072_failed_attempt_write_failure_isolated_public_entry() {
     let rid = request_id.as_deref().unwrap_or_default();
     let mut ledger_failures: Vec<String> = Vec::new();
     let matching: Vec<_> = persist_failures
+        .codex_sample_persist_failures
         .iter()
         .filter(|failure| failure.request_id == rid && failure.file_name == FAILED_ATTEMPT_FILE)
         .collect();
@@ -241,7 +242,9 @@ async fn fa22072_failed_attempt_write_failure_isolated_public_entry() {
             "the filesystem failure reason must be non-empty (ledger={persist_failures:?})"
         ));
     }
-    if persist_failures.len() != matching.len() {
+    if persist_failures.codex_sample_persist_failures.len() != matching.len()
+        || !persist_failures.control_cleanup_failures.is_empty()
+    {
         ledger_failures.push(format!(
             "unrelated diagnostic failures must not be accepted as proof of the injected write \
              failure (ledger={persist_failures:?})"

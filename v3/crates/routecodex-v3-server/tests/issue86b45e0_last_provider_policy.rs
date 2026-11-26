@@ -27,8 +27,7 @@ struct Upstream {
     label: &'static str,
 }
 async fn upstream(State(s): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
-    // Existing recovery events may still probe a preloaded cooldown. Count
-    // actual business requests separately so a ping cannot satisfy this test.
+    // Count actual business requests so synthetic traffic cannot satisfy this test.
     if body.to_string().contains("controlled request") {
         s.calls.fetch_add(1, Ordering::SeqCst);
     }
@@ -218,11 +217,23 @@ targets = {targets}
 async fn i86_single_stale_cooldown_bypass() {
     let _home = LOCK.lock().await;
     let entry = Entry::start(false).await;
-    let added = reqwest::Client::new().post(format!("{}/_routecodex/health/cooldown-pool/add",entry.base)).json(&json!({"provider_id":"a","interface_id":"default","auth_alias":"key","model_id":"wire-a","kind":"probe","duration_ms":60000})).send().await.unwrap();
+    // A legacy broad probe restriction is not an exact business-recovery episode.
+    // Keep its singleton exemption separate from an active exact manual hold.
+    let added = reqwest::Client::new()
+        .post(format!(
+            "{}/_routecodex/health/cooldown-pool/add",
+            entry.base
+        ))
+        .json(
+            &json!({"provider_id":"a","interface_id":"default","kind":"probe","duration_ms":60000}),
+        )
+        .send()
+        .await
+        .unwrap();
     assert!(added.status().is_success());
-    let _ = entry.request().await;
+    let one = entry.request_response(true).await;
     let first = entry.a.calls.load(Ordering::SeqCst);
-    let _ = entry.request().await;
+    let two = entry.request_response(true).await;
     let second = entry.a.calls.load(Ordering::SeqCst);
     entry.stop().await;
     assert_eq!(
@@ -232,6 +243,74 @@ async fn i86_single_stale_cooldown_bypass() {
     assert_eq!(
         second, 2,
         "a new request must send again without retrying the failed request"
+    );
+    for reply in [one, two] {
+        let reply = reply.expect("the final real Provider HTTP 503 must reach the client");
+        assert_eq!(reply.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(reply.body, FINAL_PROVIDER_ERROR_BODY);
+    }
+}
+
+#[tokio::test]
+async fn i86_single_active_exact_cooldown_requires_release() {
+    let _home = LOCK.lock().await;
+    let entry = Entry::start(false).await;
+    let client = reqwest::Client::new();
+    let identity = json!({"provider_id":"a","interface_id":"default","auth_alias":"key","model_id":"wire-a","kind":"probe"});
+    let mut addition = identity.clone();
+    addition["duration_ms"] = json!(60000);
+    let added = client
+        .post(format!(
+            "{}/_routecodex/health/cooldown-pool/add",
+            entry.base
+        ))
+        .json(&addition)
+        .send()
+        .await
+        .unwrap();
+    assert!(added.status().is_success());
+    let before = entry.cooldown().await;
+    for stream in [false, true] {
+        assert!(
+            entry.request_response(stream).await.is_err(),
+            "an active exact hold must break transport without a fabricated response"
+        );
+    }
+    let held_calls = entry.a.calls.load(Ordering::SeqCst);
+    let after = entry.cooldown().await;
+    let removed = client
+        .post(format!("{}/_routecodex/health/cooldown-pool", entry.base))
+        .json(&identity)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::OK);
+    let removed: Value = removed.json().await.unwrap();
+    assert_eq!(removed["removed"], true);
+    let reply = entry.request_response(false).await;
+    let calls = entry.a.calls.load(Ordering::SeqCst);
+    let released_pool = entry.cooldown().await;
+    entry.stop().await;
+    assert_eq!(
+        held_calls, 0,
+        "singleton status cannot bypass an active exact hold"
+    );
+    assert_eq!(before["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(after["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        before["entries"][0]["until_ms"],
+        after["entries"][0]["until_ms"]
+    );
+    assert_eq!(
+        calls, 1,
+        "operator release must restore the next real request"
+    );
+    let reply = reply.expect("the final real Provider HTTP 503 must reach the client");
+    assert_eq!(reply.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(reply.body, FINAL_PROVIDER_ERROR_BODY);
+    assert!(
+        released_pool["entries"].as_array().unwrap().is_empty(),
+        "the final candidate failure must remain health-neutral: {released_pool}"
     );
 }
 

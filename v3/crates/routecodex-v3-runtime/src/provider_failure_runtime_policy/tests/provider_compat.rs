@@ -48,6 +48,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(
@@ -116,6 +117,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -215,6 +217,7 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -254,21 +257,20 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
         result.event.health_record.state,
         "request_local_provider_compat"
     );
-    assert_eq!(result.event.health_record.state, "pre_cool_observation");
     assert_eq!(
-        result.event.health_record.failure_count, 0,
-        "a held provider HTTP 400 must not count before its observation"
+        result.event.health_record.state,
+        "provider_failure_observed"
+    );
+    assert_eq!(
+        result.event.health_record.failure_count, 1,
+        "the actual rejection is counted once"
     );
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    let held = health.availability("first", Some("key"), Some("test"), u64::MAX);
     assert!(
-        !held.available,
-        "the failed exact identity must be held for observation"
+        health
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available
     );
-    assert!(held
-        .blocked_scopes
-        .iter()
-        .any(|blocked| blocked == "provider_pre_cool_observation"));
     assert!(
         health
             .store()
@@ -318,6 +320,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
         failure_session_scope: test_provider_failure_scope(
@@ -390,6 +393,7 @@ async fn relay_provider_failure_projects_target_expansion_error() {
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(

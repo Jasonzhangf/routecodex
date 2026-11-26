@@ -328,7 +328,12 @@ impl V3TargetInterpreter {
                 unavailable.push(reason);
             }
         };
-        for candidate in &expanded.occurrence_candidates {
+        let selection_rows = if expanded.active_pools.is_empty() {
+            &expanded.candidates
+        } else {
+            &expanded.occurrence_candidates
+        };
+        for candidate in selection_rows {
             let identity = candidate.active_key_identity();
             let Some(index) = indices.get(&identity).copied() else {
                 continue;
@@ -619,8 +624,27 @@ impl V3TargetInterpreter {
             .get(&classified.route.server_id)
             .map(|server| server.provider_priority_schedule.clone())
             .unwrap_or_default();
+        let mut active_pools = BTreeMap::new();
+        for entry in &classified.route.target_plan {
+            let Some(pool) = group.pools.get(&entry.pool_id) else {
+                continue;
+            };
+            if active_pools.contains_key(&entry.pool_id) {
+                continue;
+            }
+            if let Some(declaration) =
+                self.active_key_pool_declaration(manifest, &entry.pool_id, pool)
+            {
+                active_pools.insert(entry.pool_id.clone(), declaration);
+            }
+        }
+        let tier_rows = if active_pools.is_empty() {
+            &candidates
+        } else {
+            &occurrence_candidates
+        };
         let mut route_pool_tiers = BTreeMap::<String, BTreeSet<i32>>::new();
-        for candidate in &occurrence_candidates {
+        for candidate in tier_rows {
             for pool_id in &candidate.pool_ids {
                 // Synthetic pools (for example `implicit:<capability>` and
                 // `direct`) have no declared route-pool tier list. They keep
@@ -644,20 +668,6 @@ impl V3TargetInterpreter {
             })
             .collect();
         let sticky_pool_members = Self::sticky_pool_members(manifest, group, &classified.route);
-        let mut active_pools = BTreeMap::new();
-        for entry in &classified.route.target_plan {
-            let Some(pool) = group.pools.get(&entry.pool_id) else {
-                continue;
-            };
-            if active_pools.contains_key(&entry.pool_id) {
-                continue;
-            }
-            if let Some(declaration) =
-                self.active_key_pool_declaration(manifest, &entry.pool_id, pool)
-            {
-                active_pools.insert(entry.pool_id.clone(), declaration);
-            }
-        }
         Ok(V3Target09CandidateSetExpanded {
             route: classified.route,
             candidates,

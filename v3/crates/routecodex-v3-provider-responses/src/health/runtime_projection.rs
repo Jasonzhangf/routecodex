@@ -107,8 +107,8 @@ fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
     history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
 }
 
-/// All availability projections read mandatory episode restrictions before
-/// advisory probe state. A timer cannot substitute for a required probe.
+/// A cooled identity can be selected for a business recovery trial after the
+/// minimum and cadence pass. Acquisition still checks ownership under the lock.
 fn key_blocks_availability(
     state: &V3ProviderHealthState,
     key: &V3ProviderCooldownProbeKey,
@@ -119,7 +119,7 @@ fn key_blocks_availability(
         .get(key)
         .and_then(|history| history.rate_limit_episode.as_ref())
         .is_some_and(|episode| {
-            episode.probe_required
+            (episode.probe_required && !state.provider_cooldown_probes.contains_key(key))
                 || episode.not_before_ms.is_some_and(|until| now_ms < until)
                 || episode.active_short_cooldown(now_ms).is_some()
         })
@@ -129,9 +129,23 @@ fn key_blocks_availability(
     let Some(probe) = state.provider_cooldown_probes.get(key) else {
         return false;
     };
+    if key.model_id.is_none() && state.auth_key_cooldowns.contains_key(key) {
+        return probe.blocked_until_ms.is_some_and(|deadline| deadline > now_ms);
+    }
+    if probe.cooldown_cause
+        == Some(crate::global_cooldown::V3ProviderCooldownFailureClass::RateLimit)
+    {
+        // The short 429 hold remains timer-only. It must never become an
+        // exclusive business-recovery trial.
+        return probe.blocked_until_ms.is_some_and(|deadline| deadline > now_ms);
+    }
     probe.active_probe.is_some()
-        || probe.next_probe_at_ms.is_some()
-        || probe.blocked_until_ms.is_some()
+        || probe
+            .next_probe_at_ms
+            .is_some_and(|deadline| deadline > now_ms)
+        || probe
+            .blocked_until_ms
+            .is_some_and(|deadline| deadline > now_ms)
 }
 
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {

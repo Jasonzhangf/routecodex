@@ -185,6 +185,32 @@ fn complete_v3_provider_health_probe(
 struct V3ManagedProbeSender {
     sender: tokio::sync::mpsc::Sender<V3ManagedProbe>,
     capacity: std::sync::Arc<tokio::sync::Semaphore>,
+    diagnostics: Arc<std::sync::Mutex<BTreeSet<V3PrecoolIdentity>>>,
+}
+
+/// Observation only: no diagnostic outcome settles business recovery.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum V3ProviderDiagnosticOutcome {
+    Succeeded,
+    Failed { http_status: Option<u16> },
+    TimedOut,
+    AlreadyOwned,
+    CapacityUnavailable,
+    OwnerUnavailable,
+}
+
+struct V3DiagnosticOwnership {
+    active: Arc<std::sync::Mutex<BTreeSet<V3PrecoolIdentity>>>,
+    identity: V3PrecoolIdentity,
+}
+
+impl Drop for V3DiagnosticOwnership {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&self.identity);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -197,6 +223,109 @@ enum V3ProbeInitiation {
 }
 
 impl V3ProviderFailureRuntimeHealth {
+    /// One explicitly requested, potentially billable diagnostic, owned by this
+    /// listener's aggregate. It never acquires or completes a health permit.
+    pub async fn diagnose_provider_once(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+    ) -> Result<V3ProviderDiagnosticOutcome, String> {
+        let target = build_v3_provider_global_probe_target(
+            manifest,
+            provider_id,
+            interface_id,
+            Some(auth_alias),
+            Some(model_id),
+        )?;
+        let owner = self
+            .probe_owner
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone();
+        let Some(owner) = owner.filter(|owner| !owner.sender.is_closed()) else {
+            return Ok(V3ProviderDiagnosticOutcome::OwnerUnavailable);
+        };
+        let identity = precool_identity(
+            &target.provider_id,
+            &target.interface_id,
+            Some(&target.auth.alias),
+            Some(&target.canonical_model_id),
+        );
+        let ownership = {
+            let mut active = owner
+                .diagnostics
+                .lock()
+                .map_err(|error| error.to_string())?;
+            if !active.insert(identity.clone()) {
+                return Ok(V3ProviderDiagnosticOutcome::AlreadyOwned);
+            }
+            V3DiagnosticOwnership {
+                active: owner.diagnostics.clone(),
+                identity,
+            }
+        };
+        let Ok(slot) = owner.capacity.clone().try_acquire_owned() else {
+            return Ok(V3ProviderDiagnosticOutcome::CapacityUnavailable);
+        };
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_millis(target.request_timeout_ms);
+        let (completed, result) = tokio::sync::oneshot::channel();
+        let work: V3ManagedProbe = Box::pin(async move {
+            let outcome =
+                match tokio::time::timeout_at(deadline, probe_v3_provider_global_target(target))
+                    .await
+                {
+                    Ok(Ok(())) => V3ProviderDiagnosticOutcome::Succeeded,
+                    Ok(Err(V3ProviderHealthProbeFailure::ConcurrencyBusy)) => {
+                        V3ProviderDiagnosticOutcome::CapacityUnavailable
+                    }
+                    Ok(Err(V3ProviderHealthProbeFailure::Provider(
+                        V3ProviderError::Transport { .. },
+                    ))) if tokio::time::Instant::now() >= deadline => {
+                        V3ProviderDiagnosticOutcome::TimedOut
+                    }
+                    Ok(Err(V3ProviderHealthProbeFailure::Provider(error))) => {
+                        match classify_provider_probe_failure(error) {
+                            Ok((http_status, _)) => {
+                                V3ProviderDiagnosticOutcome::Failed { http_status }
+                            }
+                            Err(error) => {
+                                let _ = completed.send(V3ProviderDiagnosticOutcome::Failed {
+                                    http_status: None,
+                                });
+                                return Err(error);
+                            }
+                        }
+                    }
+                    Ok(Err(V3ProviderHealthProbeFailure::Internal(error))) => {
+                        let _ = completed
+                            .send(V3ProviderDiagnosticOutcome::Failed { http_status: None });
+                        return Err(error);
+                    }
+                    Err(_) => V3ProviderDiagnosticOutcome::TimedOut,
+                };
+            // Release ownership before publishing completion, including timeout.
+            drop(ownership);
+            drop(slot);
+            let _ = completed.send(outcome);
+            Ok(V3ProbeCompletion::Superseded)
+        });
+        match owner.sender.try_send(work) {
+            Ok(()) => Ok(result
+                .await
+                .unwrap_or(V3ProviderDiagnosticOutcome::OwnerUnavailable)),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                Ok(V3ProviderDiagnosticOutcome::CapacityUnavailable)
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                Ok(V3ProviderDiagnosticOutcome::OwnerUnavailable)
+            }
+        }
+    }
+
     // Registration is synchronous. The aggregate retains and joins the returned
     // future's task; requests never spawn their own probe tasks.
     pub fn aggregate_provider_probe_lifecycle(
@@ -204,23 +333,22 @@ impl V3ProviderFailureRuntimeHealth {
         manifest: std::sync::Arc<V3Config05ManifestPublished>,
         shutdown: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
-        self.aggregate_provider_probe_scheduler(manifest, shutdown, true)
+        self.aggregate_provider_probe_scheduler(manifest, shutdown)
     }
 
-    // A retained aggregate resumes the stored schedule, not the startup sweep.
+    // A retained aggregate resumes explicit diagnostics without a startup sweep.
     pub fn aggregate_provider_probe_lifecycle_resume(
         &self,
         manifest: std::sync::Arc<V3Config05ManifestPublished>,
         shutdown: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
-        self.aggregate_provider_probe_scheduler(manifest, shutdown, false)
+        self.aggregate_provider_probe_scheduler(manifest, shutdown)
     }
 
     fn aggregate_provider_probe_scheduler(
         &self,
-        manifest: std::sync::Arc<V3Config05ManifestPublished>,
+        _manifest: std::sync::Arc<V3Config05ManifestPublished>,
         mut shutdown: tokio::sync::oneshot::Receiver<()>,
-        mut startup: bool,
     ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
         let (sender, mut receiver) =
             tokio::sync::mpsc::channel(V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY);
@@ -237,13 +365,11 @@ impl V3ProviderFailureRuntimeHealth {
         *owner = Some(V3ManagedProbeSender {
             sender,
             capacity: capacity.clone(),
+            diagnostics: Default::default(),
         });
         drop(owner);
-        let health = self.clone();
         Ok(async move {
             let mut pending = FuturesUnordered::<V3ManagedProbe>::new();
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            let mut last_considered = None;
             loop {
                 tokio::select! {
                     biased;
@@ -257,55 +383,6 @@ impl V3ProviderFailureRuntimeHealth {
                             eprintln!("provider managed probe failed: {error}");
                         }
                     },
-                    _ = interval.tick() => {
-                        let now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-                            Ok(now_ms) => now_ms,
-                            Err(error) => { eprintln!("provider probe clock failed: {error}"); continue; }
-                        };
-                        let now_ms = health.observation_now_ms(now_ms);
-                        let mut keys = match health.store.provider_cooldown_probe_keys_with_interface(now_ms, startup) {
-                            Ok(keys) => keys,
-                            Err(error) => { eprintln!("provider probe scheduling failed: {error}"); continue; }
-                        };
-                        match health.precool_probe_keys() {
-                            Ok(observations) => keys.extend(observations),
-                            Err(error) => eprintln!("provider observation scheduling failed: {error}"),
-                        }
-                        keys.sort();
-                        keys.dedup();
-                        startup = false;
-                        if let Some(last) = &last_considered {
-                            let next = keys.partition_point(|key| key <= last);
-                            keys.rotate_left(next);
-                        }
-                        for key in keys {
-                            let Ok(slot) = capacity.clone().try_acquire_owned() else { break; };
-                            // Advance even if acquisition is denied or fails. Full
-                            // capacity leaves this cursor at the last considered key.
-                            last_considered = Some(key.clone());
-                            let (provider_id, interface_id, auth_alias, model_id) = key;
-                            let identity = precool_identity(&provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref());
-                            let observing = match health.precool.lock() {
-                                Ok(actions) => actions.contains_key(&identity),
-                                Err(error) => { eprintln!("provider observation state failed: {error}"); continue; }
-                            };
-                            if observing {
-                                match health.managed_precool_probe(&manifest, identity, slot) {
-                                    Ok(Some(probe)) => pending.push(probe),
-                                    Ok(None) => {},
-                                    Err(error) => eprintln!("provider observation acquisition failed: {error}"),
-                                }
-                                continue;
-                            }
-                            match health.store.acquire_provider_cooldown_probe_for_interface(
-                                &provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref(),
-                            ) {
-                                Ok(Some(permit)) => pending.push(health.managed_probe(&manifest, permit, slot)),
-                                Ok(None) => {},
-                                Err(error) => eprintln!("provider probe acquisition failed: {error}"),
-                            }
-                        }
-                    }
                 }
             }
             // Close admission before dropping both received and queued work.

@@ -316,7 +316,7 @@ async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
 /// exact identity. A failed early probe changes cadence but does not shorten
 /// the committed minimum; only a matching 2xx probe after expiry restores it.
 #[tokio::test]
-async fn recoverable_failure_reaches_tenth_before_cooling_and_valid_probe_restores_it() {
+async fn recoverable_failure_reaches_tenth_and_business_trial_restores_it() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
     std::env::set_var(
@@ -483,62 +483,7 @@ async fn recoverable_failure_reaches_tenth_before_cooling_and_valid_probe_restor
     assert_eq!(entries[0]["model_id"], json!("test"));
     assert_eq!(entries[0]["auth_alias"], json!("key"));
 
-    // An early failed probe preserves the one-hour minimum.
-    let probes_before = *upstream.probes.lock().await;
-    upstream
-        .probe_ready
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-    let (status, body) = post_json(
-        &client,
-        managed.probe_url(),
-        json!({
-            "provider_id": "test",
-            "interface_id": interface_id,
-            "auth_alias": "key",
-            "model_id": "test",
-        }),
-    )
-    .await;
-    assert_eq!(status, 200, "operator probe must be accepted: {body}");
-    assert_eq!(
-        body["scheduled"],
-        json!(true),
-        "the committed cooldown must accept an operator probe request: {body}"
-    );
-
-    // The first probe cadence is five seconds. Move only the injected health
-    // clock past that cadence; request and transport time remain real.
-    clock.0.store(now + 60_000, Ordering::SeqCst);
-    timeout(Duration::from_secs(15), async {
-        loop {
-            if *upstream.probes.lock().await > probes_before {
-                break;
-            }
-            sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("the early probe must reach the exact provider");
-    assert!(
-        zero_is_cooled(&client, &base).await,
-        "a failed probe before expiry must preserve the committed cooldown"
-    );
-    assert_eq!(
-        pool_entries(&client, managed.pool_url())
-            .await
-            .iter()
-            .find(|entry| entry["provider_id"] == json!("test"))
-            .and_then(|entry| entry["until_ms"].as_u64()),
-        Some(initial_deadline),
-        "a failed probe must not shorten the committed deadline"
-    );
-
-    // A matching valid 2xx probe restores the exact identity only after the
-    // controlled one-hour boundary.
-    clock.0.store(initial_deadline + 1, Ordering::SeqCst);
-    upstream
-        .probe_ready
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    // Scheduling the next trial never sends an upstream request or overrides the minimum.
     let probes_before = *upstream.probes.lock().await;
     let (status, body) = post_json(
         &client,
@@ -553,28 +498,38 @@ async fn recoverable_failure_reaches_tenth_before_cooling_and_valid_probe_restor
     .await;
     assert_eq!(
         status, 200,
-        "operator probe must be accepted after expiry: {body}"
+        "operator trial action must be accepted: {body}"
     );
     assert_eq!(
         body["scheduled"],
         json!(true),
-        "the expired cooldown must carry probe state: {body}"
+        "the committed cooldown must accept a trial action: {body}"
     );
 
-    timeout(Duration::from_secs(15), async {
-        loop {
-            if *upstream.probes.lock().await > probes_before
-                && !zero_is_cooled(&client, &base).await
-            {
-                break;
-            }
-            sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("a matching 2xx probe after expiry must recover the exact identity");
+    clock.0.store(now + 60_000, Ordering::SeqCst);
+    zero_success(&client, &base, "test", "zero:before-minimum").await;
+    assert!(!upstream
+        .business
+        .lock()
+        .await
+        .contains_key("zero:before-minimum"));
+    assert_eq!(*upstream.probes.lock().await, probes_before);
+    assert!(
+        zero_is_cooled(&client, &base).await,
+        "an early trial action must preserve the committed cooldown"
+    );
+    assert_eq!(
+        pool_entries(&client, managed.pool_url())
+            .await
+            .iter()
+            .find(|entry| entry["provider_id"] == json!("test"))
+            .and_then(|entry| entry["until_ms"].as_u64()),
+        Some(initial_deadline),
+        "a trial action must not shorten the committed deadline"
+    );
 
-    // The recovered identity routes again, and the server plus siblings stay alive.
+    // The first real request after the minimum verifies recovery.
+    clock.0.store(initial_deadline + 1, Ordering::SeqCst);
     zero_success(&client, &base, "test", "zero:recovered").await;
     zero_receipt(
         &upstream,
@@ -583,6 +538,8 @@ async fn recoverable_failure_reaches_tenth_before_cooling_and_valid_probe_restor
         Some("Bearer controlled-secret"),
     )
     .await;
+    assert!(!zero_is_cooled(&client, &base).await);
+    assert_eq!(*upstream.probes.lock().await, probes_before);
     zero_success(&client, &base, "test.sibling", "zero:alive-after-recovery").await;
     zero_receipt(
         &upstream,
@@ -607,6 +564,8 @@ struct ZeroUpstream {
     business: Mutex<BTreeMap<String, ZeroBusinessReceipt>>,
     probes: Mutex<usize>,
     probe_ready: std::sync::atomic::AtomicBool,
+    probe_delay_ms: AtomicU64,
+    probe_requests: Mutex<Vec<(String, Value)>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -625,6 +584,19 @@ async fn zero_provider(
     let probe = body.to_string().contains("ping; reply pong");
     if probe {
         *state.probes.lock().await += 1;
+        state.probe_requests.lock().await.push((
+            headers
+                .get(axum::http::header::AUTHORIZATION)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
+            body,
+        ));
+        sleep(Duration::from_millis(
+            state.probe_delay_ms.load(Ordering::SeqCst),
+        ))
+        .await;
         return if state.probe_ready.load(std::sync::atomic::Ordering::SeqCst) {
             zero_ok("pong")
         } else {
@@ -1240,4 +1212,140 @@ async fn admin_proxy_forwards_manual_cooldown_actions_to_the_listener() {
     );
 
     managed.finish().await;
+}
+
+#[tokio::test]
+async fn admin_paid_diagnostic_preserves_consent_identity_observation_and_cadence() {
+    let _guard = TEST_LOCK.lock().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_port = listener.local_addr().unwrap().port();
+    let upstream = Arc::new(ZeroUpstream::default());
+    let app = Router::new()
+        .route("/v1/responses", post(zero_provider))
+        .with_state(upstream.clone());
+    let (shutdown, stopped) = oneshot::channel::<()>();
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    let sibling_port = free_port();
+    let managed = Managed::start_source("admin-diagnostic", true, |port| {
+        format!(
+            "{}\n[servers.sibling]\nbind = \"127.0.0.1\"\nport = {sibling_port}\nrouting_group = \"default\"\nendpoints = [\"responses\"]\n",
+            config_source(port).replace("http://127.0.0.1:9/v1", &format!("http://127.0.0.1:{upstream_port}/v1"))
+        )
+    }).await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let admin_base = managed.admin_base.as_ref().unwrap();
+    let token = fs::read_to_string(managed.home.join("state/admin-token")).unwrap();
+    let probe_url = format!("{admin_base}/api/observability/cooldown-pool/probe");
+    let identity = json!({"port": managed.listener_port, "provider_id": "test", "interface_id": "default", "auth_alias": "key", "model_id": "test"});
+    for port in [managed.listener_port, sibling_port] {
+        let mut add = identity.clone();
+        add["port"] = json!(port);
+        add["kind"] = json!("probe");
+        add["duration_ms"] = json!(600_000);
+        let (status, body) = post_json_admin(
+            &client,
+            format!("{admin_base}/api/observability/cooldown-pool/add"),
+            token.trim(),
+            add,
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+    }
+    let (status, body) =
+        post_json_admin(&client, probe_url.clone(), token.trim(), identity.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["scheduled"], true);
+    assert_eq!(
+        *upstream.probes.lock().await,
+        0,
+        "free action sends nothing"
+    );
+    let snapshot = |mut entries: Vec<Value>| {
+        for entry in &mut entries {
+            entry.as_object_mut().unwrap().remove("remaining_ms");
+        }
+        entries
+    };
+    let before = snapshot(pool_entries(&client, managed.pool_url()).await);
+    let sibling_url = format!("http://127.0.0.1:{sibling_port}/_routecodex/health/cooldown-pool");
+    let sibling_before = snapshot(pool_entries(&client, sibling_url.clone()).await);
+    let mut paid = identity.clone();
+    paid["allow_paid_diagnostic"] = json!(true);
+    let mut unconfigured = paid.clone();
+    unconfigured["port"] = json!(upstream_port);
+    let (status, _) = post_json_admin(&client, probe_url.clone(), token.trim(), unconfigured).await;
+    assert_eq!(
+        status, 400,
+        "an unconfigured listener cannot receive a paid action"
+    );
+    assert_eq!(*upstream.probes.lock().await, 0);
+    for (ready, expected) in [(true, "succeeded"), (false, "failed")] {
+        upstream.probe_ready.store(ready, Ordering::SeqCst);
+        // A listener-owned diagnostic may legitimately outlast the Admin's
+        // ordinary two-second action timeout. Preserve its actual outcome.
+        upstream
+            .probe_delay_ms
+            .store(if ready { 2_100 } else { 0 }, Ordering::SeqCst);
+        let sends = *upstream.probes.lock().await;
+        let (status, body) =
+            post_json_admin(&client, probe_url.clone(), token.trim(), paid.clone()).await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            body["diagnostic"]["status"], expected,
+            "Admin must preserve the observed result: {body}"
+        );
+        assert_eq!(body["scheduled"], false);
+        if !ready {
+            assert_eq!(body["diagnostic"]["http_status"], 503);
+        }
+        for field in ["provider_id", "interface_id", "auth_alias", "model_id"] {
+            assert_eq!(body[field], identity[field]);
+        }
+        assert_eq!(*upstream.probes.lock().await, sends + 1);
+        assert_eq!(
+            snapshot(pool_entries(&client, managed.pool_url()).await),
+            before,
+            "diagnostic cannot change the owning listener cadence"
+        );
+        assert_eq!(
+            snapshot(pool_entries(&client, sibling_url.clone()).await),
+            sibling_before,
+            "diagnostic cannot change another listener"
+        );
+    }
+    assert!(upstream.business.lock().await.is_empty());
+    let receipts = upstream.probe_requests.lock().await;
+    assert_eq!(receipts.len(), 2);
+    for (authorization, wire) in receipts.iter() {
+        assert_eq!(authorization, "Bearer controlled-secret");
+        assert_eq!(wire["model"], "test");
+    }
+    drop(receipts);
+    let owned_ports = [
+        managed.listener_port,
+        sibling_port,
+        managed
+            .handle
+            .as_ref()
+            .unwrap()
+            .listeners
+            .iter()
+            .find(|listener| listener.server_id == "admin_webui")
+            .unwrap()
+            .addr
+            .port(),
+    ];
+    managed.finish().await;
+    shutdown.send(()).unwrap();
+    upstream_task.await.unwrap();
+    for port in owned_ports.into_iter().chain([upstream_port]) {
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
 }

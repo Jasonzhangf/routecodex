@@ -366,7 +366,6 @@ pub async fn handle_provider_failure(
         None,
         None,
         false,
-        None,
     )
     .await
 }
@@ -391,7 +390,6 @@ pub(crate) async fn handle_provider_failure_with_response_code(
         None,
         None,
         false,
-        None,
     )
     .await
 }
@@ -407,7 +405,6 @@ pub(crate) async fn handle_provider_failure_with_response_code_and_active_keys(
     active_keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
     episode: Option<&mut routecodex_v3_target::V3ActiveKeyEpisode>,
     dispatched: bool,
-    failure_custody: Option<&mut V3RelayFailureCustody>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
     if failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
@@ -450,8 +447,8 @@ pub(crate) async fn handle_provider_failure_with_response_code_and_active_keys(
             return Ok(Some(failure));
         }
     };
-    if let Some(custody) = failure_custody {
-        custody.record(
+    if let Some(control) = context.recovery_control {
+        control.record_failure(
             &selected,
             &result.event.diagnostic_source,
             state.last_external_http.as_ref(),
@@ -507,7 +504,8 @@ pub(crate) async fn handle_provider_failure_with_response_code_and_active_keys(
                     .map_err(|_| "active-key eligibility clock failed".to_string())?,
             )
             .available;
-            let eligible = !feedback.stale
+            let eligible = !result.business_trial_failed
+                && !feedback.stale
                 && !feedback.transitioned
                 && active_keys.selection_current(&episode.selection)
                 && health;
@@ -1155,60 +1153,6 @@ fn failure_external_classification(
 /// 从 failure 提取错误消息（共享版；走协议提取函数字段）。
 pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
     (failure.error_message_fn)(&failure.client_response)
-}
-
-/// Runtime-owned failure from the last transport invocation. A selection
-/// that never reached transport must not replace this record.
-struct V3RelayDispatchedFailure {
-    identity: routecodex_v3_target::V3ActiveKeyIdentity,
-    source: routecodex_v3_error::V3Error01SourceRaised,
-    external_http: Option<V3ExternalHttpWitness>,
-}
-
-#[derive(Default)]
-pub(crate) struct V3RelayFailureCustody {
-    dispatched_failure: Option<V3RelayDispatchedFailure>,
-    local_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
-}
-
-impl V3RelayFailureCustody {
-    pub(crate) fn record(
-        &mut self,
-        selected: &V3Target10ConcreteProviderSelected,
-        source: &routecodex_v3_error::V3Error01SourceRaised,
-        external_http: Option<&V3ExternalHttpWitness>,
-        dispatched: bool,
-    ) {
-        if dispatched {
-            self.dispatched_failure = Some(V3RelayDispatchedFailure {
-                identity: selected.candidate.active_key_identity(),
-                source: source.clone(),
-                external_http: external_http.cloned(),
-            });
-        } else {
-            self.local_source = Some(source.clone());
-        }
-    }
-
-    pub(crate) fn into_exhaustion(
-        self,
-        source: Option<routecodex_v3_error::V3Error01SourceRaised>,
-        external_http: Option<V3ExternalHttpWitness>,
-    ) -> (
-        Option<routecodex_v3_target::V3ActiveKeyIdentity>,
-        Option<routecodex_v3_error::V3Error01SourceRaised>,
-        Option<V3ExternalHttpWitness>,
-    ) {
-        match (source.or(self.local_source), self.dispatched_failure) {
-            (Some(source), _) => (None, Some(source), None),
-            (None, Some(attempt)) => (
-                Some(attempt.identity),
-                Some(attempt.source),
-                attempt.external_http,
-            ),
-            (None, None) => (None, None, external_http),
-        }
-    }
 }
 
 /// Provider failure that consumed the request residence budget must still be

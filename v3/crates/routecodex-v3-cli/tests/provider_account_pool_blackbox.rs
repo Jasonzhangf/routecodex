@@ -6,12 +6,17 @@ use axum::{
     Json, Router,
 };
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{
+    spawn_v3_server_aggregate, spawn_v3_server_aggregate_with_health_observation_clock,
+};
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
     net::TcpListener,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tokio::sync::{mpsc, Mutex};
@@ -26,8 +31,16 @@ const POOL_FAILURE_BODY: &str = r#"{"error":{"type":"server_error","message":"Up
 struct RecoveryPeer {
     business: Arc<AtomicUsize>,
     sibling_business: Arc<AtomicUsize>,
-    probe_body: Arc<Mutex<String>>,
     receipts: mpsc::UnboundedSender<Value>,
+}
+
+#[derive(Debug)]
+struct RecoveryClock(AtomicU64);
+
+impl routecodex_v3_runtime::V3ProviderHealthObservationClock for RecoveryClock {
+    fn now_epoch_ms(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 async fn recovery_peer(
@@ -54,11 +67,7 @@ async fn recovery_peer(
             .collect();
         assert_eq!(names, ["bash", "read"]);
         peer.receipts.send(body).unwrap();
-        return (
-            [("content-type", "text/event-stream")],
-            peer.probe_body.lock().await.clone(),
-        )
-            .into_response();
+        return ([("content-type", "text/event-stream")], "data: [DONE]\n\n").into_response();
     }
     let attempt = peer
         .business
@@ -76,17 +85,15 @@ async fn recovery_peer(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
+async fn early_429_fallback_and_manual_business_recovery_public() {
     let _guard = TEST_LOCK.lock().await;
     let _counter = CounterEnvironment::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let probe_body = Arc::new(Mutex::new("data: [DONE]\n\n".to_string()));
     let business = Arc::new(AtomicUsize::new(0));
     let sibling_business = Arc::new(AtomicUsize::new(0));
     let peer = RecoveryPeer {
         business: business.clone(),
         sibling_business: sibling_business.clone(),
-        probe_body: probe_body.clone(),
         receipts: tx,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -120,7 +127,14 @@ async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
         pool.targets[0].priority = Some(10);
         pool.targets[1].priority = Some(1);
     }
-    let server = spawn_v3_server_aggregate(config).await.unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = Arc::new(RecoveryClock(AtomicU64::new(now)));
+    let server = spawn_v3_server_aggregate_with_health_observation_clock(config, clock.clone())
+        .await
+        .unwrap();
     let base = format!("http://{}", server.listeners[0].addr);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -155,16 +169,17 @@ async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
         sibling_business.load(std::sync::atomic::Ordering::SeqCst),
         1
     );
-    // Seed a separate declared manual recovery test. This is not a429 health
-    // mutation. The real public probe still has to restore the exact account.
+    // Seed a separate manual hold and exercise exact-account recovery.
     let seed = client
         .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
         .json(&json!({"provider_id":"poolpeer","interface_id":"default",
-            "auth_alias":"pool-key-01","model_id":"model","kind":"probe","duration_ms":1100}))
+            "auth_alias":"pool-key-01","model_id":"model","kind":"probe","duration_ms":60000}))
         .send()
         .await
         .unwrap();
     assert_eq!(seed.status(), StatusCode::OK);
+    let seed = seed.json::<Value>().await.unwrap();
+    let deadline = seed["until_ms"].as_u64().unwrap();
     let pool: Value = client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
@@ -200,32 +215,46 @@ async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
             .any(|entry| entry["provider_id"] == "poolpeer"
                 && entry["auth_alias"] == "pool-key-01"
                 && entry["model_id"] == "model"),
-        "the hold must persist until a real success or a matching 2xx probe: {pool:?}"
+        "the hold must remain until a governed business success: {pool:?}"
     );
-    // The manual seed schedules this recovery; early429 does not. A real
-    // nonterminal2xx SSE response qualifies without validating its body.
-    tokio::time::timeout(Duration::from_secs(15), rx.recv())
+    assert!(
+        rx.try_recv().is_err(),
+        "cooldown must send no automatic diagnostic"
+    );
+    let diagnostic = client
+        .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
+        .json(&json!({
+            "provider_id":"poolpeer","interface_id":"default","auth_alias":"pool-key-01",
+            "model_id":"model","allow_paid_diagnostic":true
+        }))
+        .send()
         .await
         .unwrap()
+        .json::<Value>()
+        .await
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let pool: Value = client
-                .get(format!("{base}/_routecodex/health/cooldown-pool"))
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap();
-            if pool["entries"] == json!([]) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("HTTP 2xx probe must restore identity");
+    assert_eq!(
+        diagnostic["diagnostic"]["status"], "succeeded",
+        "{diagnostic}"
+    );
+    assert!(
+        rx.try_recv().is_ok(),
+        "explicit diagnostic must reach the selected key"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "explicit diagnostic sends only once"
+    );
+    let observed = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(observed["entries"][0]["until_ms"], deadline);
+    clock.0.store(deadline + 1, Ordering::SeqCst);
     let reply = client
         .post(format!("{base}/v1/responses"))
         .json(&routed_request)
@@ -237,6 +266,15 @@ async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
         "restored account must serve business request"
     );
     assert_eq!(reply.json::<Value>().await.unwrap()["status"], "completed");
+    let recovered = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(recovered["entries"], json!([]));
     assert_eq!(
         business.load(std::sync::atomic::Ordering::SeqCst),
         2,
@@ -249,6 +287,7 @@ async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
     );
     server.shutdown().await;
     peer_task.abort();
+    let _ = peer_task.await;
 }
 
 const ACCOUNTS: [&str; 11] = [

@@ -75,14 +75,13 @@ public_code = "E_MATCHED_CLASS"
                 100 + index as u64,
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
-        assert_eq!(record.state, "pre_cool_observation");
         assert_eq!(
-            record.failure_count, 0,
-            "class {class} health counters wait for the qualified observation"
+            record.failure_count,
+            index as u32 + 1,
+            "class {class} must count the actual failure once"
         );
-        assert_eq!(record.cooldown_until_ms, None);
+        assert_eq!(record.cooldown_until_ms, (index == 9).then_some(3_600_109));
     }
-    complete_due_precool_failures(&health, 101).await;
     assert!(
         !health
             .store()
@@ -95,7 +94,7 @@ public_code = "E_MATCHED_CLASS"
             .store()
             .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"))
             .expect("matched-policy probe deadline"),
-        Some(5_101),
+        Some(5_109),
         "cooldown owns the first five-second probe cadence"
     );
     assert!(

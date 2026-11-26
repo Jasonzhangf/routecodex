@@ -48,19 +48,8 @@ struct ActiveKeyControlEndpointRecord {
 fn control_record_path(
     config_path: &std::path::Path,
     server_id: &str,
-) -> Result<std::path::PathBuf, std::io::Error> {
-    let config = std::fs::canonicalize(config_path)?;
-    let parent = config.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "canonical config has no parent",
-        )
-    })?;
-    Ok(parent.join(format!(
-        "active-key-control-{}-{}.json",
-        percent_encode(config.file_name().unwrap().as_encoded_bytes()),
-        percent_encode(server_id.as_bytes())
-    )))
+) -> std::io::Result<routecodex_v3_config::V3ActiveKeyControlPaths> {
+    routecodex_v3_config::v3_active_key_control_paths(config_path, server_id)
 }
 
 async fn active_keys(
@@ -88,28 +77,40 @@ async fn forward_selection_control(
     body: Option<serde_json::Value>,
 ) -> ControlResult {
     use axum::http::StatusCode;
-    let selection = state
-        .store
-        .read_user_routing()
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    let server = selection
-        .servers
-        .get(server_id)
-        .filter(|server| server.enabled)
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("unknown or disabled server {server_id:?}"),
-            )
-        })?;
-    let record_path = control_record_path(&state.config_path, server_id)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    let business_ip = server
-        .bind
-        .parse::<std::net::IpAddr>()
+    let store = state.store.clone();
+    let config_path = state.config_path.clone();
+    let selected = server_id.to_owned();
+    let (server, record_path) = tokio::task::spawn_blocking(move || {
+        let mut selection = store
+            .read_user_routing()
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        let server = selection
+            .servers
+            .remove(&selected)
+            .filter(|server| server.enabled)
+            .ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("unknown or disabled server {selected:?}"),
+                )
+            })?;
+        let record_path = control_record_path(&config_path, &selected)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        Ok::<_, (StatusCode, String)>((server, record_path))
+    })
+    .await
+    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
+    let business_addr = format!("{}:{}", server.bind, server.port)
+        .parse::<std::net::SocketAddr>()
+        .or_else(|_| {
+            server
+                .bind
+                .parse()
+                .map(|ip| std::net::SocketAddr::new(ip, server.port))
+        })
         .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
-    let business_addr = std::net::SocketAddr::new(business_ip, server.port);
-    let address = match std::fs::read(&record_path) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+    let address = match record_path.read_until(deadline).await {
         Ok(bytes) => {
             let record: ActiveKeyControlEndpointRecord =
                 serde_json::from_slice(&bytes).map_err(|error| {
@@ -156,6 +157,17 @@ async fn forward_selection_control(
                 }
             },
         },
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("active-key control storage lock unavailable: {error}"),
+            ));
+        }
         Err(error) => return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
     };
     let suffix = if body.is_some() { "/release" } else { "" };
@@ -184,21 +196,6 @@ async fn forward_selection_control(
         )
     })?;
     Ok((status, Json(body)))
-}
-
-fn percent_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut encoded = String::with_capacity(bytes.len());
-    for byte in bytes {
-        if byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'.') {
-            encoded.push(*byte as char);
-        } else {
-            encoded.push('%');
-            encoded.push(HEX[(byte >> 4) as usize] as char);
-            encoded.push(HEX[(byte & 0x0f) as usize] as char);
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

@@ -380,8 +380,6 @@ impl V3ProviderFailureDirective {
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
-    pub(crate) failure_custody:
-        Option<&'state mut super::relay_runtime_shared::V3RelayFailureCustody>,
     pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,

@@ -9,6 +9,10 @@ use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::Mutex as StdMutex;
 
+mod active_key_control_contention;
+mod active_key_control_storage_race;
+mod active_key_handoff_projection;
+mod active_key_partial_release;
 mod foundation_output;
 mod frame_sdk_fault;
 mod local599_output;
@@ -242,6 +246,8 @@ fn test_v3_listener_state_with_debug(
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
     Arc::new(V3ListenerState {
         active_keys: None,
+        active_key_control_revoked: Default::default(),
+        responses_handoff_observer: Default::default(),
         server,
         manifest_version: manifest.version,
         manifest: Arc::clone(&manifest),
@@ -5219,6 +5225,8 @@ fn error_projection_appends_human_console_failure_line() {
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
     let state = V3ListenerState {
         active_keys: None,
+        active_key_control_revoked: Default::default(),
+        responses_handoff_observer: Default::default(),
         server,
         manifest_version: manifest.version,
         manifest: Arc::clone(&manifest),

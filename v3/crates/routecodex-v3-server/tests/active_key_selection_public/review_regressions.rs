@@ -1,5 +1,167 @@
 use super::*;
 
+#[tokio::test]
+async fn legacy_duplicate_identity_keeps_first_merged_row_rank() {
+    legacy_duplicate_rank(false).await;
+}
+
+#[tokio::test]
+async fn legacy_duplicate_identity_keeps_scheduled_tier_table() {
+    legacy_duplicate_rank(true).await;
+}
+
+async fn legacy_duplicate_rank(scheduled: bool) {
+    let routing_id = if scheduled {
+        "legacy_scheduled_rank"
+    } else {
+        "legacy_rank"
+    };
+    let _home = LOCK.lock().await;
+    let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+    let port = test_ports::free_port();
+    assert!(![4444, 7777].contains(&port) && ![4444, 7777].contains(&upstream_port));
+    let state = Arc::new(Upstream {
+        script: Mutex::new(Script::default()),
+        chat: false,
+        protocol: "responses",
+    });
+    let upstream_state = state.clone();
+    let task = tokio::spawn(async move {
+        axum::serve(
+            upstream_listener,
+            Router::new()
+                .route("/v1/responses", post(upstream))
+                .with_state(upstream_state),
+        )
+        .await
+        .unwrap();
+    });
+    std::env::set_var("ACTIVE_PUBLIC_A", "active-public-A");
+    std::env::set_var("ACTIVE_PUBLIC_B", "active-public-B");
+    std::env::set_var("ACTIVE_PUBLIC_C", "active-public-C");
+    let schedule = if scheduled {
+        r#"provider_priority_schedule={timezone="UTC",providers=[{provider="c",peak_tier=4,off_peak_tier=4}]}"#
+    } else {
+        ""
+    };
+    let third_provider = if scheduled {
+        format!(
+            r#"[providers.c]
+type="responses"
+base_url="http://127.0.0.1:{upstream_port}/v1"
+default_model="wire"
+auth={{type="api_key",entries=[{{alias="C",env="ACTIVE_PUBLIC_C"}}]}}
+[providers.c.models.wire]
+wire_name="wire"
+capabilities=["text"]
+"#
+        )
+    } else {
+        String::new()
+    };
+    let third_target = if scheduled {
+        r#"{kind="provider_model",provider="c",model="wire",priority=7},"#
+    } else {
+        ""
+    };
+    let source = format!(
+        r#"version=3
+{declaration}
+[servers.{routing_id}]
+bind="127.0.0.1"
+port={port}
+routing_group="{routing_id}"
+endpoints=["responses"]
+{schedule}
+{execution}
+[providers.a]
+type="responses"
+base_url="http://127.0.0.1:{upstream_port}/v1"
+default_model="wire"
+auth={{type="api_key",entries=[{{alias="A",env="ACTIVE_PUBLIC_A"}}]}}
+[providers.a.models.wire]
+wire_name="wire"
+capabilities=["text"]
+[providers.b]
+type="responses"
+base_url="http://127.0.0.1:{upstream_port}/v1"
+default_model="wire"
+auth={{type="api_key",entries=[{{alias="B",env="ACTIVE_PUBLIC_B"}}]}}
+[providers.b.models.wire]
+wire_name="wire"
+capabilities=["text"]
+{third_provider}
+[route_groups.{routing_id}.pools.default]
+selection={{strategy="round_robin"}}
+targets=[
+{{kind="provider_model",provider="a",model="wire",priority=1}},
+{{kind="provider_model",provider="b",model="wire",priority=5}},
+{third_target}
+{{kind="provider_model",provider="a",model="wire",key="A",priority=10}}
+]
+"#,
+        declaration = hub_v1_fixture::hub_v1_test_declaration(),
+        execution = hub_v1_fixture::hub_v1_server_execution(routing_id)
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut outcomes = Vec::new();
+    for turn in 0..9 {
+        let result = client
+            .post(format!("{base}/v1/responses"))
+            .header("x-session-id", format!("legacy-rank-{turn}"))
+            .json(&json!({"model":"client","input":"legacy rank"}))
+            .send()
+            .await;
+        outcomes.push(match result {
+            Ok(response) => {
+                let status = response.status();
+                response.text().await.map(|body| (status, body))
+            }
+            Err(error) => Err(error),
+        });
+    }
+    let calls = state
+        .script
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .map(|(alias, _)| alias.clone())
+        .collect::<Vec<_>>();
+    handle.shutdown().await;
+    task.abort();
+    let _ = task.await;
+    wait_for_listener_close(port).await;
+    wait_for_listener_close(upstream_port).await;
+    for (turn, outcome) in outcomes.into_iter().enumerate() {
+        let (status, body) = outcome.unwrap();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        if scheduled && turn == 0 {
+            assert_eq!(text(&body), "C");
+        }
+    }
+    if scheduled {
+        assert_eq!(
+            calls.first().map(String::as_str), Some("C"),
+            "legacy merged tier table must retain C's base priority for absent tier4; actual wire={calls:?}"
+        );
+    } else {
+        assert!(
+            calls.iter().any(|alias| alias == "B"),
+            "legacy merged first-row priority must leave B selectable; actual wire={calls:?}"
+        );
+    }
+}
+
 async fn request_model(
     entry: &Entry,
     session: &str,

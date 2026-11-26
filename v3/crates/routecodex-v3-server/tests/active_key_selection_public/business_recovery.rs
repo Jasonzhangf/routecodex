@@ -11,9 +11,9 @@ struct BusinessGate {
     released: Semaphore,
 }
 static GATE: OnceLock<Mutex<Option<Arc<BusinessGate>>>> = OnceLock::new();
-struct GateOwner(Arc<BusinessGate>);
+pub(super) struct GateOwner(Arc<BusinessGate>);
 impl GateOwner {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let gate = Arc::new(BusinessGate {
             entered: Semaphore::new(0),
             released: Semaphore::new(0),
@@ -26,14 +26,14 @@ impl GateOwner {
             .is_none());
         Self(gate)
     }
-    async fn entered(&self) {
+    pub(super) async fn entered(&self) {
         tokio::time::timeout(Duration::from_secs(5), self.0.entered.acquire())
             .await
             .expect("actual trial reaches upstream")
             .unwrap()
             .forget();
     }
-    fn release(&self) {
+    pub(super) fn release(&self) {
         self.0.released.add_permits(1);
     }
 }
@@ -241,7 +241,16 @@ async fn held_active_member_cannot_acquire_trial_and_release_keeps_health() {
         assert_eq!(queue["pools"][0]["held"][0]["auth_alias"], "A");
         assert_eq!(held_calls, ["A", "A", "A", "A", "B", "B"]);
         assert_eq!(release["released"], true);
-        assert_eq!(released_health, before, "release must not settle health");
+        let before = before.as_ref().unwrap();
+        let released_health = released_health
+            .as_ref()
+            .expect("release must not clear health");
+        for field in ["until_ms", "failure_count", "state", "kind", "reason"] {
+            assert_eq!(
+                released_health[field], before[field],
+                "release must not change health {field}"
+            );
+        }
         assert_eq!(path.alias(&one.unwrap()), "B");
         assert_eq!(path.alias(&two.unwrap()), "A");
         assert!(after.is_none(), "{path:?}: {after:?}");
@@ -272,5 +281,49 @@ async fn failed_owned_trial_defers_without_spending_active_retry_budget() {
             queue["pools"][0]["held"].as_array().unwrap().is_empty(),
             "one dispatched failure is below fourth threshold"
         );
+    }
+}
+
+#[tokio::test]
+async fn cancelled_business_trial_releases_custody_without_holding_the_active_key() {
+    let _home = LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let _refill = Refill;
+    for path in PATHS {
+        let (entry, clock) = path.entry("active_queue").await;
+        make_due(&entry, &clock).await;
+        let gate = GateOwner::new();
+        entry.script("A", &[Outcome::GatedOk]);
+        let base = entry.base.clone();
+        let request = tokio::spawn(async move { path.send(&base, "cancel-trial").await });
+        gate.entered().await;
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        let released = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let health = cooldown(&entry.base)
+                    .await
+                    .expect("cancel retains cooldown");
+                if health["state"] != "probing" {
+                    return health;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        gate.release();
+        let next = path.send(&entry.base, "after-cancel-trial").await;
+        let after = cooldown(&entry.base).await;
+        let queue = entry.queue().await;
+        let calls = entry.calls();
+        entry.stop().await;
+        assert!(
+            released.is_ok(),
+            "{path:?}: cancelled request must release trial ownership"
+        );
+        assert_eq!(path.alias(&next.unwrap()), "A", "{path:?}");
+        assert!(after.is_none(), "{path:?}: fresh real trial succeeds");
+        assert_eq!(calls, ["A", "A"], "{path:?}");
+        assert!(queue["pools"][0]["held"].as_array().unwrap().is_empty());
     }
 }

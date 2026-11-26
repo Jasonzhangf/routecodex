@@ -14071,13 +14071,16 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
     let persist_failures = handle.shutdown().await;
     assert!(
         persist_failures
+            .codex_sample_persist_failures
             .iter()
             .any(|failure| failure.file_name == "request.json"),
         "aggregate shutdown must return the residual request sample failure"
     );
     assert!(persist_failures
+        .codex_sample_persist_failures
         .iter()
         .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    assert!(persist_failures.control_cleanup_failures.is_empty());
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }

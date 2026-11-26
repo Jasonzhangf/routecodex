@@ -1,10 +1,12 @@
 //! Public retained-listener witness for reversible aggregate probe ownership.
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{
+    spawn_v3_server_aggregate, spawn_v3_server_aggregate_with_health_observation_clock,
+};
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
 use tokio::{
@@ -20,6 +22,15 @@ mod hub_v1_fixture;
 mod test_home;
 
 static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
+
+#[derive(Debug)]
+struct RecoveryClock(AtomicU64);
+
+impl routecodex_v3_runtime::V3ProviderHealthObservationClock for RecoveryClock {
+    fn now_epoch_ms(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
 
 fn business_payload() -> Value {
     json!({"id":"rollback-complete","object":"chat.completion","model":"test","choices":[{"index":0,"message":{"role":"assistant","content":"complete retained business payload","tool_calls":[{"id":"paired-call","type":"function","function":{"name":"fixture","arguments":"{invalid arguments preserved"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8},"tail":{"complete":[1,2,3]}})
@@ -331,19 +342,25 @@ snapshot_direct = true
     );
     let manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = Arc::new(RecoveryClock(AtomicU64::new(now_ms)));
+    let handle = spawn_v3_server_aggregate_with_health_observation_clock(manifest, clock.clone())
+        .await
+        .unwrap();
     let client = reqwest::Client::new();
     let base = format!("http://{}", handle.listeners[0].addr);
-    // Startup has already ticked before the public cooldown declaration.
-    tokio::time::sleep(Duration::from_millis(100)).await;
     // A completed same-provider business record must not be mistaken for A.
     business(&client, &base, &format!("{provider}.sibling")).await;
     let add = client.post(format!("{base}/_routecodex/health/cooldown-pool/add")).json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test","kind":"probe","duration_ms":5000})).send().await.unwrap();
     assert_eq!(add.status(), 200);
-    // Request admission no longer starts recovery. Make the scheduled probe due
-    // through the operator endpoint, then let the managed probe owner run it.
-    let probe_now = client.post(format!("{base}/_routecodex/health/cooldown-pool/probe")).json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test"})).send().await.unwrap();
-    assert_eq!(probe_now.status(), 200);
+    // This test owns an explicit observation-only diagnostic. It is allowed to
+    // send one upstream request, but it must not settle the cooldown episode.
+    let diagnostic = tokio::spawn(client.post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
+        .json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test","allow_paid_diagnostic":true}))
+        .send());
     business(&client, &base, "test").await;
     timeout(Duration::from_secs(2), async {
         loop {
@@ -354,6 +371,8 @@ snapshot_direct = true
     })
     .await
     .unwrap();
+    diagnostic.abort();
+    let _ = diagnostic.await;
     let extend_schedule = client.post(format!("{base}/_routecodex/health/cooldown-pool/add")).json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test","kind":"probe","duration_ms":5000})).send().await.unwrap();
     assert_eq!(extend_schedule.status(), 200);
     eprintln!(
@@ -376,7 +395,10 @@ snapshot_direct = true
         "live held probe has no default broker checkpoint"
     );
     let old = entry(&before, &provider).clone();
-    assert_eq!(old["state"], "probing");
+    assert_ne!(
+        old["state"], "probing",
+        "paid diagnostic must not acquire a health permit"
+    );
     assert_eq!(old["interface_id"], "default");
     assert_eq!(old["auth_alias"], "key");
     assert_eq!(old["model_id"], "test");
@@ -477,31 +499,16 @@ snapshot_direct = true
         1,
         "rollback must not repeat startup's future-due sweep"
     );
-    // No recovery business is sent until the scheduled exact successor arrives.
-    let scheduled = timeout(Duration::from_secs(8), async {
-        loop {
-            let capture = rx.recv().await.unwrap();
-            if capture["probe"] == true {
-                break capture;
-            }
-        }
-    })
-    .await;
-    if scheduled.is_err() {
-        handle.shutdown().await;
-        upstream_task.abort();
-        let _ = upstream_task.await;
-        panic!(
-            "retained aggregate lost scheduled exact-identity recovery after preparation rollback"
-        );
-    }
-    let scheduled = scheduled.unwrap();
-    assert_eq!(scheduled["body"]["model"], "test");
-    eprintln!("FA22072 exact key one-slot release proven by scheduled B admission; A socket closed={} remote_gate={}", peer.old_closed.load(Ordering::SeqCst), peer.old_gate.available_permits());
-    assert_eq!(
-        scheduled["auth_alias"], "key",
-        "one-slot exact-auth successor admitted before business"
-    );
+    // The next genuine business request owns the released exact identity.
+    while rx.try_recv().is_ok() {}
+    clock
+        .0
+        .store(old["until_ms"].as_u64().unwrap() + 1, Ordering::SeqCst);
+    business(&client, &base, "test").await;
+    let scheduled = rx.recv().await.unwrap();
+    assert_eq!(scheduled["probe"], false);
+    assert_eq!(scheduled["auth_alias"], "key");
+    eprintln!("FA22072 exact key one-slot release proven by real business admission; A socket closed={} remote_gate={}", peer.old_closed.load(Ordering::SeqCst), peer.old_gate.available_permits());
     timeout(Duration::from_secs(2), async {
         loop {
             let after = pool(&client, &base).await;
@@ -552,7 +559,10 @@ snapshot_direct = true
         count,
         "terminal shutdown must suppress late restoration"
     );
-    assert_eq!(count, 2, "one old owner and one due successor only");
+    assert_eq!(
+        count, 1,
+        "one explicit diagnostic only; recovery uses business traffic"
+    );
     assert_eq!(
         peer.total.load(Ordering::SeqCst),
         captures,
