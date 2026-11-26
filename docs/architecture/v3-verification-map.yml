@@ -1573,6 +1573,7 @@ features:
     - real_admin_status_and_exact_release_follow_the_selected_listener_control
     - control_publication_failure_keeps_business_and_preserves_the_foreign_record
     - drop_and_exec_close_the_owned_companion_and_record
+    - drop_revokes_record_only_controls_on_retained_connection
     - bracketed_ipv6_bind_keeps_legacy_business_and_real_admin_controls
     - colliding_config_listener_components_keep_independent_real_admin_controls
     - long_canonical_config_name_keeps_real_admin_status_release_and_cleanup

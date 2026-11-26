@@ -802,7 +802,6 @@ impl Drop for V3ServerAggregateHandle {
                     let _ = shutdown.send(());
                 }
             }
-            self.front_transport_broker.close_active_client_transports();
         }
         self.active_key_controls.clear();
     }

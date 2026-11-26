@@ -511,6 +511,104 @@ async fn control_publication_failure_keeps_business_and_preserves_the_foreign_re
 }
 
 #[tokio::test]
+async fn drop_revokes_record_only_controls_on_retained_connection() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn exchange(
+        socket: &mut tokio::net::TcpStream,
+        method: &str,
+        body: Option<Value>,
+    ) -> Result<(u16, Value), String> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let path = if body.is_some() {
+                "/_routecodex/selection/active-keys/release"
+            } else {
+                "/_routecodex/selection/active-keys"
+            };
+            let body = body.map(|value| value.to_string()).unwrap_or_default();
+            let request = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+            socket.write_all(request.as_bytes()).await.map_err(|e| e.to_string())?;
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(socket.read_u8().await.map_err(|e| e.to_string())?);
+            }
+            let headers = String::from_utf8(headers).map_err(|e| e.to_string())?;
+            let status = headers.split_whitespace().nth(1).ok_or("missing status")?
+                .parse::<u16>().map_err(|e| e.to_string())?;
+            let length: usize = headers.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| value.trim())
+            }).ok_or("missing content length")?.parse::<usize>().map_err(|e| e.to_string())?;
+            let mut bytes = vec![0; length];
+            socket.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
+            Ok((status, serde_json::from_slice(&bytes).map_err(|e| e.to_string())?))
+        }).await.map_err(|_| "retained control exchange timed out".to_string())?
+    }
+
+    let _home = LOCK.lock().await;
+    let mut fixture = Fixture::start("127.0.0.1".parse().unwrap(), false).await;
+    let business = fixture.business().await;
+    let before = fixture.status().await;
+    assert_eq!(fixture.control, Some(fixture.business));
+    let mut retained = tokio::net::TcpStream::connect(fixture.business)
+        .await
+        .unwrap();
+    let accepted = exchange(&mut retained, "GET", None).await;
+    drop(fixture.handle.take().unwrap());
+    let status = exchange(&mut retained, "GET", None).await;
+    let release = exchange(
+        &mut retained,
+        "POST",
+        Some(json!({
+            "routing_group_id":fixture.group,"pool_id":"default","provider_id":"controlled",
+            "interface_id":"default","model_id":"wire","auth_alias":"A"
+        })),
+    )
+    .await;
+    let _ = retained.shutdown().await;
+    drop(retained);
+    let old_closed = closed(fixture.business).await;
+    let old_record_absent = read_control_bytes_until(&fixture.record_paths())
+        .await
+        .is_none();
+    // Reconstruct from the real selection store to prove the rejected release
+    // did not remove the durable hold or change the next routable member.
+    fixture.handle = Some(
+        spawn_v3_server_aggregate_with_admin(
+            fixture.manifest.clone(),
+            None,
+            Some(fixture.config_path.clone()),
+        )
+        .await
+        .unwrap(),
+    );
+    let after = fixture.status().await;
+    let next = fixture.business().await;
+    let calls = fixture
+        .calls
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(alias, _)| alias.clone())
+        .collect::<Vec<_>>();
+    let cleanup = fixture.finish(Close::Shutdown).await;
+    assert_eq!(cleanup, (true, true));
+    assert!(old_closed && old_record_absent);
+    assert_eq!(business.unwrap().0, 200);
+    assert_eq!(accepted.unwrap().0, 200);
+    assert_eq!(status.unwrap().0, 410);
+    assert_eq!(release.unwrap().0, 410);
+    let before = before.unwrap().1;
+    let after = after.unwrap().1;
+    assert_eq!(before["pools"][0]["held"][0]["auth_alias"], "A");
+    assert_eq!(after["pools"][0]["held"], before["pools"][0]["held"]);
+    assert_eq!(after["pools"][0]["order"], before["pools"][0]["order"]);
+    assert_eq!(next.unwrap().1["output"][0]["content"][0]["text"], "B");
+    assert_eq!(calls, ["A", "A", "A", "A", "B", "B"]);
+}
+
+#[tokio::test]
 async fn drop_and_exec_close_the_owned_companion_and_record() {
     let _home = LOCK.lock().await;
     let bind = assigned_ipv4().expect("assigned non-loopback address");
