@@ -436,7 +436,7 @@ fn completed_usage_projects_split_cache_fields() {
 }
 
 #[test]
-fn provider_attempt_failure_survives_completed_meta_rebuild() {
+fn completed_terminal_does_not_inherit_prior_attempt_error_metadata() {
     let o = V3WebuiObservability::new();
     let key = build_v3_obs_request_key(5555, "r-failure-then-success");
     record(
@@ -455,8 +455,14 @@ fn provider_attempt_failure_survives_completed_meta_rebuild() {
     obs.provider_failure_events = vec![failure_event];
 
     let mut failed_meta = meta_with_full("r-failure-then-success");
+    failed_meta.finish_reason = Some("error".to_string());
     failed_meta.error_category = Some("provider_http_502".to_string());
     failed_meta.error_detail = Some("provider returned HTTP 502".to_string());
+    failed_meta.observed_error = Some(V3ObsErrorTruth {
+        source: "provider_attempt_failure".to_string(),
+        action: Some("switch_provider".to_string()),
+        ..Default::default()
+    });
     record_observed(
         &o,
         V3ObsEventType::ProviderAttemptFailed,
@@ -467,7 +473,8 @@ fn provider_attempt_failure_survives_completed_meta_rebuild() {
     )
     .unwrap();
 
-    // Completed rebuilds meta from the fresh payload; the category must survive.
+    // The completed terminal establishes the stored row. Its clean success
+    // metadata must not inherit the failed attempt's terminal or error fields.
     record_observed(
         &o,
         V3ObsEventType::Completed,
@@ -479,12 +486,12 @@ fn provider_attempt_failure_survives_completed_meta_rebuild() {
     .unwrap();
     let rows = o.rows().unwrap();
     let row = rows.get(&key).expect("row");
-    assert_eq!(
-        row.meta.error_category.as_deref(),
-        Some("provider_http_502"),
-        "error_category must survive Completed meta rebuild"
-    );
-    assert!(row.failed_attempts >= 1);
+    assert_eq!(row.result.as_deref(), Some("success"));
+    assert_eq!(row.meta.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(row.meta.error_category, None);
+    assert_eq!(row.meta.error_detail, None);
+    assert_eq!(row.meta.observed_error, None);
+    assert_eq!(row.failed_attempts, 1);
 }
 
 #[test]
@@ -1056,6 +1063,76 @@ fn provider_status_none_clears_only_typed_terminal_inheritance() {
         row.meta.provider_status,
         Some(503),
         "a legacy lane with no typed facts keeps the previous provider status"
+    );
+}
+
+/// A delivered success keeps its real provider status when a later typed
+/// post-commit terminal replays onto the row. The failure still adds error truth.
+#[test]
+fn post_commit_terminal_keeps_completed_success_provider_status() {
+    let observability = V3WebuiObservability::new();
+    let key = build_v3_obs_request_key(6001, "req-completed-then-failed");
+    let scope = |port| V3ObsScope {
+        port,
+        workdir: None,
+        session: None,
+    };
+    let completed = V3ObsRequestMeta {
+        request_id: "req-completed-then-failed".to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_status: Some(200),
+        response_status: Some("completed".to_string()),
+        finish_reason: Some("stop".to_string()),
+        ..Default::default()
+    };
+    record(
+        &observability,
+        V3ObsEventType::Completed,
+        &key,
+        scope(6001),
+        completed,
+    )
+    .unwrap();
+    let post_commit = V3ObsRequestMeta {
+        request_id: "req-completed-then-failed".to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_status: None,
+        terminal_typed_status_cleared: true,
+        response_status: Some("error".to_string()),
+        error_category: Some("provider_http_502".to_string()),
+        observed_error: Some(V3ObsErrorTruth {
+            source: "error01_provider_terminal".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    record(
+        &observability,
+        V3ObsEventType::Failed,
+        &key,
+        scope(6001),
+        post_commit,
+    )
+    .unwrap();
+    let row = observability
+        .rows()
+        .unwrap()
+        .get(&key)
+        .cloned()
+        .expect("the completed row");
+    assert_eq!(
+        row.result.as_deref(),
+        Some("success"),
+        "a delivered success terminal must not be reopened"
+    );
+    assert_eq!(
+        row.meta.provider_status,
+        Some(200),
+        "the delivered provider status must survive a post-commit failure"
+    );
+    assert!(
+        row.meta.observed_error.is_some(),
+        "the post-commit failure must still be recorded"
     );
 }
 
