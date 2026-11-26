@@ -916,7 +916,7 @@ features:
   - pending_endpoint
   - multi_listener_server::responses_direct_shared_provider_health_reselects_after_unrecoverable_failure
   - multi_listener_server::responses_direct_provider_request_dry_run_does_not_send_to_any_provider
-  - multi_listener_server::responses_direct_last_default_projects_after_provider_failure
+  - multi_listener_server::responses_direct_projects_final_real_provider_http_error
   - direct_frame_console_infers_stop_finish_reason_from_completed_json_status
   - direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish
   - direct_stream_request_error06_projects_sse_error_not_json
@@ -6517,7 +6517,7 @@ features:
   - npm run verify:v3-architecture-docs
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_projects_final_real_provider_http_error -- --exact
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
   - git diff --check
