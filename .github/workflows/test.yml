@@ -130,6 +130,8 @@ jobs:
       - name: V3 canonical verification stack
         id: v3_canonical
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        env:
+          ROUTECODEX_C1_DIAGNOSTIC_DIR: ${{ runner.temp }}/routecodex-c1-diagnostics/canonical
         run: npm --prefix v3 run verify:ci
       - name: V3 DAGPipe graph governance
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
@@ -184,6 +186,8 @@ jobs:
           if-no-files-found: warn
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
+        env:
+          ROUTECODEX_C1_DIAGNOSTIC_DIR: ${{ runner.temp }}/routecodex-c1-diagnostics/host
         run: |
           if [[ '${{ needs.scope.outputs.v3_architecture }}' == 'true' && '${{ steps.v3_canonical.outcome }}' == 'success' ]]; then
             node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli -p routecodex-v3-lifecycle -- --nocapture
@@ -193,6 +197,14 @@ jobs:
       - name: V3 cargo test stack environment regression
         if: needs.scope.outputs.v3_build == 'true'
         run: npm --prefix v3 run --silent test:v3-cargo-test-stack-env-regression
+      - name: Upload V3 C1 lifecycle diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: routecodex-c1-diagnostics
+          path: ${{ runner.temp }}/routecodex-c1-diagnostics
+          if-no-files-found: warn
 
   v4-build:
     needs: scope

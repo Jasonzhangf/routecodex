@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Mutex, MutexGuard};
@@ -4015,9 +4016,188 @@ fn issue36df127_start_replaces_unresponsive_aggregate_with_attached_admin() {
     let ports = [free_port(), free_port()];
     let admin_port = free_port();
     let config = write_config(&root, ports);
+    let explicit_diagnostic_dir = std::env::var_os("ROUTECODEX_C1_DIAGNOSTIC_DIR").map(|path| {
+        let diagnostic_root = PathBuf::from(path);
+        fs::create_dir_all(&diagnostic_root).unwrap();
+        tempfile::Builder::new()
+            .prefix("replacement-")
+            .tempdir_in(&diagnostic_root)
+            .unwrap()
+            .keep()
+    });
+    let default_diagnostic_tempdir = if explicit_diagnostic_dir.is_none() {
+        Some(
+            tempfile::Builder::new()
+                .prefix("routecodex-c1-replacement-")
+                .tempdir_in(std::env::temp_dir())
+                .unwrap(),
+        )
+    } else {
+        None
+    };
+    let diagnostic_dir = explicit_diagnostic_dir.unwrap_or_else(|| {
+        default_diagnostic_tempdir
+            .as_ref()
+            .unwrap()
+            .path()
+            .to_owned()
+    });
+    let report_diagnostic =
+        |message: std::fmt::Arguments<'_>| -> std::result::Result<(), std::io::Error> {
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(diagnostic_dir.join("capture.log"))?
+                .write_fmt(message)
+        };
+    let write_diagnostic_file = |path: &Path, contents: &str| {
+        if let Err(error) = fs::write(path, contents) {
+            let _ = report_diagnostic(format_args!(
+                "C1 diagnostic write {}: {error}\n",
+                path.display()
+            ));
+        }
+    };
+    let capture_instance_state = |label: &str, instance_dir: &Path| {
+        let destination_root = diagnostic_dir.join(label);
+        if let Err(error) = fs::create_dir_all(&destination_root) {
+            let _ = report_diagnostic(format_args!(
+                "C1 diagnostic directory {}: {error}\n",
+                destination_root.display()
+            ));
+            return;
+        }
+        let mut errors = Vec::new();
+        let instances_root = state_root.join("instances");
+        let mut instance_count = 0;
+        match fs::read_dir(&instances_root) {
+            Ok(instances) => {
+                for entry in instances {
+                    let entry = match entry {
+                        Ok(entry) => entry,
+                        Err(error) => {
+                            errors.push(format!(
+                                "instance entry source={} error={error}",
+                                instances_root.display()
+                            ));
+                            continue;
+                        }
+                    };
+                    instance_count += 1;
+                    let destination = destination_root.join(entry.file_name());
+                    if let Err(error) = fs::create_dir_all(&destination) {
+                        errors.push(format!(
+                            "instance destination={} error={error}",
+                            destination.display()
+                        ));
+                        continue;
+                    }
+                    for record in ["instance.json", "pid.cache", "control.json", "status.json"] {
+                        let source = entry.path().join(record);
+                        if let Err(error) = fs::copy(&source, destination.join(record)) {
+                            errors
+                                .push(format!("record source={} error={error}", source.display()));
+                        }
+                    }
+                    match fs::read_dir(entry.path()) {
+                        Ok(files) => {
+                            for file in files {
+                                let file = match file {
+                                    Ok(file) => file,
+                                    Err(error) => {
+                                        errors.push(format!(
+                                            "instance file entry source={} error={error}",
+                                            entry.path().display()
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                match file.file_type() {
+                                    Ok(kind) if kind.is_file() => {
+                                        if let Err(error) = fs::copy(
+                                            file.path(),
+                                            destination.join(file.file_name()),
+                                        ) {
+                                            errors.push(format!(
+                                                "instance file source={} error={error}",
+                                                file.path().display()
+                                            ));
+                                        }
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => errors.push(format!(
+                                        "instance file type source={} error={error}",
+                                        file.path().display()
+                                    )),
+                                }
+                            }
+                        }
+                        Err(error) => errors.push(format!(
+                            "instance directory source={} error={error}",
+                            entry.path().display()
+                        )),
+                    }
+                }
+            }
+            Err(error) => errors.push(format!(
+                "instances directory source={} error={error}",
+                instances_root.display()
+            )),
+        }
+        if instance_count == 0 {
+            errors.push(format!("no instance found in {}", instances_root.display()));
+        }
+        let log_root = home.join(".rcc").join("logs");
+        let destination_logs = destination_root.join("home-logs");
+        if let Err(error) = fs::create_dir_all(&destination_logs) {
+            errors.push(format!(
+                "lifecycle log directory source={} error={error}",
+                destination_logs.display()
+            ));
+        } else {
+            match fs::read_dir(&log_root) {
+                Ok(logs) => {
+                    for log in logs {
+                        let log = match log {
+                            Ok(log) => log,
+                            Err(error) => {
+                                errors.push(format!(
+                                    "lifecycle log entry source={} error={error}",
+                                    log_root.display()
+                                ));
+                                continue;
+                            }
+                        };
+                        if let Err(error) =
+                            fs::copy(log.path(), destination_logs.join(log.file_name()))
+                        {
+                            errors.push(format!(
+                                "lifecycle log source={} error={error}",
+                                log.path().display()
+                            ));
+                        }
+                    }
+                }
+                Err(error) => errors.push(format!(
+                    "lifecycle logs directory source={} error={error}",
+                    log_root.display()
+                )),
+            }
+        }
+        if !errors.is_empty() {
+            let contents = format!(
+                "capture={} instance_dir={}\n{}\n",
+                label,
+                instance_dir.display(),
+                errors.join("\n")
+            );
+            write_diagnostic_file(&destination_root.join("capture-errors.txt"), &contents);
+            let _ = report_diagnostic(format_args!("C1 capture {label}:\n{contents}"));
+        }
+    };
     let binary = env!("CARGO_BIN_EXE_rccv3");
     let admin_bind = format!("127.0.0.1:{admin_port}");
-    let command = || {
+    let command = |label: &str| {
         let mut command = managed_test_command(binary, &state_root);
         command
             .args(["start", "--snapall", "--config"])
@@ -4028,34 +4208,70 @@ fn issue36df127_start_replaces_unresponsive_aggregate_with_attached_admin() {
             .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
             .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "300")
             .env("V3_MANAGED_TEST_KEY", SECRET)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(fs::File::create(diagnostic_dir.join(format!("{label}.stdout.log"))).unwrap())
+            .stderr(fs::File::create(diagnostic_dir.join(format!("{label}.stderr.log"))).unwrap());
         command
     };
-    let mut original = command().spawn().unwrap();
+    let mut original = None;
     let mut replacement = None;
+    let mut phase = "starting test";
+    let mut state_read_error = None;
+    let mut instance_dir_snapshot = state_root.join("instances");
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        phase = "spawning original";
+        original = Some(command("original").spawn().unwrap());
+        phase = "waiting for original listeners";
         for port in ports.into_iter().chain([admin_port]) {
             wait_port(port, true);
         }
+        phase = "waiting for original running state";
         let instance_dir = single_instance_dir(&state_root);
+        instance_dir_snapshot = instance_dir.clone();
         wait_status_file_state(&instance_dir, "running");
+        phase = "capturing original running state";
+        capture_instance_state("state-original-running", &instance_dir);
+        phase = "stopping original";
         assert_eq!(
-            unsafe { libc::kill(original.id() as libc::pid_t, libc::SIGSTOP) },
+            unsafe {
+                libc::kill(
+                    original.as_ref().unwrap().id() as libc::pid_t,
+                    libc::SIGSTOP,
+                )
+            },
             0
         );
-        replacement = Some(command().spawn().unwrap());
-        assert!(wait_for_child_exit(&mut original, Duration::from_secs(15)));
+        phase = "original stopped";
+        phase = "spawning replacement";
+        replacement = Some(command("replacement").spawn().unwrap());
+        phase = "waiting for original exit";
+        assert!(wait_for_child_exit(
+            original.as_mut().unwrap(),
+            Duration::from_secs(15)
+        ));
+        phase = "waiting for replacement readiness";
         let replacement = replacement.as_mut().unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
+            let status = replacement.try_wait().unwrap();
             assert!(
-                replacement.try_wait().unwrap().is_none(),
-                "replacement exited before ready"
+                status.is_none(),
+                "replacement exited before ready: status={status:?} diagnostics={}",
+                diagnostic_dir.display()
             );
-            let current = fs::read(instance_dir.join("pid.cache"))
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            let pid_path = instance_dir.join("pid.cache");
+            let current = match fs::read(&pid_path) {
+                Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        state_read_error = Some(format!("{}: {error}", pid_path.display()));
+                        None
+                    }
+                },
+                Err(error) => {
+                    state_read_error = Some(format!("{}: {error}", pid_path.display()));
+                    None
+                }
+            };
             if current.as_ref().and_then(|value| value["pid"].as_u64())
                 == Some(u64::from(replacement.id()))
                 && ports
@@ -4067,17 +4283,104 @@ fn issue36df127_start_replaces_unresponsive_aggregate_with_attached_admin() {
             assert!(Instant::now() < deadline, "replacement never became ready");
             sleep(Duration::from_millis(50));
         }
+        phase = "probing replacement health";
         for port in ports {
             assert_eq!(http_get_json(port, "/health")["status"], "ok");
         }
+        phase = "completed";
     }));
-    let _ = original.kill();
-    let _ = original.wait();
-    if let Some(mut replacement) = replacement {
-        let _ = replacement.kill();
-        let _ = replacement.wait();
+    // Capture the failure state before test cleanup changes process ownership.
+    let pre_cleanup_capture = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let describe_child = |child: Option<&mut Child>| -> String {
+            let Some(child) = child else {
+                return "not-spawned".to_owned();
+            };
+            match child.try_wait() {
+                Ok(None) => format!("running pid={}", child.id()),
+                Ok(Some(status)) => format!(
+                    "exited pid={} status={status:?} signal={:?}",
+                    child.id(),
+                    status.signal()
+                ),
+                Err(error) => format!("status-error pid={} error={error}", child.id()),
+            }
+        };
+        let port_state = |port: u16| match TcpStream::connect(("127.0.0.1", port)) {
+            Ok(_) => "open".to_owned(),
+            Err(error) => format!("closed({error})"),
+        };
+        let ports_state = [ports[0], ports[1], admin_port]
+            .into_iter()
+            .map(|port| format!("port_{port}={}", port_state(port)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let process_state = format!(
+            "phase={phase}\noriginal={}\nreplacement={}\nstate_read_error={}\n{ports_state}\n",
+            describe_child(original.as_mut()),
+            describe_child(replacement.as_mut()),
+            state_read_error.as_deref().unwrap_or("none")
+        );
+        write_diagnostic_file(&diagnostic_dir.join("process-state.txt"), &process_state);
+        let _ = report_diagnostic(format_args!(
+            "C1 diagnostics: {}\n{process_state}\n",
+            diagnostic_dir.display()
+        ));
+        capture_instance_state("state-before-cleanup", &instance_dir_snapshot);
+        for label in ["original", "replacement"] {
+            for stream in ["stdout", "stderr"] {
+                let path = diagnostic_dir.join(format!("{label}.{stream}.log"));
+                match fs::read_to_string(&path) {
+                    Ok(output) => {
+                        let _ = report_diagnostic(format_args!("C1 {label} {stream}:\n{output}"));
+                    }
+                    Err(error) => {
+                        let _ = report_diagnostic(format_args!("C1 {label} {stream}: {error}\n"));
+                    }
+                }
+            }
+        }
+    }));
+    let finalize_child = |label: &str, child: Option<&mut Child>, cleanup: &mut String| {
+        let Some(child) = child else {
+            cleanup.push_str(&format!(
+                "{label}_kill=not-spawned; {label}_wait=not-spawned\n"
+            ));
+            return;
+        };
+        cleanup.push_str(&format!("{label}_kill={:?}\n", child.kill()));
+        cleanup.push_str(&format!("{label}_wait={:?}\n", child.wait()));
+    };
+    let mut cleanup = String::new();
+    finalize_child("original", original.as_mut(), &mut cleanup);
+    finalize_child("replacement", replacement.as_mut(), &mut cleanup);
+    cleanup.push_str("phase=finalization\n");
+    let cleanup_path = diagnostic_dir.join("cleanup.txt");
+    write_diagnostic_file(&cleanup_path, &cleanup);
+    let _ = report_diagnostic(format_args!("C1 cleanup:\n{cleanup}"));
+    let post_cleanup_capture = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        capture_instance_state("state-after-cleanup", &instance_dir_snapshot);
+    }));
+    let failed = outcome.is_err() || pre_cleanup_capture.is_err() || post_cleanup_capture.is_err();
+    if failed {
+        if let Some(tempdir) = default_diagnostic_tempdir {
+            let retained = tempdir.keep();
+            let _ = report_diagnostic(format_args!(
+                "C1 retained diagnostics: {}\n",
+                retained.display()
+            ));
+        }
+    } else if let Some(tempdir) = default_diagnostic_tempdir {
+        if let Err(error) = tempdir.close() {
+            let _ = report_diagnostic(format_args!("C1 diagnostic cleanup: {error}\n"));
+        }
     }
     if let Err(error) = outcome {
+        std::panic::resume_unwind(error);
+    }
+    if let Err(error) = pre_cleanup_capture {
+        std::panic::resume_unwind(error);
+    }
+    if let Err(error) = post_cleanup_capture {
         std::panic::resume_unwind(error);
     }
 }
