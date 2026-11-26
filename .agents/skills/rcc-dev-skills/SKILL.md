@@ -30,9 +30,14 @@ description: "RouteCodex V3 开发与排障：定位首次偏离和唯一 owner�
    ```
 
 3. Debug 用同一请求的原始证据定位首次偏离，再按已接受计划补正图/gate、取得红测、修改 owner、完成黑盒回归。每个 non-2xx 除已确认传输失败外，仍须查根因和请求形状；切换 Provider 成功不关闭原错。
-4. 功能/修复使用真实 HTTP、WebSocket、CLI 或公开 consumer 验收，记录稳定测试 ID 与实际命令。受控上游可以使用，但源码字符串检查和未经过公开入口的 mock 不能替代行为证据。Provider 错误与业务响应的回归要求沿项目合同。
-5. 按映射运行受影响测试和 `npm run verify:v3-architecture-ci`。umbrella 已覆盖的子 gate 不再单跑；未覆盖的必需项仍执行，新输入只使受影响证据失效。
-6. 运行时变更在本地 gate 通过后沿[运行验收](references/50-rcc-config-ssot.md)完成 build、install、配置检查、正式 restart、各 listener health 和同入口回放；PR CI 可并行，不以其等待阻止候选验收。原失败样本必须覆盖；真实客户端工具须证明完整身份、参数、执行结果及后续配对，200 或 `requires_action` 不算工具成功。
+   Provider HTTP 400 按下一条专门流程处理。不能把 400 的后续 fallback 成功、换 key 成功或项目整体兼容性提高当作该缺陷已解决。
+4. **Provider HTTP 400 定位与修复**：按精确 request ID 读取保留的原始客户端请求、完整末轮与历史、provider-bound body、Provider 状态和响应体、typed Error、attempt ordinal；与相同 Provider、model、key 的已成功样本对照。然后在同一 Provider 身份上重放原始失败 body，再逐步缩小到仍能复现 400 的最小请求。每次重放都记录实际 Provider/model/key 和响应。原请求或末轮缺失时，先从现存原始样本恢复；记录仍缺的证据并继续可行的定位，不用另一个 Provider 的成功替代复现。通用 `upstream_error`、单次同 key 成功或另一个 Provider 成功本身都不能证明原因。
+   - 对照证据确认本地请求形状错误后，先加覆盖该组合的红测，再修唯一 owner；以同一公开入口和同一 Provider/model/key 验证原始组合首次尝试通过，并保留完整请求语义。
+   - 对照证据确认 Provider 上游限制后，记录原始 body 与最小请求在同一身份上的响应，按上游例外记录，不做本地形状修复。
+   - 证据仍不足时保持 bug `open`，由 issue owner 继续复现、缩小请求或沿合同记录具体阻塞和恢复信号。切换 Provider、换 key、路由 fallback、重启后偶发成功和其他绕行都不满足该 issue 的根因与修复验收。
+5. 功能/修复使用真实 HTTP、WebSocket、CLI 或公开 consumer 验收，记录稳定测试 ID 与实际命令。受控上游可以使用，但源码字符串检查和未经过公开入口的 mock 不能替代行为证据。Provider 错误与业务响应的回归要求沿项目合同。
+6. 按映射运行受影响测试和 `npm run verify:v3-architecture-ci`。umbrella 已覆盖的子 gate 不再单跑；未覆盖的必需项仍执行，新输入只使受影响证据失效。
+7. 运行时变更在本地 gate 通过后沿[运行验收](references/50-rcc-config-ssot.md)完成 build、install、配置检查、正式 restart、各 listener health 和同入口回放；PR CI 可并行，不以其等待阻止候选验收。原失败样本必须覆盖；真实客户端工具须证明完整身份、参数、执行结果及后续配对，200 或 `requires_action` 不算工具成功。
 
 ## Defect Lifecycle
 
