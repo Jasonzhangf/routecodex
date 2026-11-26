@@ -222,6 +222,13 @@ struct V3TargetExpansionScope {
     interface_filter: Option<String>,
 }
 
+struct ExpandProviderOptions {
+    priority: i32,
+    weight: u32,
+    sample: u64,
+    scope: V3TargetExpansionScope,
+}
+
 impl V3TargetInterpreter {
     pub fn classify_kind(&self, route: V3Router07OpaqueTargetHitOnce) -> V3Target08KindClassified {
         V3Target08KindClassified { route }
@@ -252,16 +259,18 @@ impl V3TargetInterpreter {
                     Some(model_id),
                     None,
                     entry.interface.as_deref(),
-                    entry.priority,
-                    entry.weight,
-                    deterministic_sample,
-                    V3TargetExpansionScope {
-                        path: vec![format!("direct:{provider_id}.{model_id}")],
-                        pool_ids: vec![entry.pool_id.clone()],
-                        default_pool_member: false,
-                        required_capabilities: Vec::new(),
-                        visible_model_ids: Vec::new(),
-                        interface_filter: entry.interface.clone(),
+                    ExpandProviderOptions {
+                        priority: entry.priority,
+                        weight: entry.weight,
+                        sample: deterministic_sample,
+                        scope: V3TargetExpansionScope {
+                            path: vec![format!("direct:{provider_id}.{model_id}")],
+                            pool_ids: vec![entry.pool_id.clone()],
+                            default_pool_member: false,
+                            required_capabilities: Vec::new(),
+                            visible_model_ids: Vec::new(),
+                            interface_filter: entry.interface.clone(),
+                        },
                     },
                 ) {
                     Ok(expanded) => {
@@ -414,7 +423,7 @@ impl V3TargetInterpreter {
                     manifest,
                     target,
                     &mut visited,
-                    &mut members.entry(entry.pool_id.clone()).or_default(),
+                    members.entry(entry.pool_id.clone()).or_default(),
                 );
             }
         }
@@ -889,10 +898,12 @@ impl V3TargetInterpreter {
                 target.model.as_deref(),
                 target.key.as_deref(),
                 target.interface.as_deref(),
-                target.priority.unwrap_or(0),
-                target.weight.unwrap_or(1),
-                sample,
-                scope,
+                ExpandProviderOptions {
+                    priority: target.priority.unwrap_or(0),
+                    weight: target.weight.unwrap_or(1),
+                    sample,
+                    scope,
+                },
             ),
             V3RouteTargetKind::Forwarder => self.expand_forwarder(
                 manifest,
@@ -953,10 +964,12 @@ impl V3TargetInterpreter {
                     target.model.as_deref().or(Some(forwarder.model.as_str())),
                     target.key.as_deref(),
                     target.interface.as_deref(),
-                    target.priority.unwrap_or(0),
-                    target.weight.unwrap_or(1),
-                    sample.wrapping_add(index as u64),
-                    scope.clone(),
+                    ExpandProviderOptions {
+                        priority: target.priority.unwrap_or(0),
+                        weight: target.weight.unwrap_or(1),
+                        sample: sample.wrapping_add(index as u64),
+                        scope: scope.clone(),
+                    },
                 ),
                 V3RouteTargetKind::Forwarder => self.expand_forwarder(
                     manifest,
@@ -989,11 +1002,14 @@ impl V3TargetInterpreter {
         model_id: Option<&str>,
         key: Option<&str>,
         interface_id: Option<&str>,
-        priority: i32,
-        weight: u32,
-        sample: u64,
-        mut scope: V3TargetExpansionScope,
+        options: ExpandProviderOptions,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
+        let ExpandProviderOptions {
+            priority,
+            weight,
+            sample,
+            mut scope,
+        } = options;
         let provider_id = provider_id.ok_or(V3TargetError::ProviderTargetIncomplete)?;
         let provider = manifest
             .providers
@@ -1285,13 +1301,13 @@ fn collect_sticky_members(
 /// expansion that produces one candidate per auth entry.
 fn declared_auth_aliases(provider: &V3ProviderManifest, key: Option<&str>) -> Vec<String> {
     match key {
-        Some(key) => provider
-            .auth
-            .entries
-            .iter()
-            .any(|entry| entry.alias == key)
-            .then(|| vec![key.to_string()])
-            .unwrap_or_default(),
+        Some(key) => {
+            if provider.auth.entries.iter().any(|entry| entry.alias == key) {
+                vec![key.to_string()]
+            } else {
+                Vec::new()
+            }
+        }
         None => provider
             .auth
             .entries
@@ -1381,11 +1397,10 @@ fn context_window_exceeded_reason(
     candidate: &V3TargetCandidate,
 ) -> Option<String> {
     let max_context_tokens = candidate.max_context_tokens?;
-    let scaled_input_tokens = ((u128::from(request_input_tokens)
-        * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
-        .min(u128::from(u64::MAX)) as u64;
+    let scaled_input_tokens = (u128::from(request_input_tokens)
+        * u128::from(candidate.context_token_estimate_scale_bps))
+    .div_ceil(10_000)
+    .min(u128::from(u64::MAX)) as u64;
     (scaled_input_tokens > max_context_tokens).then(|| {
         format!(
             "{}:{}:{}:context_window_exceeded(input_tokens={},max_context_tokens={})",
@@ -1417,9 +1432,8 @@ fn context_window_near_limit_reason(
 }
 
 fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_tokens: u64) -> u64 {
-    ((u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
+    (u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps))
+        .div_ceil(10_000)
         .min(u128::from(u64::MAX)) as u64
 }
 
