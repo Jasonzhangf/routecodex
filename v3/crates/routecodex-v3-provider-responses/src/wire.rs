@@ -337,6 +337,12 @@ fn build_responses_wire_payload_with_registry(
     };
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_tool_choice(&mut body, &target);
+    // 请求侧 agent-to-agent 密文剥离（所有目标，每次请求必经）：Responses Beta
+    // `agent_message` 的 `content` part 可携带 Codex 宿主的 Fernet 会话密文，
+    // 该密文任何 provider 都无法解密。Chat codec 已在投影前丢弃；Responses
+    // direct/relay wire 必须同样丢弃，否则第三方 Responses provider 会以 HTTP 200
+    // `Encrypted function output content could not be decrypted or decoded` 拒绝整次请求。
+    strip_v3_request_agent_message_cipher_parts(&mut body);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
     // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
     //    接受密文，保留透传；响应侧主防线（`apply_v3_response_cipher_policy`，
@@ -589,6 +595,35 @@ fn ensure_v3_official_deepseek_reasoning_text(
                 "content".to_string(),
                 json!([{"type": "reasoning_text", "text": text}]),
             );
+        }
+    }
+}
+
+/// 请求侧 agent-to-agent 密文剥离（所有目标，每次请求必经）。
+///
+/// Responses Beta `agent_message` 的 `content` 数组可能包含
+/// `type=encrypted_content` 的 part，其值是 Codex 宿主的 Fernet 会话密文
+/// （与 `compaction` 同源，只有产生它的宿主能解密）。Chat codec
+/// （`responses_openai_codec.rs`）已在投影前丢弃这些 part；Responses direct/relay
+/// wire 必须在同一语义位置丢弃，否则第三方 Responses provider 会尝试解密，以
+/// HTTP 200 + `Encrypted function output content could not be decrypted or decoded`
+/// 拒绝整次请求（样本：xingchiapi/gpt-6.1-sol，model 名属 gpt 家族，绕过了非 gpt
+/// 密文剥离）。可见 `input_text` part 与其余业务字段原样保留。
+fn strip_v3_request_agent_message_cipher_parts(body: &mut Value) {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("agent_message") {
+            continue;
+        }
+        if let Some(parts) = obj.get_mut("content").and_then(Value::as_array_mut) {
+            parts.retain(|part| {
+                part.get("type").and_then(Value::as_str) != Some("encrypted_content")
+            });
         }
     }
 }

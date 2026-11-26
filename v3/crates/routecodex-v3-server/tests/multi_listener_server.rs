@@ -16688,3 +16688,104 @@ async fn v3_listener_survives_real_accept_error_child_blackbox() {
 
     handle.shutdown().await;
 }
+
+/// Regression for sample openai-responses-router-gpt-6-luna-...-2981185-369:
+/// xingchiapi/gpt-6.1-sol returned HTTP 200
+/// "Encrypted function output content could not be decrypted or decoded" because
+/// a Responses Beta `agent_message` content part of type `encrypted_content`
+/// (Fernet host session ciphertext) leaked onto the Responses provider wire.
+/// Real public entry: client request -> responses direct provider projection ->
+/// controlled upstream captures the outgoing body. The ciphertext part must be
+/// stripped before provider wire while the visible `input_text` part survives.
+#[tokio::test]
+async fn responses_direct_agent_message_encrypted_content_never_reaches_provider_wire() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("agent-message-cipher-direct");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "agent-message-cipher-key");
+    let provider_body = serde_json::to_vec(&json!({
+        "id": "resp_am",
+        "object": "response",
+        "status": "completed",
+        "model": "wire-protocol",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "ok"}]
+        }]
+    }))
+    .unwrap();
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            provider_body,
+        )
+        .await;
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &provider_base_url,
+        r#""direct""#,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = client
+        .post(&endpoint)
+        .header("accept", "application/json")
+        .json(&json!({
+            "model": "client-test",
+            "stream": false,
+            "input": [
+                {"type": "agent_message", "author": "/root", "recipient": "/worker",
+                 "content": [
+                    {"type": "input_text", "text": "Message Type: NEW_TASK"},
+                    {"type": "encrypted_content", "encrypted_content": "gAAAA_FERNET_HOST_CIPHER"}
+                 ]},
+                {"role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+            ]
+        }))
+        .send()
+        .await
+        .expect("public Responses request must reach provider");
+    assert_eq!(response.status(), StatusCode::OK);
+    let client_response: Value = response.json().await.unwrap();
+    assert_eq!(client_response["status"], "completed", "{client_response}");
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("provider attempt must reach controlled upstream")
+        .expect("controlled upstream must capture request");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider wire input must be an array");
+    let agent = input
+        .iter()
+        .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("agent_message"))
+        .expect("agent_message must be forwarded to the provider wire");
+    let parts = agent["content"].as_array().expect("agent_message content array");
+    assert!(
+        parts
+            .iter()
+            .all(|part| part.get("type").and_then(|v| v.as_str()) != Some("encrypted_content")),
+        "Fernet ciphertext part must be stripped before provider wire: {}",
+        capture.body
+    );
+    assert!(
+        parts
+            .iter()
+            .any(|part| part.get("text").and_then(|v| v.as_str()) == Some("Message Type: NEW_TASK")),
+        "visible input_text part must be preserved: {}",
+        capture.body
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
