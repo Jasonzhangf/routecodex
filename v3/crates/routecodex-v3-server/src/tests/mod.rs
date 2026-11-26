@@ -2396,7 +2396,7 @@ fn test_runtime_stream_observation_from_provider_event_json(
 ) -> V3RuntimeStreamObservation {
     let observation = V3RuntimeStreamObservation::default();
     observation
-        .record_provider_event_json(&event)
+        .record_direct_responses_payload_observation(&event)
         .expect("test provider event JSON observation must record");
     observation
 }
@@ -4400,7 +4400,8 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
                 "input_tokens_details": {"cached_tokens": 0},
                 "output_tokens": 38,
                 "total_tokens": 79
-            }
+            },
+            "output": [{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
         })),
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: "none",
@@ -4423,10 +4424,279 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=unreported"), "{log}");
+    assert!(log.contains("finish_reason=stop"), "{log}");
     assert!(log.contains("usage_in=41 usage_out=38"), "{log}");
     assert!(log.contains("usage_total=79"), "{log}");
-    assert!(log.contains("finish_reason=unreported"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn direct_frame_console_infers_tool_calls_from_completed_json_output() {
+    let log_file = test_v3_console_log_file("direct-console-json-tool-finish");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-json-tool-finish",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "status": "completed",
+                "call_id": "call_json",
+                "name": "lookup",
+                "arguments": "{\"query\":\"json\"}"
+            }]
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Resp15ClientPayload"],
+        observability: Some(V3RuntimeObservability {
+            response_status: None,
+            finish_reason: None,
+            usage: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: None,
+    };
+
+    assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("responseStatus=completed"), "{log}");
+    assert!(log.contains("finish_reason=tool_calls"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn direct_frame_console_preserves_explicit_json_response_reason() {
+    let log_file = test_v3_console_log_file("direct-console-json-explicit-finish");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-json-explicit-finish",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "status": "completed",
+            "response": {
+                "status": "completed",
+                "stopReason": "content_filter",
+                "output": [{"type": "function_call", "call_id": "call_filtered", "name": "lookup", "arguments": "{}"}]
+            }
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Resp15ClientPayload"],
+        observability: Some(V3RuntimeObservability {
+            response_status: None,
+            finish_reason: None,
+            usage: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: None,
+    };
+
+    assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("finish_reason=content_filter"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+fn assert_direct_console_preserves_exact_reason(log: &str, request_id: &str) {
+    // The rendered field keeps the provider string verbatim, so the leading
+    // space follows `finish_reason=` and the trailing space doubles the field
+    // separator. A trimmed value would render neither shape.
+    assert!(
+        log.contains("finish_reason= outer vendor reason  elapsedMs="),
+        "missing exact headline reason: {log}"
+    );
+    assert!(
+        log.contains(&format!(
+            "req={request_id} event=completed detail=[usage] status=200 responseStatus=completed finish_reason= outer vendor reason  elapsedMs="
+        )),
+        "missing exact debug completion: {log}"
+    );
+}
+
+#[test]
+fn direct_frame_console_preserves_explicit_json_reason_whitespace() {
+    let log_file = test_v3_console_log_file("direct-console-json-explicit-whitespace");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let request_id = "req-direct-console-json-explicit-whitespace";
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5"}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "status": "completed",
+            "finish_reason": " outer vendor reason ",
+            "output": [{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Resp15ClientPayload"],
+        observability: Some(V3RuntimeObservability {
+            response_status: None,
+            finish_reason: None,
+            usage: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: None,
+    };
+
+    assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert_direct_console_preserves_exact_reason(&log, request_id);
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn direct_frame_console_other_entry_protocols_keep_normalized_explicit_reason() {
+    for (entry, endpoint, body) in [
+        (
+            "openai_chat",
+            "/v1/chat/completions",
+            json!({"choices":[{"finish_reason":" stop "}]}),
+        ),
+        (
+            "anthropic",
+            "/v1/messages",
+            json!({"stop_reason":" end_turn "}),
+        ),
+        (
+            "gemini",
+            "/v1beta/models/gemini:generateContent",
+            json!({"candidates":[{"finishReason":" STOP "}]}),
+        ),
+    ] {
+        let log_file = test_v3_console_log_file(&format!("direct-other-{entry}-reason"));
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let context = test_v3_console_emission_context(
+            &state,
+            entry,
+            endpoint,
+            "req-other-direct",
+            &test_direct_console_headers(),
+            &json!({"model":"test"}),
+        );
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(body),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                response_status: Some("completed".to_string()),
+                finish_reason: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: None,
+        };
+        assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        let reason = match entry {
+            "anthropic" => "end_turn",
+            "gemini" => "STOP",
+            _ => "stop",
+        };
+        assert!(
+            log.contains(&format!("finish_reason={reason} elapsedMs=")),
+            "{log}"
+        );
+        let mut observed = test_direct_observability(Vec::new());
+        observed.response_status = Some("completed".to_string());
+        observed.finish_reason = Some(format!(" {reason} "));
+        emit_v3_request_complete_console_line(
+            &context,
+            200,
+            &[],
+            &observed,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(
+            !log.contains(&format!("finish_reason= {reason}  elapsedMs=")),
+            "{log}"
+        );
+        let _ = std::fs::remove_file(&log_file);
+    }
+}
+
+#[test]
+fn relay_console_keeps_existing_trimmed_reason_semantics() {
+    let log_file = test_v3_console_log_file("relay-console-explicit-whitespace");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-relay-console-explicit-whitespace",
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5"}),
+    );
+    let mut observability = test_direct_observability(Vec::new());
+    observability.execution_mode = "relay".to_string();
+    observability.finish_reason = Some(" relay vendor ".to_string());
+    emit_v3_request_complete_console_line(
+        &context,
+        200,
+        &["V3Resp15ClientPayload"],
+        &observability,
+        std::time::Duration::from_millis(1),
+    )
+    .unwrap();
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("finish_reason=relay vendor "), "{log}");
+    assert!(!log.contains("finish_reason= relay vendor "), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -4472,7 +4742,8 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
                         "input_tokens_details":{"cached_tokens":5},
                         "output_tokens":3,
                         "total_tokens":20
-                    }
+                    },
+                    "output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
                 }
             }),
         )),
@@ -4491,13 +4762,153 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=unreported"), "{log}");
+    assert!(log.contains("finish_reason=stop"), "{log}");
     assert!(log.contains("usage_in=17 usage_out=3"), "{log}");
     assert!(log.contains("usage_cache=5/17(29.4%)"), "{log}");
     assert!(log.contains("usage_total=20"), "{log}");
     assert!(!log.contains("usage=unreported"), "{log}");
-    assert!(!log.contains("finish_reason=stop"), "{log}");
     let _ = std::fs::remove_file(&log_file);
+}
+
+#[tokio::test]
+async fn direct_sse_console_closeout_infers_tool_calls_from_completed_function_call() {
+    let log = direct_sse_console_completed_function_call_log(None).await;
+    assert!(log.contains("finish_reason=tool_calls"), "{log}");
+}
+
+#[tokio::test]
+async fn direct_sse_console_closeout_preserves_explicit_content_filter() {
+    let log = direct_sse_console_completed_function_call_log(Some("content_filter")).await;
+    assert!(log.contains("finish_reason=content_filter"), "{log}");
+}
+
+#[tokio::test]
+async fn direct_sse_console_closeout_preserves_explicit_reason_whitespace() {
+    let log = direct_sse_console_completed_function_call_log(Some(" outer vendor reason ")).await;
+    assert_direct_console_preserves_exact_reason(&log, "req-direct-console-sse-completed-tool");
+}
+
+#[test]
+fn direct_sse_console_conflicting_completed_status_keeps_incomplete_closeout() {
+    let log_file = test_v3_console_log_file("direct-console-sse-conflicting-status");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-sse-conflicting-status",
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5","stream":true}),
+    );
+    let event = json!({
+        "type":"response.completed",
+        "response":{"status":"incomplete","output":[]}
+    });
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(Vec::<
+            Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>,
+        >::new()))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            finish_reason: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+            event,
+        )),
+    };
+    emit_v3_direct_frame_console_lines(&context, &frame, Instant::now())
+        .unwrap()
+        .complete();
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(!log.contains("responseStatus=completed"), "{log}");
+    assert!(!log.contains("finish_reason=stop"), "{log}");
+    assert!(log.contains("responseStatus=incomplete"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+async fn direct_sse_console_completed_function_call_log(finish_reason: Option<&str>) -> String {
+    let log_file = test_v3_console_log_file(if finish_reason.is_some() {
+        "direct-console-sse-tool-explicit-reason"
+    } else {
+        "direct-console-sse-tool-missing-reason"
+    });
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-sse-completed-tool",
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5","stream":true}),
+    );
+    let mut terminal = json!({
+        "type":"response.completed",
+        "response":{
+            "id":"resp_direct_completed_tool",
+            "status":"completed",
+            "output":[{
+                "type":"function_call",
+                "status":"completed",
+                "id":"fc_exact",
+                "call_id":"call_exact",
+                "name":"lookup",
+                "arguments":"{\"query\":\"exact\"}"
+            }]
+        }
+    });
+    if let Some(reason) = finish_reason {
+        terminal["response"]["finish_reason"] = json!(reason);
+    }
+    let provider_bytes = format!("event: response.completed\ndata: {terminal}\n\n").into_bytes();
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            provider_bytes.clone(),
+        )]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            finish_reason: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+            terminal,
+        )),
+    };
+    let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+    let response = responses_direct_output_response_with_console(frame, finalizer, None);
+    let client_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(client_bytes.as_ref(), provider_bytes.as_slice());
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("event=completed"), "{log}");
+    assert!(log.contains("responseStatus=completed"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+    log
 }
 
 #[tokio::test]

@@ -346,6 +346,38 @@ async fn openai_chat_direct_sse_releases_only_after_finish_reason_and_done() {
     );
 }
 
+#[tokio::test]
+async fn direct_responses_observer_keeps_other_direct_protocol_reason_normalization() {
+    let observation = V3RuntimeStreamObservation::default();
+    let timing = V3RuntimeTimingState::start();
+    timing.start_external().unwrap();
+    let bytes = b"data: {\"id\":\"chatcmpl_reason\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\" stop \"}]}\n\ndata: [DONE]\n\n".to_vec();
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(Box::pin(stream::iter([Ok(bytes.clone())]))),
+        observation.clone(),
+        timing,
+        false,
+        false,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
+    let committed = collect_direct_sse_attempt_after_terminal(
+        projected,
+        V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("Chat terminal must seal");
+    assert_eq!(committed.collect::<Vec<_>>().await.concat(), bytes);
+    assert_eq!(
+        observation.snapshot().unwrap().finish_reason.as_deref(),
+        Some("stop")
+    );
+    assert_eq!(
+        observation.semantic_terminal().unwrap(),
+        Some(crate::hub_v1::V3RuntimeSemanticTerminal::Success)
+    );
+}
+
 #[test]
 fn direct_responses_done_event_does_not_bypass_provider_codec_terminal_contract() {
     let observation = V3RuntimeStreamObservation::default();

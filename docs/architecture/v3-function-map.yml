@@ -918,6 +918,9 @@ features:
   - multi_listener_server::responses_direct_provider_request_dry_run_does_not_send_to_any_provider
   - multi_listener_server::responses_direct_last_default_projects_after_provider_failure
   - direct_frame_console_infers_stop_finish_reason_from_completed_json_status
+  - v3_direct_responses_finish_reason
+  - record_direct_responses_payload_observation
+  - record_direct_responses_finish_reason
   - direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish
   - direct_stream_request_error06_projects_sse_error_not_json
   - kernel::tests::direct_stream_request_projects_provider_json_as_client_sse
@@ -956,7 +959,8 @@ features:
   - npm run test:v3-provider-responses
   - npm run test:v3-responses-direct-unit
   - npm run test:v3-responses-direct-blackbox
-  - npm run test:v3-direct-response-observability
+  - npm --prefix v3 run test:v3-direct-response-observability
+  - npm run test:v3-159361f-finish-reason-public
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -2582,7 +2586,9 @@ features:
   - parse_v3_provider_sse_json_data
   - classify_v3_provider_sse_json_data
   - classify_v3_provider_responses_json_event
-  - record_v3_provider_sse_json_frame
+  - record_v3_provider_sse_json_frame_for_protocol
+  - record_direct_responses_payload_observation
+  - v3_direct_responses_finish_reason
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs

@@ -2482,7 +2482,7 @@ flowchart TD
 
 ## v3.console_human_readable_layering.mainline
 
-Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; final observability only backfills missing events and terminal closeout.
+Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; Direct Responses finish reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.
 
 Owner feature: `v3.console_human_readable_layering`
 Manifest: `docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml`

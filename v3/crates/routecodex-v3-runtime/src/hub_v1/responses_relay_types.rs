@@ -277,6 +277,7 @@ pub struct V3RuntimeObservability {
 #[derive(Debug, Clone, Default)]
 pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
+    direct_explicit_finish_reason: Arc<Mutex<Option<String>>>,
     control: Arc<Mutex<V3RuntimeStreamControlState>>,
     /// Typed attempt-local fact recorded while the complete native provider
     /// stream is processed. It is physically separate from the diagnostic
@@ -665,6 +666,36 @@ impl V3RuntimeStreamObservation {
             .lock()
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
         snapshot.finish_reason = Some(finish_reason.to_string());
+        Ok(())
+    }
+
+    /// Direct diagnostic write only. Preserve provider spelling and priority;
+    /// do not mutate semantic-terminal control or generic observer behavior.
+    pub(crate) fn record_direct_responses_finish_reason(
+        &self,
+        explicit: Option<String>,
+        inferred: Option<String>,
+        completion_terminal: bool,
+    ) -> Result<(), String> {
+        let mut prior_explicit = self
+            .direct_explicit_finish_reason
+            .lock()
+            .map_err(|_| "V3 runtime Direct observation state lock is poisoned".to_string())?;
+        if explicit.is_some() {
+            *prior_explicit = explicit;
+        }
+        let reason = prior_explicit.clone().or(inferred);
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        if reason.is_some() {
+            snapshot.finish_reason = reason;
+        } else if completion_terminal {
+            // A generic nonterminal `requires_action` reason must not leak into
+            // a later completed Direct payload that has no Direct result reason.
+            snapshot.finish_reason = None;
+        }
         Ok(())
     }
 

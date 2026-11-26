@@ -1256,7 +1256,11 @@ fn record_direct_sse_provider_event_json_chunk(
                 ));
             }
         };
-        record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
+        record_direct_sse_provider_event_json_frame(
+            frame.frame().fields(),
+            stream_observation,
+            provider_protocol,
+        )?;
         if frame_disposition == V3SseFrameDisposition::SemanticTerminal
             && !stream_observation
                 .has_semantic_terminal()
@@ -1309,13 +1313,14 @@ fn record_direct_sse_provider_event_json_chunk(
 fn record_direct_sse_provider_event_json_frame(
     fields: &[SseField],
     stream_observation: &V3RuntimeStreamObservation,
+    provider_protocol: V3HubProviderWireProtocol,
 ) -> crate::shared::V3DirectSourceResult<()> {
     let data = collect_v3_provider_sse_json_data(fields);
     if is_v3_provider_sse_keepalive_text(&data) {
         return Ok(());
     }
     record_direct_sse_source_summary_fact(&data, stream_observation);
-    record_v3_provider_sse_json_frame(fields, stream_observation)
+    record_v3_provider_sse_json_frame_for_protocol(fields, stream_observation, provider_protocol)
         .map_err(provider_sse_failure_source)
 }
 
