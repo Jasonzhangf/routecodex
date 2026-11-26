@@ -1601,8 +1601,6 @@ fn active_keys_control_router(state: Arc<V3ListenerState>) -> Router {
             "/_routecodex/selection/active-keys/release",
             post(active_keys_release),
         )
-        .method_not_allowed_fallback(|| async { axum::http::StatusCode::METHOD_NOT_ALLOWED })
-        .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
         .with_state(state)
 }
 

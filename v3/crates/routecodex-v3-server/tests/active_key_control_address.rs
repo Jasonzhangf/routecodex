@@ -2,6 +2,33 @@ include!("support/active_key_control_fixture.rs");
 
 #[tokio::test]
 async fn real_admin_status_and_exact_release_follow_the_selected_listener_control() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn exchange(
+        socket: &mut tokio::net::TcpStream,
+        method: &str,
+        path: &str,
+    ) -> Result<(u16, Vec<u8>), String> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let request = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n");
+            socket.write_all(request.as_bytes()).await.map_err(|e| e.to_string())?;
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(socket.read_u8().await.map_err(|e| e.to_string())?);
+            }
+            let headers = String::from_utf8(headers).map_err(|e| e.to_string())?;
+            let status = headers.split_whitespace().nth(1).ok_or("missing status")?
+                .parse::<u16>().map_err(|e| e.to_string())?;
+            let length: usize = headers.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| value.trim())
+            }).ok_or("missing content length")?.parse::<usize>().map_err(|e| e.to_string())?;
+            let mut bytes = vec![0; length];
+            socket.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
+            Ok((status, bytes))
+        }).await.map_err(|_| "companion exchange timed out".to_string())?
+    }
+
     let _home = LOCK.lock().await;
     let mut binds = vec![
         "0.0.0.0".parse::<IpAddr>().unwrap(),
@@ -17,12 +44,39 @@ async fn real_admin_status_and_exact_release_follow_the_selected_listener_contro
         let fixture = Fixture::start(bind, false).await;
         let business = fixture.business().await;
         let status = fixture.status().await;
+        let companion = fixture.control.unwrap();
+        let calls_before_rejections = fixture.calls.calls.lock().unwrap().len();
+        let rejections = if !bind.is_loopback() && !bind.is_unspecified() {
+            Some(
+                async {
+                    let mut socket = tokio::net::TcpStream::connect(companion)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let missing = exchange(&mut socket, "GET", "/not-a-control").await?;
+                    let status_method =
+                        exchange(&mut socket, "POST", "/_routecodex/selection/active-keys").await?;
+                    let release_method = exchange(
+                        &mut socket,
+                        "GET",
+                        "/_routecodex/selection/active-keys/release",
+                    )
+                    .await?;
+                    let legal =
+                        exchange(&mut socket, "GET", "/_routecodex/selection/active-keys").await?;
+                    socket.shutdown().await.map_err(|e| e.to_string())?;
+                    Ok::<_, String>((missing, status_method, release_method, legal))
+                }
+                .await,
+            )
+        } else {
+            None
+        };
+        let calls_after_rejections = fixture.calls.calls.lock().unwrap().len();
         let rejected = fixture.release("wrong-pool").await;
         let still_held = fixture.status().await;
         let released = fixture.release("default").await;
         let after = fixture.status().await;
         let next = fixture.business().await;
-        let companion = fixture.control.unwrap();
         let companion_only = if !bind.is_loopback() && !bind.is_unspecified() {
             Some((
                 response(client().get(format!("http://{companion}/v1/models"))).await,
@@ -49,13 +103,27 @@ async fn real_admin_status_and_exact_release_follow_the_selected_listener_contro
         let business = business.unwrap();
         assert_eq!(business.0, 200);
         assert_eq!(business.1["output"][0]["content"][0]["text"], "B");
-        assert_eq!(status.unwrap().1["pools"][0]["held"][0]["auth_alias"], "A");
+        let status = status.unwrap();
+        assert_eq!(status.0, 200);
+        assert_eq!(status.1["pools"][0]["held"][0]["auth_alias"], "A");
+        assert_eq!(calls_after_rejections, calls_before_rejections);
+        if let Some(rejections) = rejections {
+            let (missing, status_method, release_method, legal) = rejections.unwrap();
+            assert_eq!(missing, (404, Vec::new()));
+            assert_eq!(status_method, (405, Vec::new()));
+            assert_eq!(release_method, (405, Vec::new()));
+            assert_eq!(legal.0, 200);
+            let observed: Value = serde_json::from_slice(&legal.1).unwrap();
+            assert_eq!(observed["pools"], status.1["pools"]);
+        }
         assert_eq!(rejected.unwrap().0, 404);
         assert_eq!(
             still_held.unwrap().1["pools"][0]["held"][0]["auth_alias"],
             "A"
         );
-        assert_eq!(released.unwrap().1["released"], true);
+        let released = released.unwrap();
+        assert_eq!(released.0, 200);
+        assert_eq!(released.1["released"], true);
         assert_eq!(after.unwrap().1["pools"][0]["held"], json!([]));
         let next = next.unwrap();
         assert_eq!(next.0, 200);
@@ -66,11 +134,9 @@ async fn real_admin_status_and_exact_release_follow_the_selected_listener_contro
             "actual controlled wire bodies: {all_calls:?}"
         );
         if let Some((models, remote)) = companion_only {
-            assert_eq!(
-                models.unwrap().0,
-                404,
-                "companion exposes no business endpoint"
-            );
+            let models = models.unwrap();
+            assert_eq!(models.0, 404, "companion exposes no business endpoint");
+            assert_eq!(models.1, Value::String(String::new()));
             assert_eq!(
                 remote.unwrap().0,
                 403,
