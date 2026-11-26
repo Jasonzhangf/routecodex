@@ -171,10 +171,9 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
             BTreeSet::new(),
             now_epoch_ms,
             deterministic_sample,
-            crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
-                entry_protocol: crate::hub_v1::V3HubEntryProtocol::Responses,
-                allowed_modes: allowed_modes.clone(),
-            },
+            crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::responses_entry(
+                allowed_modes.clone(), standardized.request_purpose,
+            ),
         ) {
             Ok(preplan) => preplan,
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted {
@@ -208,7 +207,9 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     trace.push("V3Target09CandidateSetExpanded");
     trace.push("V3Target10ConcreteProviderSelected");
     trace.push("V3Execution11ProtocolDecision");
-    let protocol_candidate_keys = match protocol_candidate_keys_for_decision_mode(
+    let protocol_candidate_keys = if standardized.request_purpose == crate::nodes::V3RequestPurpose::NativeCompaction {
+        preplan.expanded.candidates.iter().map(candidate_key).collect()
+    } else { match protocol_candidate_keys_for_decision_mode(
         &preplan.expanded,
         "responses",
         &allowed_modes,
@@ -216,7 +217,7 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     ) {
         Ok(keys) => keys,
         Err(source) => return Err(protocol_plan_source_failure(source, trace)),
-    };
+    }};
     Ok(V3ResponsesProtocolExecutionPlan {
         decision: preplan.protocol_decision,
         node_trace: trace,

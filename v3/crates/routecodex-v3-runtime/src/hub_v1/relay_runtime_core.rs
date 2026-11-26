@@ -577,6 +577,7 @@ where
     // stage-3 丢弃上下文：ReqInbound02 会用 canonical 覆盖 `payload`，此处先保留
     // 客户端原始 payload 的 Arc 句柄。
     let raw = std::sync::Arc::clone(&req01.payload.0);
+    let estimated_turns = crate::nodes::estimate_history_turns(&raw, C::ENTRY_KIND);
     let drop_ctx = crate::projection_drop_log::V3ProjectionDropContext::from_manifest(
         manifest, server_id, request_id, raw,
     );
@@ -597,6 +598,8 @@ where
             endpoint_path: endpoint_path.to_string(),
             requested_model: (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini)
                 .then_some(requested_model),
+            source_estimated_turns: Some(estimated_turns),
+            is_compaction: false,
             deterministic_sample,
         },
     };
@@ -977,6 +980,19 @@ where
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
+        if selected.route.estimated_history_turns.is_some()
+            && provider_health.provider_blocked_until_compact(
+                &failure_context.failure_session_scope,
+                &selected_target_provider_id,
+            )
+        {
+            failed_candidates.insert(
+                crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                ),
+            );
+            continue;
+        }
         if !provider_health
             .acquire_business_recovery_trial(
                 &request_execution_control,

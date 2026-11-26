@@ -493,6 +493,7 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
                 request_client_model: Some("claude-client-alias".to_string()),
                 request_capabilities: BTreeSet::from(["text".to_string()]),
                 request_input_tokens: 3,
+                estimated_history_turns: None,
                 hit_count: 1,
             },
             candidate: V3TargetCandidate {

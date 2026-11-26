@@ -568,6 +568,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     } else {
         V3HubTransportIntent::Json
     };
+    let source_estimated_turns = crate::nodes::estimate_history_turns(&input.payload, "anthropic");
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Anthropic,
@@ -612,6 +613,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             entry_kind: "anthropic".to_string(),
             endpoint_path: "/v1/messages".to_string(),
             requested_model: None,
+            source_estimated_turns: Some(source_estimated_turns),
+            is_compaction: false,
             deterministic_sample,
         },
     };
@@ -932,6 +935,19 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 ),
             };
         let provider_request_snapshot = transport_request.provider_request_projection();
+        if selected.route.estimated_history_turns.is_some()
+            && provider_health.provider_blocked_until_compact(
+                &failure_context.failure_session_scope,
+                &selected_target_provider_id,
+            )
+        {
+            failed_candidates.insert(
+                crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                ),
+            );
+            continue;
+        }
         if !provider_health
             .acquire_business_recovery_trial(
                 &request_execution_control,

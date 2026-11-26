@@ -100,6 +100,7 @@
   "outputs": ["internal-error-outcome"],
   "semantic_contract": {
     "sink": "internal-error-outcome",
+    "session_turn_limit": "Runtime consumes a complete genuine Provider HTTP 400 witness with the exact session_turn_limit_exceeded code. For an ordinary conversation it records the provider restriction before observing available successors. This restriction is independent of provider health.",
     "sink_rule": "The one graph sink carries typed internal failure evidence. For a complete genuine non-2xx Provider HTTP response from the current exhausted final identity, it also carries a typed projection-eligibility resource. Server alone converts that qualified witness into the entry protocol; every other terminal remains a transport break and never borrows a prior attempt witness or fabricates a response."
   }
 }

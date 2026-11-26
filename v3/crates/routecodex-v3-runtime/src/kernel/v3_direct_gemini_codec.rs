@@ -440,6 +440,7 @@ mod tests {
                     request_client_model: Some("gemini-client".to_string()),
                     request_capabilities: BTreeSet::from(["text".to_string()]),
                     request_input_tokens: 1,
+                    estimated_history_turns: None,
                     hit_count: 1,
                 },
                 candidate: V3TargetCandidate {

@@ -672,7 +672,12 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         )
         .map(|(_, source)| source)
     })?;
-    routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
+    let endpoint = if policy.request_purpose == crate::nodes::V3RequestPurpose::NativeCompaction {
+        routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Compact
+    } else {
+        routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Responses
+    };
+    routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint(
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
@@ -697,6 +702,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         },
         request_body,
         namespace_registry,
+        endpoint,
     )
     .map(|wire| wire.with_custom_tool_function_binding(custom_tool_function_binding))
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))

@@ -344,6 +344,7 @@ fn provider_priority_schedule_excludes_synthetic_direct_pool() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -701,6 +702,7 @@ fn expanded_tools() -> V3Target09CandidateSetExpanded {
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -733,6 +735,7 @@ fn direct_selected(
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -779,6 +782,7 @@ fn synthetic_direct_target_preserves_configured_priority_for_health_selection() 
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -867,6 +871,7 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -904,6 +909,7 @@ fn direct_provider_model_respects_request_local_exclusion() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -994,6 +1000,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -1056,6 +1063,7 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -1136,6 +1144,7 @@ targets = [{ kind = "forwarder", id = "fwd_gpt", priority = 1 }]
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -1192,6 +1201,7 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
                     current_turn_input_tokens: 10,
+                    estimated_history_turns: None,
                     route_classification: RouteClassification::default(),
                 },
             )
@@ -1264,6 +1274,7 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -1334,6 +1345,7 @@ targets = [
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("web_search", &["web_search", "default"]),
             },
         )
@@ -1426,6 +1438,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -1506,6 +1519,7 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -1633,6 +1647,7 @@ fn selected_pool_tiers_exhaust_before_declared_default_successor() {
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -1903,6 +1918,7 @@ targets = [
                 capabilities: BTreeSet::from(["multimodal".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("multimodal", &["multimodal", "default"]),
             },
         )
@@ -2020,6 +2036,7 @@ targets = [
                 capabilities: BTreeSet::from(["multimodal".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("multimodal", &["multimodal", "default"]),
             },
         )
@@ -2101,6 +2118,7 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
                 capabilities: BTreeSet::from(["multimodal".into(), "vision".into()]),
                 input_tokens: 1000,
                 current_turn_input_tokens: 1000,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "multimodal",
                     &["multimodal", "longcontext", "default"],
@@ -2178,6 +2196,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("web_search", &["web_search", "default"]),
             },
         )
@@ -2274,6 +2293,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("web_search", &["web_search", "default"]),
             },
         )
@@ -2364,6 +2384,7 @@ targets = [
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -2441,6 +2462,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 899,
                 current_turn_input_tokens: 899,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2477,6 +2499,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 950,
                 current_turn_input_tokens: 950,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2510,6 +2533,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 1000,
                 current_turn_input_tokens: 1000,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2543,6 +2567,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 1001,
                 current_turn_input_tokens: 1001,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2580,6 +2605,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 2400,
                 current_turn_input_tokens: 2400,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2620,6 +2646,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 4001,
                 current_turn_input_tokens: 4001,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2696,6 +2723,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 200_001,
                 current_turn_input_tokens: 200_001,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -2771,6 +2799,7 @@ targets = [{ kind = "provider_model", provider = "low", model = "m", key = "key"
                 capabilities: BTreeSet::new(),
                 input_tokens: 950,
                 current_turn_input_tokens: 950,
+                estimated_history_turns: None,
                 route_classification: test_route("high", &["high", "default"]),
             },
         )
@@ -2852,6 +2881,7 @@ targets = [{ kind = "provider_model", provider = "normal", model = "m", key = "k
                 capabilities: BTreeSet::new(),
                 input_tokens: 930_000,
                 current_turn_input_tokens: 930_000,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -2929,6 +2959,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 950,
                 current_turn_input_tokens: 950,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -2992,6 +3023,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
                 capabilities: BTreeSet::new(),
                 input_tokens: 2000,
                 current_turn_input_tokens: 2000,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -3031,6 +3063,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
                 capabilities: BTreeSet::new(),
                 input_tokens: 1500,
                 current_turn_input_tokens: 1500,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -3092,6 +3125,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
                 capabilities: BTreeSet::new(),
                 input_tokens: 2000,
                 current_turn_input_tokens: 2000,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -3155,6 +3189,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
                 capabilities: BTreeSet::new(),
                 input_tokens: 1500,
                 current_turn_input_tokens: 1500,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -3277,6 +3312,7 @@ targets = [
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -3342,6 +3378,7 @@ targets = [{ kind = "forwarder", id = "fwd_free", priority = 1 }]
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         )
@@ -3456,6 +3493,7 @@ fn expand_multi_interface_manifest(
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -3542,6 +3580,7 @@ fn multi_interface_missing_or_disabled_pin_is_typed_interface_error() {
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
                     current_turn_input_tokens: 10,
+                    estimated_history_turns: None,
                     route_classification: test_route("default", &["default"]),
                 },
             )
@@ -3596,6 +3635,7 @@ fn multi_interface_missing_or_disabled_pin_is_typed_interface_error() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
