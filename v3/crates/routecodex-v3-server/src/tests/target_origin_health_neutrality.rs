@@ -1305,7 +1305,11 @@ async fn partial_http_head_fails_zero_byte_wire_assertion() {
     let task = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut request = [0; 1024];
-        socket.read(&mut request).await.unwrap();
+        let bytes_read = socket.read(&mut request).await.unwrap();
+        assert!(
+            bytes_read > 0,
+            "partial-head upstream must receive request bytes"
+        );
         socket.write_all(b"HTTP/1.1 200 OK\r\n").await.unwrap();
         socket.shutdown().await.unwrap();
     });
@@ -1428,15 +1432,12 @@ fn reaped_early_exit_without_address_finalizes_case_directory() {
         "{run:?}"
     );
     assert!(run.home_absent, "{run:?}");
-    assert!(
-        run.child_stderr
-            .contains("intentional child exit before recording an address")
-    );
-    assert!(
-        exact_health_failure(&run)
-            .expect("the no-address failure must remain explicit")
-            .contains("recorded no addresses")
-    );
+    assert!(run
+        .child_stderr
+        .contains("intentional child exit before recording an address"));
+    assert!(exact_health_failure(&run)
+        .expect("the no-address failure must remain explicit")
+        .contains("recorded no addresses"));
     assert!(run.case_directory_absent, "{run:?}");
 }
 
@@ -1506,11 +1507,9 @@ fn direct_persistence_flush_stall_is_terminated_reaped_and_released() {
         &run.records,
         "stage=direct_baseline_flush_pending"
     ));
-    assert!(
-        exact_health_failure(&run)
-            .unwrap()
-            .starts_with("pending stage=direct_baseline_flush_pending;")
-    );
+    assert!(exact_health_failure(&run)
+        .unwrap()
+        .starts_with("pending stage=direct_baseline_flush_pending;"));
     assert!(exact_health_record_value(&run.records, "business_assertions").is_none());
     assert!(
         exact_health_record_value(&run.records, "direct_flush_returned_unexpectedly").is_none()
@@ -1549,11 +1548,9 @@ fn assertion_survives_shutdown_persistence_stall_and_child_release() {
     assert!(
         exact_health_record_value(&run.records, "runtime_drop_completed_unexpectedly").is_none()
     );
-    assert!(
-        exact_health_failure(&run)
-            .unwrap()
-            .starts_with("intentional exact-health assertion before stalled shutdown;")
-    );
+    assert!(exact_health_failure(&run)
+        .unwrap()
+        .starts_with("intentional exact-health assertion before stalled shutdown;"));
 }
 
 #[test]
@@ -1582,11 +1579,9 @@ fn cleanup_only_shutdown_persistence_stall_is_bounded_and_released() {
     assert!(
         exact_health_record_value(&run.records, "runtime_drop_completed_unexpectedly").is_none()
     );
-    assert!(
-        exact_health_failure(&run)
-            .unwrap()
-            .starts_with("cleanup failed: aggregate_shutdown;")
-    );
+    assert!(exact_health_failure(&run)
+        .unwrap()
+        .starts_with("cleanup failed: aggregate_shutdown;"));
 }
 
 #[test]
@@ -1604,11 +1599,9 @@ fn late_upstream_arrival_fails_final_zero_count_after_join_and_releases_child() 
         &run.records,
         "late_upstream_arrival_rejected=true"
     ));
-    assert!(
-        exact_health_failure(&run)
-            .unwrap()
-            .contains("disabled provider received upstream arrivals")
-    );
+    assert!(exact_health_failure(&run)
+        .unwrap()
+        .contains("disabled provider received upstream arrivals"));
 }
 
 #[tokio::test]
