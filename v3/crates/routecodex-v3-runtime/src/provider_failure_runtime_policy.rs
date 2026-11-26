@@ -545,19 +545,24 @@ struct V3SessionGlobalSchedulingReader<'health> {
 impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
+        key_ref: routecodex_v3_provider_responses::V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let mut projection = self.global.scheduling_projection_for_interface(
+        let routecodex_v3_provider_responses::V3ProviderKeyRef {
             provider_id,
-            interface_id,
             auth_alias,
             model_id,
+        } = key_ref;
+        let mut projection = self.global.scheduling_projection_for_interface(
+            routecodex_v3_provider_responses::V3ProviderKeyRef::new(
+                provider_id,
+                auth_alias,
+                model_id,
+            ),
+            interface_id,
             priority,
             base_weight,
             now_ms,
@@ -665,20 +670,25 @@ impl V3ProviderFailureRuntimeHealth {
 impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
+        key_ref: routecodex_v3_provider_responses::V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let now_ms = self.observation_now_ms(now_ms);
-        let mut projection = self.store.scheduling_projection_for_interface(
+        let routecodex_v3_provider_responses::V3ProviderKeyRef {
             provider_id,
-            interface_id,
             auth_alias,
             model_id,
+        } = key_ref;
+        let now_ms = self.observation_now_ms(now_ms);
+        let mut projection = self.store.scheduling_projection_for_interface(
+            routecodex_v3_provider_responses::V3ProviderKeyRef::new(
+                provider_id,
+                auth_alias,
+                model_id,
+            ),
+            interface_id,
             priority,
             base_weight,
             now_ms,

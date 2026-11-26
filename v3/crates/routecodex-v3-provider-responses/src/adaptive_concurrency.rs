@@ -15,6 +15,17 @@ pub const V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS: u64 = 60 * 60_000;
 /// `provider.concurrency.maxInFlight`.
 pub const V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT: u32 = 40;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3AdaptiveConcurrencyTimeout;
+
+impl std::fmt::Display for V3AdaptiveConcurrencyTimeout {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("provider concurrency acquisition timed out")
+    }
+}
+
+impl std::error::Error for V3AdaptiveConcurrencyTimeout {}
+
 /// Dynamic capacity belongs to a declared interface/model, never a wire body.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ConcurrencyIdentityScope {
@@ -331,10 +342,10 @@ impl V3AdaptiveConcurrencyController {
         provider_key: impl Into<String>,
         now_ms: u64,
         timeout: Duration,
-    ) -> Result<V3AdaptiveConcurrencyLease, ()> {
+    ) -> Result<V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyTimeout> {
         tokio::time::timeout(timeout, self.acquire(provider_key, now_ms))
             .await
-            .map_err(|_| ())
+            .map_err(|_| V3AdaptiveConcurrencyTimeout)
     }
 
     pub async fn acquire_with_clock<F>(

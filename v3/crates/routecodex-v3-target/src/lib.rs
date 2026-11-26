@@ -152,14 +152,17 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
 {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
+        key_ref: routecodex_v3_provider_responses::V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        let routecodex_v3_provider_responses::V3ProviderKeyRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = key_ref;
         let availability = self.availability.availability_for_interface(
             provider_id,
             interface_id,
@@ -588,10 +591,12 @@ impl V3TargetInterpreter {
                 .saturating_sub(route_tier_index);
             let route_priority = (route_tier_rank as i32).saturating_mul(1_000_000);
             let mut projection = scheduling.scheduling_projection_for_interface(
-                &candidate.provider_id,
+                routecodex_v3_provider_responses::V3ProviderKeyRef::new(
+                    &candidate.provider_id,
+                    &candidate.auth_alias,
+                    &candidate.model_id,
+                ),
                 &candidate.interface_id,
-                &candidate.auth_alias,
-                &candidate.model_id,
                 candidate.priority,
                 candidate.weight,
                 now_ms,

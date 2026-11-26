@@ -667,10 +667,12 @@ targets = [
         provider_health
             .store()
             .record_provider_cooldown_failure_for_interface(
-                "a",
+                routecodex_v3_provider_responses::V3ProviderIdentityRef::new(
+                    "a",
+                    Some("ka"),
+                    Some("m"),
+                ),
                 "default",
-                Some("ka"),
-                Some("m"),
                 "test cooldown",
                 now_ms,
                 600_000,
@@ -756,10 +758,12 @@ targets = [
         provider_health
             .store()
             .record_provider_cooldown_failure_for_interface(
-                "a",
+                routecodex_v3_provider_responses::V3ProviderIdentityRef::new(
+                    "a",
+                    Some("ka"),
+                    Some("m"),
+                ),
                 "default",
-                Some("ka"),
-                Some("m"),
                 "test cooldown",
                 now_ms,
                 600_000,
