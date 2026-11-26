@@ -378,18 +378,16 @@ mod tests {
             10
         );
 
-        for (code, status) in [("account_disabled", 401)] {
-            let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
-                "V3ProviderReqOutbound09TransportRequest",
-                code,
-                status,
-            ));
-            assert_eq!(
-                action.recovery,
-                V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-            );
-            assert_eq!(action.failure_threshold, 1);
-        }
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "account_disabled",
+            401,
+        ));
+        assert_eq!(
+            action.recovery,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+        );
+        assert_eq!(action.failure_threshold, 1);
 
         for code in ["provider_http_403", "permission_error", "account_disabled"] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
