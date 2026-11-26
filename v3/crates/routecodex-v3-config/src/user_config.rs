@@ -79,21 +79,12 @@ fn default_all_entry_protocols() -> Vec<String> {
         .collect()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3UserRoutePool {
     #[serde(default, skip_serializing_if = "V3SelectionPolicy::is_default")]
     pub selection: V3SelectionPolicy,
     pub tiers: Vec<Vec<V3UserRouteMember>>,
-}
-
-impl Default for V3UserRoutePool {
-    fn default() -> Self {
-        Self {
-            selection: V3SelectionPolicy::default(),
-            tiers: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
