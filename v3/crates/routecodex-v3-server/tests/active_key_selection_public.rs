@@ -62,6 +62,7 @@ enum Outcome {
 struct Script {
     next: BTreeMap<String, VecDeque<Outcome>>,
     calls: Vec<(String, Value)>,
+    identity_headers: Option<Vec<HeaderMap>>,
 }
 struct Upstream {
     script: Mutex<Script>,
@@ -90,6 +91,9 @@ async fn upstream(
     let outcome = {
         let mut script = state.script.lock().unwrap();
         script.calls.push((alias.clone(), body.clone()));
+        if let Some(captures) = &mut script.identity_headers {
+            captures.push(headers.clone());
+        }
         script
             .next
             .get_mut(&alias)
@@ -259,6 +263,27 @@ impl Entry {
         members: &[&str],
         pools: Option<&str>,
     ) -> Self {
+        Self::start_with_protocol_and_pools_mode(
+            strategy,
+            retries,
+            disposition,
+            protocol,
+            members,
+            pools,
+            false,
+        )
+        .await
+    }
+
+    async fn start_with_protocol_and_pools_mode(
+        strategy: &str,
+        retries: u32,
+        disposition: &str,
+        protocol: &'static str,
+        members: &[&str],
+        pools: Option<&str>,
+        force_responses_relay: bool,
+    ) -> Self {
         let chat = protocol == "openai_chat";
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let upstream_port = listener.local_addr().unwrap().port();
@@ -310,6 +335,7 @@ type = "{protocol}"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "wire"
 auth = {{ type = "api_key", entries = [{{alias="A",env="ACTIVE_PUBLIC_A"}},{{alias="B",env="ACTIVE_PUBLIC_B"}},{{alias="C",env="ACTIVE_PUBLIC_C"}}] }}
+{responses}
 [providers.controlled.models.wire]
 wire_name = "wire"
 capabilities = ["text", "tools"]
@@ -318,6 +344,11 @@ capabilities = ["text", "tools"]
             declaration = hub_v1_fixture::hub_v1_test_declaration(),
             execution = hub_v1_fixture::hub_v1_server_execution("active_public"),
             protocol = protocol,
+            responses = if force_responses_relay {
+                r#"responses = { process = "chat", streaming = "client" }"#
+            } else {
+                ""
+            },
             pools = pools.unwrap_or(&default_pool),
         );
         let manifest = compile_v3_config_05_manifest(
@@ -368,8 +399,27 @@ capabilities = ["text", "tools"]
         model: &str,
         input: Value,
     ) -> Result<(StatusCode, String), reqwest::Error> {
-        let response = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().unwrap()
-            .post(format!("{}/v1/responses",self.base)).header("x-session-id",session)
+        self.send_model_with_headers(session, model, input, &[])
+            .await
+    }
+
+    async fn send_model_with_headers(
+        &self,
+        session: &str,
+        model: &str,
+        input: Value,
+        headers: &[(&str, String)],
+    ) -> Result<(StatusCode, String), reqwest::Error> {
+        let mut request = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap()
+            .post(format!("{}/v1/responses", self.base))
+            .header("x-session-id", session);
+        for (name, value) in headers {
+            request = request.header(*name, value.as_str());
+        }
+        let response = request
             .json(&json!({"model":model,"input":input,"tools":[{"type":"function","name":"calculate","parameters":{"type":"object","properties":{"x":{"type":"number"}},"required":["x"]}}]}))
             .send().await?;
         let status = response.status();
@@ -768,25 +818,140 @@ async fn sticky_failed_attempt_does_not_create_a_successful_preference() {
 
 #[tokio::test]
 async fn sticky_tail_fourth_failure_clears_old_binding_and_allows_later_fresh_a() {
+    fn identity(session: &str, request: &str) -> Vec<(&'static str, String)> {
+        vec![
+            ("user-agent", "active-key-client/1".into()),
+            ("originator", "active-key-consumer".into()),
+            ("session-id", session.into()),
+            ("thread-id", format!("thread-{session}")),
+            ("x-client-request-id", request.into()),
+            ("x-codex-window-id", format!("window-{session}")),
+            ("x-codex-parent-thread-id", format!("parent-{session}")),
+            ("x-openai-subagent", "active-key-child".into()),
+        ]
+    }
+    async fn request(entry: &Entry, session: &str, request: &str) -> String {
+        let (status, body) = entry
+            .send_model_with_headers(
+                session,
+                "client",
+                json!("controlled input"),
+                &identity(session, request),
+            )
+            .await
+            .expect("public response with caller identity");
+        assert_eq!(status, StatusCode::OK, "{body}");
+        text(&body)
+    }
     let _home = LOCK.lock().await;
-    for chat in paths() {
-        let entry = Entry::start("sticky", 3, "tail", chat).await;
-        let initial = text(&entry.request("S1").await);
+    let mut modes: Vec<_> = paths().into_iter().map(|chat| (chat, false)).collect();
+    if std::env::var("ACTIVE_PUBLIC_PATH").as_deref() != Ok("direct") {
+        modes.push((false, true));
+    }
+    for (chat, relay) in modes {
+        let mut entry = if relay {
+            Entry::start_with_protocol_and_pools_mode(
+                "sticky",
+                3,
+                "tail",
+                "responses",
+                &["A", "B"],
+                None,
+                true,
+            )
+            .await
+        } else {
+            Entry::start("sticky", 3, "tail", chat).await
+        };
+        if relay {
+            let binding = entry
+                .manifest
+                .hub_v1
+                .as_mut()
+                .unwrap()
+                .entry_protocol_bindings
+                .iter_mut()
+                .find(|binding| binding.entry_protocol == "responses")
+                .unwrap();
+            binding.execution_mode = routecodex_v3_config::V3EntryProtocolExecutionMode::Relay;
+            binding.protocol_profile_owner = "v3.hub_relay_runtime_closeout".into();
+            binding.runtime_owner_symbol =
+                Some("execute_v3_responses_relay_runtime_with_default_transport".into());
+            binding.runtime_owner_path = Some(
+                "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs".into(),
+            );
+            binding.forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.".into();
+            entry.restart_fixture().await;
+        }
+        entry.state.script.lock().unwrap().identity_headers = Some(Vec::new());
+        let initial = request(&entry, "S1", "initial").await;
         entry.script("A", &[Outcome::Http(500); 4]);
-        let replacement = text(&entry.request("S1").await);
-        let retained = text(&entry.request("S1").await);
+        let replacement = request(&entry, "S1", "replace").await;
+        let retained = request(&entry, "S1", "retained").await;
         // Fresh sessions use queue/cursor assignment, so A must remain eligible
         // after tail disposition without reviving S1's obsolete preference.
-        let fresh1 = text(&entry.request("fresh1").await);
-        let fresh2 = text(&entry.request("fresh2").await);
+        let fresh1 = request(&entry, "fresh1", "fresh-request-1").await;
+        let fresh2 = request(&entry, "fresh2", "fresh-request-2").await;
         let calls = entry.calls();
+        let captured = entry
+            .state
+            .script
+            .lock()
+            .unwrap()
+            .identity_headers
+            .take()
+            .unwrap();
+        let records_path =
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(format!(
+                ".rcc/logs/server-v3-{}.request-records.jsonl",
+                entry.ports[0]
+            ));
         entry.stop().await;
+        let completed_modes: Vec<_> = std::fs::read_to_string(&records_path)
+            .expect("actual completed-request records after shutdown")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|record| record["row"]["event_type"] == "request.completed")
+            .map(|record| record["row"]["meta"]["execution_mode"].clone())
+            .collect();
+        let expected_mode = if chat || relay { "relay" } else { "direct" };
+        assert_eq!(completed_modes, vec![json!(expected_mode); 5]);
+        eprintln!("active-public actual modes: chat={chat} forced_relay={relay} completed={completed_modes:?}");
         assert_eq!(initial, "A");
         assert_eq!(replacement, "B");
         assert_eq!(retained, "B");
         assert!([fresh1.as_str(), fresh2.as_str()].contains(&"A"));
         assert_eq!(&calls[..7], ["A", "A", "A", "A", "A", "B", "B"]);
         assert!(!calls.iter().any(|a| a == "C"));
+        let expected: Vec<_> = [identity("S1", "initial")]
+            .into_iter()
+            .chain(std::iter::repeat_n(identity("S1", "replace"), 5))
+            .chain([
+                identity("S1", "retained"),
+                identity("fresh1", "fresh-request-1"),
+                identity("fresh2", "fresh-request-2"),
+            ])
+            .collect();
+        assert_eq!(captured.len(), calls.len());
+        assert_eq!(captured.len(), expected.len());
+        for ((headers, alias), expected) in captured.iter().zip(&calls).zip(expected) {
+            assert_eq!(
+                headers["authorization"].to_str().unwrap(),
+                format!("Bearer active-public-{alias}")
+            );
+            for (name, value) in expected {
+                // Caller identity belongs only to Responses HTTP providers.
+                if chat {
+                    assert!(headers.get(name).is_none(), "{name} crossed into Chat");
+                } else {
+                    assert_eq!(
+                        headers[name].to_str().unwrap(),
+                        value,
+                        "{name} relay={relay}"
+                    );
+                }
+            }
+        }
     }
 }
 

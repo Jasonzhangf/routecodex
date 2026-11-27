@@ -57,7 +57,7 @@ pub use transport::{
     discover_v3_provider_models, is_v3_anthropic_provider_request_header_name,
     ProviderResponsesTransport, ReqwestResponsesTransport, ResponsesTransport,
     V3ProviderCancellation, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
-    V3Transport13ResponsesRequest,
+    V3Transport13ResponsesRequest, V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptControl,

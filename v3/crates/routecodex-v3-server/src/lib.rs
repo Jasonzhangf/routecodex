@@ -129,7 +129,7 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayRuntimeSeeds, V3RuntimeObservability, V3RuntimeObservabilityAccumulator,
     V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
     V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
-    V3RuntimeUsageSummary,
+    V3RuntimeUsageSummary, V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -2218,8 +2218,9 @@ fn record_and_emit_v3_error_projection(
 }
 
 fn responses_client_identity_headers(headers: &HeaderMap) -> Vec<(String, String)> {
-    ["user-agent", "originator"]
-        .into_iter()
+    V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES
+        .iter()
+        .copied()
         .filter(|name| {
             !headers
                 .get_all("connection")

@@ -1473,13 +1473,14 @@ features:
   - v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only proves the public Responses Direct live SSE consumer receives every original business byte after optional snapshot append and terminal persistence fail, while the snapshot diagnostic remains observable.
   required_negative:
   - The optional snapshot failure test proves no V3DebugArtifact source replaces the original upstream source and no snapshot failure terminates the public SSE consumer.
+  - The issue639a73f public Responses gate proves client Authorization, cookies, attestation, turn metadata and state, installation IDs, routing and workspace metadata, beta flags and transport negotiation do not enter Provider headers; Connection nomination removes an otherwise eligible identity or correlation header. Its two-origin redirect control proves forwarded identity headers remain on the selected origin for same-origin redirects, never reach a foreign origin through a cross-origin redirect, and unrelated requests retain the default redirect policy.
   required_integration:
   - Model entry blackbox covers real HTTP 503 projection and malformed SSE transport breaks for Chat, Responses including compact, Messages and Gemini. final_truncated_provider_error_breaks_transport_and_preserves_received_head proves an incomplete body with a real 503 head remains private. direct_incomplete_http_error_remains_private_evidence covers the same boundary at the pluggable Direct transport interface. The V3 workspace gate also covers WebSocket decode failures, provider 429/binary/502, malformed input, pool exhaustion, session isolation and successful tools.
   - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
   - Server model endpoints emit internal Debug/Error evidence and return complete success, a qualified final Provider error or a typed incomplete transport outcome.
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
-  - issue1f60200 exercises public Responses provider-request dry-run through Direct and Relay. Both paths capture redacted client identity headers, exclude Connection-specified headers and credentials, and make zero Provider sends. The live counterpart proves the actual headers. The Server orchestration test exercises the typed Relay-to-Direct handoff and proves the same redacted identity projection with zero sends.
+  - issue1f60200 exercises public Responses provider-request dry-run through Direct and Relay. Both paths capture redacted client identity headers, exclude Connection-specified headers and credentials, and make zero Provider sends. issue639a73f proves the actual User-Agent, Originator, x-client-request-id, session-id, thread-id, x-codex-window-id, x-codex-parent-thread-id and x-openai-subagent values through live Direct and Relay, selected Provider Authorization, configured override precedence and the exclusions above, including Direct-to-Relay reselection. The Server orchestration test exercises the typed Relay-to-Direct handoff and proves the same redacted identity projection with zero sends.
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and only applies the current ToolThinking/model-identity cleanup contract
   - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
@@ -1516,6 +1517,7 @@ features:
     requirement: routecodex-active-key-queue v2
     command: npm run test:v3-active-key-selection
     test_design: docs/design/v3-active-key-selection.md
+    failure_mode: Sticky fourth-failure retry and reselection preserve each caller request's identity headers and the selected alias credential for Responses HTTP providers in Direct and Relay. The cross-protocol Chat case retains its header exclusion, queue order, fresh-session assignment and inactive-account boundary.
     test_ids:
     - active_queue_success_retains_head_and_excludes_inactive_alias
     - fourth_recoverable_failure_reselects_and_next_request_keeps_b
