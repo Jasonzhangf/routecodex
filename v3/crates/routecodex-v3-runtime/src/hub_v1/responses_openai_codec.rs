@@ -1101,10 +1101,14 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         .unwrap_or("function_call_output");
     let mut extension = Map::new();
     extension.insert("responses_tool_output_type".to_string(), json!(item_type));
-    extension.insert(
-        "responses_item_id".to_string(),
-        json!(read_v3_non_empty_str(item.get("id"))),
-    );
+    if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
+        extension.insert("responses_item_id".to_string(), json!(item_id));
+    } else {
+        extension.insert(
+            "responses_tool_output_id_omitted".to_string(),
+            Value::Bool(true),
+        );
+    }
     if item_type == "function_call_output"
         && output.as_array().is_some_and(|parts| {
             parts

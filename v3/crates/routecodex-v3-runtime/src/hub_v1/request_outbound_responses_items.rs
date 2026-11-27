@@ -332,9 +332,11 @@ pub(super) fn chat_tool_result_to_responses_input_item(
     ]);
     if let Some(call_id) = call_id {
         // Responses-derived outputs retain an absent item id through the round trip.
-        if !extension
-            .and_then(|fields| fields.get("responses_item_id"))
-            .is_some_and(Value::is_null)
+        if responses_item_id_from_chat_extension(row).is_some()
+            || extension
+                .and_then(|fields| fields.get("responses_tool_output_id_omitted"))
+                .and_then(Value::as_bool)
+                != Some(true)
         {
             let item_id = if responses_tool_output_type == "custom_tool_call_output" {
                 responses_custom_item_id(row, call_id)

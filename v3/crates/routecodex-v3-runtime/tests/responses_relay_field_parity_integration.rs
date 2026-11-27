@@ -367,7 +367,7 @@ async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
     ]);
     let chat_call = |name: &str, id: &str| serde_json::json!({"id":id,"type":"function","function":{"name":name,"arguments":"{}"}});
     let chat_result = |id: &str, content: &str| serde_json::json!({"role":"tool","tool_call_id":id,"content":content});
-    let twin = serde_json::json!([
+    let mut twin = serde_json::json!([
         {"role":"assistant","content":"","tool_calls":[chat_call("first","call_a")]},
         chat_result("call_a","first result"),
         {"role":"assistant","content":"","tool_calls":[chat_call("second","call_b"),chat_call("third","call_c")]},
@@ -375,6 +375,8 @@ async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
         chat_result("call_b","second result"),
         chat_result("call_c","third result")
     ]);
+    twin[1]["routecodex_chat_extension"] =
+        serde_json::json!({"responses_item_id":"fc_twin_result"});
     let outcome = execute_v3_responses_relay_runtime(
         &manifest,
         responses_relay_input(
@@ -399,16 +401,20 @@ async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
     assert_eq!(repeated.status, 200);
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
-    for (capture, expected) in captures.iter().zip([input, repeat_in_group]) {
+    for (case_index, (capture, expected)) in
+        captures.iter().zip([input, repeat_in_group]).enumerate()
+    {
         let wire = provider_projection_body(capture);
         let actual = wire["input"].as_array().unwrap();
         let expected = expected.as_array().unwrap();
         assert_eq!(actual.len(), expected.len());
-        for (actual, expected) in actual.iter().zip(expected) {
+        for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
             assert_eq!(actual["type"], expected["type"]);
             assert_eq!(actual["call_id"], expected["call_id"]);
             assert_eq!(actual.get("output"), expected.get("output"));
-            if expected.get("output").is_some() {
+            if case_index == 0 && index == 1 {
+                assert_eq!(actual["id"], "fc_twin_result");
+            } else if expected.get("output").is_some() {
                 assert!(actual.get("id").is_none());
             }
         }
