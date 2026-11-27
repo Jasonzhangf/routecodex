@@ -582,13 +582,16 @@ fn govern_chat_tool_outputs_at_req04(
     };
     let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
         BTreeMap::new();
+    let mut prior_outputs = BTreeMap::new();
     let mut output_count = 0usize;
     for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
         match message.get("role").and_then(Value::as_str) {
             Some("assistant") => {
                 // A Responses continuation may contain further receipts for
                 // earlier calls after an intervening assistant group.
-                if !allow_missing_parent {
+                if allow_missing_parent {
+                    prior_outputs.append(&mut expected_outputs);
+                } else {
                     expected_outputs.clear();
                 }
                 if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
@@ -628,7 +631,10 @@ fn govern_chat_tool_outputs_at_req04(
             }
             return Err(V3HubRelayRequestError::MalformedToolOutput { index });
         };
-        let Some(expected_kinds) = expected_outputs.get(&call_id) else {
+        let Some(expected_kinds) = expected_outputs
+            .get(&call_id)
+            .or_else(|| prior_outputs.get(&call_id))
+        else {
             if allow_missing_parent {
                 continue;
             }

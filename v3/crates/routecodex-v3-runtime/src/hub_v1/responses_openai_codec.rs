@@ -137,11 +137,14 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 }
             }
             "function_call" | "tool_call" | "custom_tool_call" => {
+                let mut message = build_v3_openai_chat_assistant_tool_call_message(item)?;
+                message["tool_calls"][0]["routecodex_chat_extension"]
+                    ["responses_tool_input_order"] = json!(input_index);
                 append_v3_openai_chat_tool_call_message(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
-                    build_v3_openai_chat_assistant_tool_call_message(item)?,
+                    message,
                     turn_assistant_tail_index,
                 )?;
                 turn_assistant_tail_index = None;
@@ -151,12 +154,15 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             | "custom_tool_call_output"
             | "tool_result"
             | "tool_message" => {
+                let mut message = build_v3_openai_chat_tool_result_message(item)?;
+                message["routecodex_chat_extension"]["responses_tool_input_order"] =
+                    json!(input_index);
                 append_v3_openai_chat_tool_result_message(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     &mut pending_tool_adjacent_deferred_messages,
-                    build_v3_openai_chat_tool_result_message(item)?,
+                    message,
                 )?;
                 turn_assistant_tail_index = None;
             }
@@ -480,15 +486,7 @@ fn append_v3_openai_chat_tool_call_message(
         messages.push(message);
         return Ok(());
     }
-    if let Some(index) = pending_tool_message_index.filter(|&index| {
-        let group = collect_v3_openai_chat_tool_call_ids(&messages[index]);
-        !messages[index + 1..].iter().any(|message| {
-            message
-                .get("tool_call_id")
-                .and_then(Value::as_str)
-                .is_some_and(|id| !group.iter().any(|call_id| call_id == id))
-        })
-    }) {
+    if let Some(index) = *pending_tool_message_index {
         merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
     } else if let Some(tail_index) = turn_assistant_tail_index {
         if messages.len() == tail_index + 1 {

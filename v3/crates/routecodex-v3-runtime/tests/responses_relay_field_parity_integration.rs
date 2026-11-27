@@ -335,29 +335,82 @@ async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
     );
     assert!(transport.captures.lock().unwrap().is_empty());
 
+    let duplicated = serde_json::json!([
+        {"type":"function_call","name":"first","call_id":"call_x","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_x","output":"first"},
+        {"type":"custom_tool_call","name":"second","call_id":"call_x","input":"test"},
+        {"type":"function_call_output","call_id":"call_x","output":"wrong current kind"}
+    ]);
+    let rejected = execute_v3_responses_relay_runtime(
+        &manifest,
+        responses_relay_input(
+            "req-conflicting-reuse",
+            serde_json::json!({"input":duplicated,"stream":false}),
+        ),
+        &transport,
+    )
+    .await;
+    assert!(
+        rejected.is_err(),
+        "prior matching kind cannot override current conflicting kind"
+    );
+    assert!(transport.captures.lock().unwrap().is_empty());
+
+    let repeat_in_group = serde_json::json!([
+        {"type":"function_call","name":"first","call_id":"call_a","arguments":"{}"},
+        {"type":"function_call","name":"second","call_id":"call_b","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_a","output":"first result"},
+        {"type":"function_call_output","call_id":"call_a","output":"repeat while second pending"},
+        {"type":"function_call","name":"third","call_id":"call_c","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_b","output":"second result"},
+        {"type":"function_call_output","call_id":"call_c","output":"third result"}
+    ]);
+    let chat_call = |name: &str, id: &str| serde_json::json!({"id":id,"type":"function","function":{"name":name,"arguments":"{}"}});
+    let chat_result = |id: &str, content: &str| serde_json::json!({"role":"tool","tool_call_id":id,"content":content});
+    let twin = serde_json::json!([
+        {"role":"assistant","content":"","tool_calls":[chat_call("first","call_a")]},
+        chat_result("call_a","first result"),
+        {"role":"assistant","content":"","tool_calls":[chat_call("second","call_b"),chat_call("third","call_c")]},
+        chat_result("call_a",r#"[{"text":"late array","type":"input_text"}]"#),
+        chat_result("call_b","second result"),
+        chat_result("call_c","third result")
+    ]);
     let outcome = execute_v3_responses_relay_runtime(
         &manifest,
         responses_relay_input(
             "req-late-ordered",
-            serde_json::json!({"input":input,"stream":false}),
+            serde_json::json!({"input":input,"messages":twin,"stream":false}),
         ),
         &transport,
     )
     .await
     .unwrap();
     assert_eq!(outcome.status, 200);
+    let repeated = execute_v3_responses_relay_runtime(
+        &manifest,
+        responses_relay_input(
+            "req-late-repeat",
+            serde_json::json!({"input":repeat_in_group,"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(repeated.status, 200);
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1);
-    let wire = provider_projection_body(&captures[0]);
-    let actual = wire["input"].as_array().unwrap();
-    let expected = input.as_array().unwrap();
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(expected) {
-        assert_eq!(actual["type"], expected["type"]);
-        assert_eq!(actual["call_id"], expected["call_id"]);
-        assert_eq!(actual.get("output"), expected.get("output"));
-        if expected.get("output").is_some() {
-            assert!(actual.get("id").is_none());
+    assert_eq!(captures.len(), 2);
+    for (capture, expected) in captures.iter().zip([input, repeat_in_group]) {
+        let wire = provider_projection_body(capture);
+        let actual = wire["input"].as_array().unwrap();
+        let expected = expected.as_array().unwrap();
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual["type"], expected["type"]);
+            assert_eq!(actual["call_id"], expected["call_id"]);
+            assert_eq!(actual.get("output"), expected.get("output"));
+            if expected.get("output").is_some() {
+                assert!(actual.get("id").is_none());
+            }
         }
     }
 }
