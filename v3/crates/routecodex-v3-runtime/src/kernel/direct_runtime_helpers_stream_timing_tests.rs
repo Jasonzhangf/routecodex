@@ -1,5 +1,123 @@
 use super::*;
 
+#[test]
+fn governed_direct_sse_reason_uses_completed_native_calls_and_visible_text_only() {
+    let cases = [
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","status":"completed","call_id":"call_1","name":"echo","arguments":"{}"}]}}),
+            Some("tool_calls"),
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"custom_tool_call","status":"completed","call_id":"call_2","name":"patch","input":"diff"}]}}),
+            Some("tool_calls"),
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","status":"completed","content":[{"type":"output_text","text":"visible"}]}]}}),
+            Some("stop"),
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"web_search_call","status":"completed"}]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call_output","call_id":"call_3","output":"ok"}]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"refusal","refusal":"blocked"}]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"plan"}]}]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","status":"in_progress","call_id":"call_4","name":"echo","arguments":"{}"}]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.incomplete","response":{"status":"incomplete","output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"response.output_text.delta","delta":"still streaming"}),
+            None,
+        ),
+    ];
+    for (terminal, expected) in cases {
+        let observation = V3RuntimeStreamObservation::default();
+        let frame = format!("event: {}\ndata: {}\n\n", terminal["type"], terminal).into_bytes();
+        let _ = inspect_direct_sse_governed_frames(&[frame], Some(&observation));
+        assert_eq!(
+            observation.snapshot().unwrap().finish_reason.as_deref(),
+            expected,
+            "{terminal}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn direct_responses_governed_harvest_owns_missing_diagnostic_reason() {
+    // Same text-only terminal shape as direct_dsml_flushed_prefix_is_preserved_and_harvest_continues.
+    for explicit in [None, Some(" outer vendor reason "), Some("stop")] {
+        let text = "Before\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name=\"echo\">\n<｜｜DSML｜｜ parameter name=\"text\" string=\"true\">ping</｜｜DSML｜｜ parameter>\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>\nAfter";
+        let mut terminal = serde_json::json!({"type":"response.completed","response":{
+            "id":"harvested","status":"completed","output":[{"id":"m","type":"message","role":"assistant",
+            "content":[{"type":"output_text","text":text}]}]}});
+        if let Some(reason) = explicit {
+            terminal["finish_reason"] = reason.into();
+        }
+        let observation = V3RuntimeStreamObservation::default();
+        let projected = wrap_direct_sse_provider_event_json_observation_stream(
+            V3ProviderAttemptSseStream::new(Box::pin(stream::iter([Ok(responses_sse_frame(
+                terminal,
+            ))]))),
+            observation.clone(),
+            V3RuntimeTimingState::start(),
+            false,
+            false,
+            V3HubProviderWireProtocol::Responses,
+        );
+        let registry = crate::hooks::register_responses_direct_hooks();
+        let context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+            &serde_json::json!({"tools":[{"type":"function","name":"echo","parameters":{"type":"object","properties":{"text":{"type":"string"}}}}]}),
+            &std::collections::HashMap::new(),
+        );
+        let sealed = collect_direct_sse_attempt_after_terminal_with_hooks(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+            None,
+            None,
+            Some((&registry, &context)),
+        )
+        .await
+        .expect("accepted governed attempt");
+        let frames = sealed.sealed_frames();
+        let before = frames.as_ref().clone();
+        let governed = inspect_direct_sse_governed_frames(&frames, Some(&observation));
+        assert_eq!(governed.tool_calls.len(), 1);
+        assert!(governed.response_completed);
+        assert_eq!(
+            observation.snapshot().unwrap().finish_reason.as_deref(),
+            Some(explicit.unwrap_or("tool_calls"))
+        );
+        assert_eq!(
+            observation.semantic_terminal().unwrap(),
+            Some(crate::hub_v1::V3RuntimeSemanticTerminal::Success)
+        );
+        assert_eq!(
+            frames.as_ref(),
+            &before,
+            "diagnostics cannot rewrite committed bytes"
+        );
+    }
+}
+
 /// Concatenate the client-visible text carried by the projected delta events.
 ///
 /// The committed client channel carries raw provider SSE frames, so the residue
@@ -343,6 +461,38 @@ async fn openai_chat_direct_sse_releases_only_after_finish_reason_and_done() {
         text.matches("data: [DONE]").count(),
         1,
         "chat closeout must be delivered exactly once: {text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_responses_observer_keeps_other_direct_protocol_reason_normalization() {
+    let observation = V3RuntimeStreamObservation::default();
+    let timing = V3RuntimeTimingState::start();
+    timing.start_external().unwrap();
+    let bytes = b"data: {\"id\":\"chatcmpl_reason\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\" stop \"}]}\n\ndata: [DONE]\n\n".to_vec();
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(Box::pin(stream::iter([Ok(bytes.clone())]))),
+        observation.clone(),
+        timing,
+        false,
+        false,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
+    let committed = collect_direct_sse_attempt_after_terminal(
+        projected,
+        V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("Chat terminal must seal");
+    assert_eq!(committed.collect::<Vec<_>>().await.concat(), bytes);
+    assert_eq!(
+        observation.snapshot().unwrap().finish_reason.as_deref(),
+        Some("stop")
+    );
+    assert_eq!(
+        observation.semantic_terminal().unwrap(),
+        Some(crate::hub_v1::V3RuntimeSemanticTerminal::Success)
     );
 }
 

@@ -265,6 +265,8 @@ pub(crate) fn v3_obs_error_projection_for_direct_frame<'a>(
 fn merge_v3_obs_request_meta(
     previous: V3ObsRequestMeta,
     incoming: V3ObsRequestMeta,
+    incoming_establishes_completed_terminal: bool,
+    established_result_is_success: bool,
 ) -> V3ObsRequestMeta {
     let route = incoming
         .route
@@ -277,12 +279,40 @@ fn merge_v3_obs_request_meta(
     // `provider_status: None` while also carrying a typed terminal/disposition
     // fact, so a later terminal on candidate B must not keep candidate A's real
     // 502. A legacy lane with no typed terminal facts keeps the existing
-    // incoming-or-previous behavior.
-    let provider_status = if incoming.terminal_typed_status_cleared {
-        None
-    } else {
-        incoming.provider_status.or(previous.provider_status)
-    };
+    // incoming-or-previous behavior. A row that already established success has
+    // delivered its real provider status: a later post-commit failure may add
+    // error truth but must not erase that status.
+    let provider_status =
+        if established_result_is_success && !incoming_establishes_completed_terminal {
+            previous.provider_status
+        } else if incoming.terminal_typed_status_cleared && !established_result_is_success {
+            None
+        } else {
+            incoming.provider_status.or(previous.provider_status)
+        };
+    let (finish_reason, error_category, error_detail, observed_error) =
+        if incoming_establishes_completed_terminal {
+            (
+                incoming.finish_reason,
+                incoming.error_category,
+                incoming.error_detail,
+                incoming.observed_error,
+            )
+        } else if established_result_is_success {
+            (
+                previous.finish_reason,
+                incoming.error_category.or(previous.error_category),
+                incoming.error_detail.or(previous.error_detail),
+                merge_v3_obs_error_truth(previous.observed_error, incoming.observed_error),
+            )
+        } else {
+            (
+                incoming.finish_reason.or(previous.finish_reason),
+                incoming.error_category.or(previous.error_category),
+                incoming.error_detail.or(previous.error_detail),
+                merge_v3_obs_error_truth(previous.observed_error, incoming.observed_error),
+            )
+        };
     V3ObsRequestMeta {
         request_id: if incoming.request_id.is_empty() {
             previous.request_id
@@ -308,13 +338,19 @@ fn merge_v3_obs_request_meta(
         execution_mode: incoming.execution_mode.or(previous.execution_mode),
         transport: incoming.transport.or(previous.transport),
         provider_status,
-        response_status: incoming.response_status.or(previous.response_status),
-        finish_reason: incoming.finish_reason.or(previous.finish_reason),
-        error_category: incoming.error_category.or(previous.error_category),
-        error_detail: incoming.error_detail.or(previous.error_detail),
+        response_status: if established_result_is_success
+            && !incoming_establishes_completed_terminal
+        {
+            previous.response_status
+        } else {
+            incoming.response_status.or(previous.response_status)
+        },
+        finish_reason,
+        error_category,
+        error_detail,
         terminal_typed_status_cleared: incoming.terminal_typed_status_cleared
             || previous.terminal_typed_status_cleared,
-        observed_error: merge_v3_obs_error_truth(previous.observed_error, incoming.observed_error),
+        observed_error,
     }
 }
 
@@ -1534,6 +1570,13 @@ impl V3WebuiObservability {
                 .requests
                 .get(request_key)
                 .is_some_and(|row| row.result.is_some());
+        let incoming_establishes_completed_terminal =
+            event_type == V3ObsEventType::Completed && !terminal_event_after_terminal_row;
+        let established_result_is_success = terminal_event_after_terminal_row
+            && inner
+                .requests
+                .get(request_key)
+                .is_some_and(|row| row.result.as_deref() == Some("success"));
         // A request terminates once, so a second terminal event must not restart
         // its outcome, duration or counters. It DOES still merge its metadata:
         // several lanes project terminal error truth for one request (the relay
@@ -1553,7 +1596,8 @@ impl V3WebuiObservability {
             // satisfied by one branch while another violates it.
             row = inner.requests.get(request_key).cloned().unwrap_or_default();
             row.request_key = request_key.to_string();
-            row.meta = merge_v3_obs_request_meta(row.meta, meta);
+            row.meta =
+                merge_v3_obs_request_meta(row.meta, meta, false, established_result_is_success);
             // A terminal replay must not move an ordinary lifecycle row to the
             // front of the bounded startup fold. The durable fact file already
             // owns replay idempotency.
@@ -1584,7 +1628,12 @@ impl V3WebuiObservability {
             row = inner.requests.get(request_key).cloned().unwrap_or_default();
             row.request_key = request_key.to_string();
             row.event_type = event_type_str.clone();
-            row.meta = merge_v3_obs_request_meta(row.meta, meta);
+            row.meta = merge_v3_obs_request_meta(
+                row.meta,
+                meta,
+                incoming_establishes_completed_terminal,
+                false,
+            );
             row.scope.port = scope.port;
             if scope.workdir.is_some() {
                 row.scope.workdir = scope.workdir.clone();
@@ -1642,9 +1691,6 @@ impl V3WebuiObservability {
                         .as_ref()
                         .map(|t| t.external.as_millis() as u64);
                     row.servertool = false;
-                    // Preserve the most recent provider-failure category for completed-but-recovered rows
-                    // so the UI/facets keep the last attempt's error category even when the meta
-                    // projection is otherwise rebuilt from a fresh payload here.
                 }
                 V3ObsEventType::Failed => {
                     row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));

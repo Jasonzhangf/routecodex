@@ -1252,7 +1252,7 @@ features:
   - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a
     typed relay handoff side-channel carrying both the complete request-local failed-candidate exclusion set and the exact request-local capacity-busy candidate set, without inferring busy provenance from exclusions, so Relay cannot retry an already-failed Direct target
   - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
-  - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider
+  - Direct observation classifies actual completed text as stop and completed function/custom calls as tool_calls only without an explicit provider reason; outer-first explicit reasons retain their original string and override inference. Generic and Relay absence remains absent. This diagnostic classification does not mutate business bytes or attempt/refill control; stream requests may project valid provider
     JSON as client SSE without treating provider inbound transport as client protocol truth
   - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
   required_gates:
@@ -1282,7 +1282,8 @@ features:
   - npm run test:v3-responses-direct-unit
   - npm run test:v3-responses-direct-blackbox
   - npm run test:v3-direct-sse-compile
-  - npm run test:v3-direct-response-observability
+  - npm --prefix v3 run test:v3-direct-response-observability
+  - npm run test:v3-159361f-finish-reason-public
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -2149,6 +2150,7 @@ features:
     v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs.
   - Responses, Anthropic, and OpenAI Chat lifecycle-only/empty terminal frames
     cannot authorize Direct client commit.
+  - Direct Responses finish observation preserves exact explicit reasons across frames and infers only from actual completed text or client-executable calls; hosted/result/unfinished-only output cannot fabricate stop.
   - runtime and SSE transport do not parse business/control semantics.
   required_reverse:
   - A foreign-protocol event fails instead of being shape-reclassified.
@@ -2157,6 +2159,7 @@ features:
   - malformed provider event fails at provider codec, not transport/server.
   required_gates:
   - npm run verify:sse-architecture-boundary
+  - npm --prefix v3 run test:v3-direct-response-observability
   - npm run test:v3-responses-function-call-arguments-regression
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-openai-chat-relay-runtime-integration
@@ -3168,6 +3171,7 @@ features:
   required_negative:
   - Final observability does not reprint route/provider events already emitted by realtime sinks.
   - Console sinks do not mutate request/response payload, provider wire, Virtual Router selection, or provider error policy.
+  - Direct JSON and SSE closeout consume the same Direct classification; the Direct feature gate npm run test:v3-159361f-finish-reason-public runs the five fixed one-completion Direct Responses public fixtures (sse, sse-completed-tool-no-reason, sse-explicit-reason, json-completed-tool-no-reason, json-explicit-reason) plus the separate two-turn responses-to-responses-sse-dsml-harvest-no-reason fixture against a baseline binary from the same base and the candidate binary. It joins exactly one completion and reason per turn to the actual captured request_id from execution-mode evidence on both sides: candidate tool_calls then stop, baseline unreported then unreported. It compares complete client request/entity-body, provider wire bytes and captured provider turn, verifies the harvested call ID pairs with the follow-up function call and result within each run, and records only the process-generated (call|fc|msg)_dsml_<process>_<ordinal> ID normalization while every non-process byte matches. Provide the baseline binary with --baseline-binary or RCC_BASELINE_BINARY.
   integration:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_reselects_without_router_reentry --lib -- --nocapture
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server realtime_provider_failure_sink_prints_before_final_and_final_dedupes --lib -- --nocapture
@@ -3185,6 +3189,7 @@ features:
   - v3-console-realtime-04
   - v3-console-realtime-05
   - v3-console-realtime-06
+  - v3-console-realtime-07
   completion_rule:
     source: Focused Runtime and Server tests prove realtime sink emission and final dedupe.
     runtime: Installed V3 aggregate live replay proves realtime route/provider-error/provider-switch order before terminal.
@@ -4229,6 +4234,7 @@ features:
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - issuedd1de7e_responses_relay_provider_http_400_terminal_provenance and issuedd1de7e_responses_relay_provider_http_400_recovers_eligible_sibling prove public Responses Relay preserves a real provider HTTP 400 as the failed terminal's provider_status/error_category, never retries that identity, and still completes from an eligible healthy sibling without exposing provider error data to the client.
   - A provider failure followed by a switch writes exactly one provider_attempt_failed row; the provider_switched row does not repeat the failed attempt's provider_status, error_category, error_detail, or observed_error.
+  - issue88a3677_completion_ledger_metadata proves a provider HTTP 503 followed by a completed sibling keeps the failed row's evidence while the request.completed row and admin records projection carry the successful terminal's stop/clean error metadata and preserve the failure and switch counters.
   - Direct Responses shares the request observation context between live failure publication and closeout. With console logging enabled, JSON HTTP 503 and SSE response-header timeout recovery each produce one Started, one failure row and console line, one switch, and one successful terminal. Each observed upstream identity receives exactly one send.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
@@ -4247,6 +4253,7 @@ features:
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib protocol_plan_operator_fault_consumer_preserves_sources_without_error06 -- --nocapture --test-threads=1
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue88a3677_completion_ledger_metadata -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:architecture-mainline-call-map
   - git diff --check

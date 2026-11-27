@@ -3,12 +3,12 @@ use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
-    V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation,
+    build_v3_provider_resp_inbound_01_raw_with_compat_profile,
+    record_v3_provider_sse_json_frame_for_protocol, V3HubEntryProtocol, V3HubExecutionMode,
+    V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayRequestHookEvent,
+    V3HubRelayResponseHookProfile, V3HubTransportIntent, V3ProviderRespInbound01RawContext,
+    V3RuntimeObservability, V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::V3ProviderActionRecoveryTransition;
