@@ -6753,7 +6753,12 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     let mut tool_result_at = None;
     for (message_index, message) in messages.iter().enumerate() {
         let role = message["role"].as_str().unwrap_or_default();
-        for block in message["content"].as_array().into_iter().flatten() {
+        for (block_index, block) in message["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
             match block["type"].as_str() {
                 Some("tool_use") if tool_use_at.is_none() => {
                     tool_use_at = Some((message_index, role, block));
@@ -6762,7 +6767,7 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
                     return Err(format!("unexpected duplicate tool_use: {body}"));
                 }
                 Some("tool_result") if tool_result_at.is_none() => {
-                    tool_result_at = Some((message_index, role, block));
+                    tool_result_at = Some((message_index, block_index, role, block));
                 }
                 Some("tool_result") => {
                     return Err(format!("unexpected duplicate tool_result: {body}"));
@@ -6783,13 +6788,20 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
         return Err(format!("tool_use identity or input changed: {body}"));
     }
 
-    let (tool_result_message, tool_result_role, tool_result) =
+    let (tool_result_message, tool_result_block, tool_result_role, tool_result) =
         tool_result_at.ok_or_else(|| format!("missing paired tool_result: {body}"))?;
     if tool_result_role != "user" {
         return Err(format!("tool_result must be in a user message: {body}"));
     }
-    if tool_result_message <= tool_use_message {
-        return Err(format!("tool_result must follow its tool_use: {body}"));
+    if tool_result_message != tool_use_message + 1 {
+        return Err(format!(
+            "tool_result must immediately follow its tool_use: {body}"
+        ));
+    }
+    if tool_result_block != 0 {
+        return Err(format!(
+            "tool_result must start its user message content: {body}"
+        ));
     }
     if tool_result["tool_use_id"] != REASONING_LOOKUP_CALL_ID || tool_result["content"] != "42" {
         return Err(format!("tool_result identity or content changed: {body}"));
@@ -6814,15 +6826,32 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
     ]});
     assert!(validate_reasoning_lookup_followup(&reversed)
         .unwrap_err()
-        .contains("must follow"));
+        .contains("must immediately follow"));
 
     let wrong_roles = json!({"messages":[
-        {"role":"user","content":[tool_use]},
-        {"role":"assistant","content":[tool_result]}
+        {"role":"user","content":[tool_use.clone()]},
+        {"role":"assistant","content":[tool_result.clone()]}
     ]});
     assert!(validate_reasoning_lookup_followup(&wrong_roles)
         .unwrap_err()
         .contains("assistant message"));
+
+    let intervening_message = json!({"messages":[
+        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"user","content":[{"type":"text","text":"intervening"}]},
+        {"role":"user","content":[tool_result.clone()]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&intervening_message)
+        .unwrap_err()
+        .contains("must immediately follow"));
+
+    let text_before_result = json!({"messages":[
+        {"role":"assistant","content":[tool_use]},
+        {"role":"user","content":[{"type":"text","text":"before result"},tool_result]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&text_before_result)
+        .unwrap_err()
+        .contains("must start its user message content"));
 }
 
 // Controlled provider fixture: a reasoning block that omits its native
