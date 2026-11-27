@@ -12,10 +12,10 @@ use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::Deserializer;
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 #[path = "resp_chat_process_tool_markup.rs"]
 mod tool_markup;
@@ -444,6 +444,7 @@ impl Deref for V3HubRespChatProcess03Outcome {
 ///   entries carry a non-empty `text`.
 /// - OpenAI Chat native: `choices[].message.reasoning.summary[]` entries with a
 ///   non-empty `text`.
+///
 /// RCC-synthesized reasoning content, ordinary assistant body text
 /// (`output_text`, `content[].text`, `reasoning_content`, provider `thinking`),
 /// native full-reasoning `reasoning.content`, and request-side summary policy
@@ -1345,24 +1346,27 @@ pub enum V3HubRelayResponseError {
     UnharvestableToolMarkup,
 }
 
+type V3NormalizeHookFn = fn(
+    V3ProviderRespInbound01Raw,
+    Option<&Value>,
+    Option<&str>,
+) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>;
+type V3CompleteChatSseHookFn =
+    fn(
+        &[Vec<u8>],
+        Option<usize>,
+        &V3HubRelaySerializedToolContext,
+    ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>;
+
 #[derive(Debug, Clone, Copy)]
 pub struct V3HubRelayResponseHookRegistry {
-    normalize: fn(
-        V3ProviderRespInbound01Raw,
-        Option<&Value>,
-        Option<&str>,
-    ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>,
+    normalize: V3NormalizeHookFn,
     govern: fn(
         V3HubRespInbound02Normalized,
         &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>,
     typed_sse_catalog: V3RelaySseHookCatalog,
-    complete_chat_sse:
-        fn(
-            &[Vec<u8>],
-            Option<usize>,
-            &V3HubRelaySerializedToolContext,
-        ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
+    complete_chat_sse: V3CompleteChatSseHookFn,
 }
 
 impl V3HubRelayResponseHookRegistry {
@@ -1434,14 +1438,12 @@ fn normalize_v3_hub_relay_response(
                 reason: error.to_string(),
             }
         })?;
-    Ok(
-        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
-            compat,
-            chat_request,
-            request_id,
-        )
-        .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
+    build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+        compat,
+        chat_request,
+        request_id,
     )
+    .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })
 }
 
 fn govern_v3_hub_relay_response(

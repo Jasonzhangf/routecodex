@@ -216,10 +216,10 @@ pub(crate) fn responses_relay_request_hook_profile(
 }
 
 pub(crate) fn responses_relay_response_hook_profile(
-    manifest: &V3Config05ManifestPublished,
-    server_id: &str,
-    session_id: &str,
-    request_id: &str,
+    _manifest: &V3Config05ManifestPublished,
+    _server_id: &str,
+    _session_id: &str,
+    _request_id: &str,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     tool_thinking_turn_context: &V3ToolThinkingTurnContext,

@@ -120,10 +120,10 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
     let other_provider_key = candidate_key(&plan.expanded.candidates[2]);
     assert_eq!(selected.candidate.provider_id, "hang_sibling_a");
     assert_eq!(selected.candidate.auth_alias, "key1");
-    assert_eq!(sibling_key, format!("hang_sibling_a:default:key2:test"));
+    assert_eq!(sibling_key, "hang_sibling_a:default:key2:test".to_string());
     assert_eq!(
         other_provider_key,
-        format!("hang_sibling_b:default:key:test")
+        "hang_sibling_b:default:key:test".to_string()
     );
 
     let availability = health.session_bound_availability(&scope);
@@ -508,12 +508,12 @@ fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
         Ok(None),
     )
     .expect_err("missing terminal Error06 is a typed SDK fault");
-    let diagnostic_source = fault.policy_failure.clone();
+    let diagnostic_source = (*fault.policy_failure).clone();
     let diagnostic_cause = fault
         .original_source
         .clone()
         .expect("the SDK fault keeps its original source");
-    assert_eq!(diagnostic_cause, source);
+    assert_eq!(*diagnostic_cause, source);
     let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![("retry-after".to_string(), b"3".to_vec())],
@@ -548,7 +548,7 @@ fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
     assert!(output.error_chain.is_none());
     assert_eq!(output.node_trace, trace);
     assert_eq!(output.diagnostic_source, Some(diagnostic_source));
-    assert_eq!(output.diagnostic_cause, Some(diagnostic_cause));
+    assert_eq!(output.diagnostic_cause, Some(*diagnostic_cause));
     assert_eq!(output.client_payload.status, 599);
     assert!(matches!(
         &output.client_payload.body,
@@ -576,7 +576,7 @@ fn protocol_plan_operator_fault_keeps_original_cause_without_running_error_proje
     let returned = project_v3_protocol_execution_plan_failure(failure)
         .expect_err("an operator fault must not become a successful Error06 projection");
     assert_eq!(returned, fault);
-    assert_eq!(returned.original_source, Some(original));
+    assert_eq!(returned.original_source, Some(Box::new(original)));
 }
 
 #[test]
@@ -604,7 +604,7 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     )
     .expect_err("process=chat with Direct-only policy must produce a real protocol-plan failure");
 
-    let original_source = failure.source.clone();
+    let original_source = (*failure.source).clone();
     let projected = project_v3_protocol_execution_plan_failure(failure)
         .expect("a normal protocol-plan source must finish through Error02..06");
 

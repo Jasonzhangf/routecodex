@@ -303,30 +303,27 @@ impl V3AnthropicSseReducerState {
         {
             return Ok(());
         }
-        if !self.blocks.contains_key(&index) {
+        if let std::collections::btree_map::Entry::Vacant(e) = self.blocks.entry(index) {
             let kind = match event.pointer("/delta/type").and_then(Value::as_str) {
                 Some("thinking_delta") => Some(V3AnthropicSseBlockKind::Thinking),
                 Some("text_delta") => Some(V3AnthropicSseBlockKind::Text),
                 _ => None,
             };
             if let Some(kind) = kind {
-                self.blocks.insert(
+                e.insert(V3AnthropicSseBlock {
                     index,
-                    V3AnthropicSseBlock {
-                        index,
-                        kind,
-                        id: None,
-                        name: None,
-                        text: String::new(),
-                        input_json: String::new(),
-                        input: None,
-                        thinking: String::new(),
-                        signature: None,
-                        redacted_data: None,
-                        stopped: false,
-                        extensions: Vec::new(),
-                    },
-                );
+                    kind,
+                    id: None,
+                    name: None,
+                    text: String::new(),
+                    input_json: String::new(),
+                    input: None,
+                    thinking: String::new(),
+                    signature: None,
+                    redacted_data: None,
+                    stopped: false,
+                    extensions: Vec::new(),
+                });
             }
         }
         let block = self
@@ -699,7 +696,7 @@ fn apply_delta(
                 .ok_or(V3AnthropicSseTreeError::SignatureDeltaRequired)?;
             block.signature = Some(signature.to_owned());
         }
-        delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
+        _delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
     }
     Ok(())
 }

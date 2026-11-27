@@ -1997,4 +1997,37 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
             .any(|drop| drop.json_path == "$.tool_choice"),
         "{mixed_required_drops:?}"
     );
+
+    // Incapable target (`has_web_search_capability = false`) must still honor
+    // `external_web_access = false` and omit preexisting `web_search_options`
+    // and orphaned `tool_choice = "required"` while recording both drops.
+    let (incapable_offline_wire, incapable_offline_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": "answer offline"}],
+                "web_search_options": {"search_context_size": "high"},
+                "tools": [{"type": "web_search", "external_web_access": false}],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::None,
+            false,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("incapable target with external_web_access=false must omit preexisting web_search_options");
+    assert!(incapable_offline_wire.get("web_search_options").is_none());
+    assert!(incapable_offline_wire.get("tool_choice").is_none());
+    assert!(incapable_offline_wire.get("tools").is_none());
+    assert!(
+        incapable_offline_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.web_search_options"),
+        "{incapable_offline_drops:?}"
+    );
+    assert!(
+        incapable_offline_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "{incapable_offline_drops:?}"
+    );
 }

@@ -698,6 +698,7 @@ pub trait ResponsesTransport: Send + Sync {
         None
     }
 
+    #[must_use = "transport send futures must be awaited"]
     async fn send(
         &self,
         request: V3Transport13ResponsesRequest,
@@ -715,6 +716,7 @@ pub trait ResponsesTransport: Send + Sync {
     /// Attach an already-started attempt control without changing the original
     /// send result type. ProviderResponsesTransport::send validates ownership
     /// and consumes the control for phase observation.
+    #[must_use = "transport send futures must be awaited"]
     async fn send_observed(
         &self,
         request: V3Transport13ResponsesRequest,
@@ -758,10 +760,7 @@ impl ProviderResponsesTransport {
                 timeout,
                 reqwest::redirect::Policy::custom(|attempt| {
                     if attempt.previous().len() > V3_PROVIDER_REDIRECT_LIMIT {
-                        return attempt.error(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "too many redirects",
-                        ));
+                        return attempt.error(std::io::Error::other("too many redirects"));
                     }
                     if attempt
                         .previous()
@@ -1154,13 +1153,13 @@ impl ProviderResponsesTransport {
         attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<reqwest::Response, V3ProviderError> {
-        ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
+        ensure_not_cancelled(request_id, provider_id, cancellation.as_ref())?;
         let timeout = deadline
             .map(|deadline| remaining_timeout(deadline, request_id, provider_id))
             .transpose()?;
         let secret = resolve_secret(
-            &request_id,
-            &provider_id,
+            request_id,
+            provider_id,
             &auth,
             timeout,
             cancellation.clone(),
@@ -1645,6 +1644,45 @@ fn response_body_read_error(
     }
 }
 
+fn sse_first_frame_timeout_error(
+    status: u16,
+    request_id: &str,
+    provider_id: &str,
+    headers: &[V3ProviderResponseHeader],
+    sse_first_frame_budget: Duration,
+) -> V3ProviderError {
+    response_body_read_error(
+        status,
+        request_id,
+        provider_id,
+        headers.to_vec(),
+        format!(
+            "provider SSE stream did not produce a first frame within timeout ({}ms)",
+            sse_first_frame_budget.as_millis()
+        ),
+    )
+}
+
+fn sse_first_frame_timeout_error_if_elapsed(
+    elapsed: Duration,
+    sse_first_frame_budget: Duration,
+    status: u16,
+    request_id: &str,
+    provider_id: &str,
+    headers: &[V3ProviderResponseHeader],
+) -> Result<(), V3ProviderError> {
+    if elapsed > sse_first_frame_budget {
+        return Err(sse_first_frame_timeout_error(
+            status,
+            request_id,
+            provider_id,
+            headers,
+            sse_first_frame_budget,
+        ));
+    }
+    Ok(())
+}
+
 async fn next_stream_chunk_with_budget<S>(
     byte_stream: &mut Pin<Box<S>>,
     request_id: &str,
@@ -1741,15 +1779,12 @@ async fn read_json_disguised_as_sse_or_stream(
             Err(V3ProviderError::ResponseBodyUnreadable { reason, .. })
                 if reason == "provider request budget exhausted while reading response body" =>
             {
-                return Err(response_body_read_error(
+                return Err(sse_first_frame_timeout_error(
                     status,
                     &request_id,
                     &provider_id,
-                    headers,
-                    format!(
-                        "provider SSE stream did not produce a first frame within timeout ({}ms)",
-                        sse_first_frame_budget.as_millis()
-                    ),
+                    &headers,
+                    sse_first_frame_budget,
                 ));
             }
             Err(err) => return Err(err),
@@ -1814,16 +1849,14 @@ async fn read_json_disguised_as_sse_or_stream(
     }
 
     let elapsed = sniff_started.elapsed();
-    if elapsed > sse_first_frame_budget {
-        return Err(V3ProviderError::Transport {
-            request_id,
-            provider_id,
-            reason: format!(
-                "provider SSE stream did not produce a first frame within timeout ({}ms)",
-                sse_first_frame_budget.as_millis()
-            ),
-        });
-    }
+    sse_first_frame_timeout_error_if_elapsed(
+        elapsed,
+        sse_first_frame_budget,
+        status,
+        &request_id,
+        &provider_id,
+        &headers,
+    )?;
     let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
     let replayed = stream::iter(prefetched.into_iter().map(Ok)).chain(byte_stream);
     let stream = validated_sse_stream(

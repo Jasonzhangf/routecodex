@@ -1,6 +1,4 @@
-use super::{
-    runtime_source, V3Config05ManifestPublished, V3Error01SourceRaised, V3RequestExecutionControl,
-};
+use super::{runtime_source, V3Config05ManifestPublished, V3RequestExecutionControl};
 
 pub(super) fn resolve_v3_direct_request_execution_control(
     control: Option<V3RequestExecutionControl>,

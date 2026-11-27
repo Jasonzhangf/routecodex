@@ -10,11 +10,66 @@ use std::{
     time::Duration,
 };
 
-#[path = "fa22072_test_home.rs"]
-mod test_home;
-static LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
+pub(crate) struct ServerTestLock(tokio::sync::Mutex<()>);
 
-struct Upstream {
+impl ServerTestLock {
+    pub(crate) const fn new() -> Self {
+        Self(tokio::sync::Mutex::const_new(()))
+    }
+
+    pub(crate) async fn lock(
+        &self,
+    ) -> (TestHomeGuard, tokio::sync::MutexGuard<'_, ()>) {
+        let lock = self.0.lock().await;
+        (TestHomeGuard::new(), lock)
+    }
+}
+
+pub(crate) struct TestHomeGuard {
+    previous: Option<std::ffi::OsString>,
+    path: PathBuf,
+}
+
+impl TestHomeGuard {
+    pub(crate) fn codex_samples_root(&self, port: u16) -> PathBuf {
+        self.path
+            .join(".rcc")
+            .join("codex-samples")
+            .join("openai-responses")
+            .join("ports")
+            .join(port.to_string())
+    }
+
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "fa22072-boundary-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &path);
+        Self { previous, path }
+    }
+}
+
+impl Drop for TestHomeGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        std::fs::remove_dir_all(&self.path).unwrap();
+        assert!(!self.path.exists(), "owned fixture home must be absent");
+    }
+}
+
+pub(crate) static LOCK: ServerTestLock = ServerTestLock::new();
+
+pub(crate) struct Upstream {
     fail_a: bool,
     calls: Mutex<Vec<(String, Value)>>,
 }
@@ -49,27 +104,29 @@ async fn upstream(
 }
 use axum::response::IntoResponse;
 
-pub fn assigned_ipv4() -> Option<IpAddr> {
+pub(crate) fn assigned_ipv4() -> Option<IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("192.0.2.1:9").ok()?;
     let ip = socket.local_addr().ok()?.ip();
     (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
 }
-fn client() -> reqwest::Client {
+pub(crate) fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap()
 }
-async fn response(request: reqwest::RequestBuilder) -> Result<(u16, Value), String> {
+pub(crate) async fn response(
+    request: reqwest::RequestBuilder,
+) -> Result<(u16, Value), String> {
     let response = request.send().await.map_err(|error| error.to_string())?;
     let status = response.status().as_u16();
     let body = response.text().await.map_err(|error| error.to_string())?;
     let body = serde_json::from_str(&body).unwrap_or(Value::String(body));
     Ok((status, body))
 }
-async fn closed(address: SocketAddr) -> bool {
+pub(crate) async fn closed(address: SocketAddr) -> bool {
     tokio::time::timeout(Duration::from_secs(5), async {
         while tokio::net::TcpStream::connect(address).await.is_ok() {
             tokio::task::yield_now().await;
@@ -78,14 +135,16 @@ async fn closed(address: SocketAddr) -> bool {
     .await
     .is_ok()
 }
-fn read_control_bytes(paths: &routecodex_v3_config::V3ActiveKeyControlPaths) -> Option<Vec<u8>> {
+pub(crate) fn read_control_bytes(
+    paths: &routecodex_v3_config::V3ActiveKeyControlPaths,
+) -> Option<Vec<u8>> {
     match paths.read() {
         Ok(bytes) => Some(bytes),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => panic!("read control record {}: {error}", paths.record.display()),
     }
 }
-async fn read_control_bytes_until(
+pub(crate) async fn read_control_bytes_until(
     paths: &routecodex_v3_config::V3ActiveKeyControlPaths,
 ) -> Option<Vec<u8>> {
     match paths
@@ -97,23 +156,23 @@ async fn read_control_bytes_until(
         Err(error) => panic!("read control record {}: {error}", paths.record.display()),
     }
 }
-pub struct Fixture {
+pub(crate) struct Fixture {
     _refill_override: RefillOverride,
-    handle: Option<V3ServerAggregateHandle>,
-    upstream_task: tokio::task::JoinHandle<()>,
-    admin_task: tokio::task::JoinHandle<()>,
-    upstream_addr: SocketAddr,
-    business: SocketAddr,
-    control: Option<SocketAddr>,
-    admin: SocketAddr,
-    token: String,
-    server_id: String,
-    group: String,
-    record_path: PathBuf,
-    record_root: PathBuf,
-    config_path: PathBuf,
-    manifest: routecodex_v3_config::V3Config05ManifestPublished,
-    calls: Arc<Upstream>,
+    pub(crate) handle: Option<V3ServerAggregateHandle>,
+    pub(crate) upstream_task: tokio::task::JoinHandle<()>,
+    pub(crate) admin_task: tokio::task::JoinHandle<()>,
+    pub(crate) upstream_addr: SocketAddr,
+    pub(crate) business: SocketAddr,
+    pub(crate) control: Option<SocketAddr>,
+    pub(crate) admin: SocketAddr,
+    pub(crate) token: String,
+    pub(crate) server_id: String,
+    pub(crate) group: String,
+    pub(crate) record_path: PathBuf,
+    pub(crate) record_root: PathBuf,
+    pub(crate) config_path: PathBuf,
+    pub(crate) manifest: routecodex_v3_config::V3Config05ManifestPublished,
+    pub(crate) calls: Arc<Upstream>,
 }
 struct RefillOverride;
 impl Drop for RefillOverride {
@@ -121,19 +180,23 @@ impl Drop for RefillOverride {
         routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
     }
 }
-pub enum Close {
+pub(crate) enum Close {
     Shutdown,
     Drop,
     Exec,
 }
 impl Fixture {
-    async fn start(bind: IpAddr, fail_publish: bool) -> Self {
+    pub(crate) async fn start(bind: IpAddr, fail_publish: bool) -> Self {
         Self::start_with_bind_text(bind, &bind.to_string(), fail_publish).await
     }
-    async fn start_with_bind_text(bind: IpAddr, bind_text: &str, fail_publish: bool) -> Self {
+    pub(crate) async fn start_with_bind_text(
+        bind: IpAddr,
+        bind_text: &str,
+        fail_publish: bool,
+    ) -> Self {
         Self::start_named(bind, bind_text, fail_publish, "config.toml", "selected").await
     }
-    async fn start_named(
+    pub(crate) async fn start_named(
         bind: IpAddr,
         bind_text: &str,
         fail_publish: bool,
@@ -151,7 +214,7 @@ impl Fixture {
         )
         .await
     }
-    pub async fn start_named_with_peer(
+    pub(crate) async fn start_named_with_peer(
         bind: IpAddr,
         bind_text: &str,
         fail_publish: bool,
@@ -315,11 +378,11 @@ tiers = [[{{use="controlled/wire"}}]]
             calls,
         }
     }
-    fn record_paths(&self) -> routecodex_v3_config::V3ActiveKeyControlPaths {
+    pub(crate) fn record_paths(&self) -> routecodex_v3_config::V3ActiveKeyControlPaths {
         routecodex_v3_config::v3_active_key_control_paths(&self.config_path, &self.server_id)
             .unwrap()
     }
-    pub async fn business(&self) -> Result<(u16, Value), String> {
+    pub(crate) async fn business(&self) -> Result<(u16, Value), String> {
         response(
             client()
                 .post(format!("http://{}/v1/responses", self.business))
@@ -328,19 +391,19 @@ tiers = [[{{use="controlled/wire"}}]]
         )
         .await
     }
-    pub async fn status(&self) -> Result<(u16, Value), String> {
+    pub(crate) async fn status(&self) -> Result<(u16, Value), String> {
         response(client().get(format!(
             "http://{}/api/routes/active-keys?server_id={}",
             self.admin, self.server_id
         )))
         .await
     }
-    pub async fn release(&self, pool: &str) -> Result<(u16, Value), String> {
+    pub(crate) async fn release(&self, pool: &str) -> Result<(u16, Value), String> {
         response(client().post(format!("http://{}/api/routes/active-keys/release", self.admin))
             .header("x-routecodex-admin-token", &self.token)
             .json(&json!({"server_id":self.server_id,"routing_group_id":self.group,"pool_id":pool,"provider_id":"controlled","interface_id":"default","model_id":"wire","auth_alias":"A"}))).await
     }
-    async fn reload(&mut self) {
+    pub(crate) async fn reload(&mut self) {
         let old_control = self.control;
         assert!(self.handle.take().unwrap().shutdown().await.is_empty());
         assert!(closed(self.business).await);
@@ -378,7 +441,7 @@ tiers = [[{{use="controlled/wire"}}]]
                 .unwrap()
         });
     }
-    pub async fn finish(mut self, how: Close) -> (bool, bool) {
+    pub(crate) async fn finish(mut self, how: Close) -> (bool, bool) {
         let handle = self.handle.take().unwrap();
         match how {
             Close::Shutdown => assert!(handle.shutdown().await.is_empty()),
@@ -392,7 +455,7 @@ tiers = [[{{use="controlled/wire"}}]]
         }
         self.finish_resources().await
     }
-    async fn finish_resources(mut self) -> (bool, bool) {
+    pub(crate) async fn finish_resources(self) -> (bool, bool) {
         let record_paths = self.record_paths();
         self.admin_task.abort();
         self.upstream_task.abort();

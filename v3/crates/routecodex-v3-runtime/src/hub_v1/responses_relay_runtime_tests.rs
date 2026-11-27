@@ -1,3 +1,6 @@
+use super::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical;
+use super::responses_relay_dry_run::execute_v3_responses_relay_dry_run_runtime;
+use super::responses_relay_runtime_inner::find_responses_tool_output_ids;
 use super::*;
 use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
@@ -287,10 +290,7 @@ async fn target_protocol_unmapped_field_continues_first_attempt_without_reselect
 
     assert_eq!(output.status, 200);
     assert!(
-        !output
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3TargetLocalReselected"),
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
         "allowlist absence must not trigger V3TargetLocalReselected: {:?}",
         output.node_trace
     );

@@ -655,7 +655,7 @@ targets = [{ kind = "provider_model", provider = "session", model = "model", key
     let client = client();
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
 
-    let mut r1_task = tokio::spawn({
+    let r1_task = tokio::spawn({
         let client = client.clone();
         let endpoint = endpoint.clone();
         async move {

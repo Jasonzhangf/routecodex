@@ -4,21 +4,28 @@ pub fn rewrite_v3_responses_sse_content(
     mut item: V3ResponsesSseOutputItem,
     rewrite: V3ResponsesSseContentRewrite,
 ) -> Result<V3ResponsesSseOutputItem, V3ResponsesSseTreeError> {
-    let compatible = match (&rewrite, item.kind) {
-        (V3ResponsesSseContentRewrite::Text(_), V3ResponsesSseOutputItemKind::OutputText)
-        | (V3ResponsesSseContentRewrite::Text(_), V3ResponsesSseOutputItemKind::Message)
-        | (V3ResponsesSseContentRewrite::Refusal(_), V3ResponsesSseOutputItemKind::Message)
-        | (V3ResponsesSseContentRewrite::Reasoning(_), V3ResponsesSseOutputItemKind::Reasoning)
-        | (
+    let compatible = matches!(
+        (&rewrite, item.kind),
+        (
+            V3ResponsesSseContentRewrite::Text(_),
+            V3ResponsesSseOutputItemKind::OutputText
+        ) | (
+            V3ResponsesSseContentRewrite::Text(_),
+            V3ResponsesSseOutputItemKind::Message
+        ) | (
+            V3ResponsesSseContentRewrite::Refusal(_),
+            V3ResponsesSseOutputItemKind::Message
+        ) | (
+            V3ResponsesSseContentRewrite::Reasoning(_),
+            V3ResponsesSseOutputItemKind::Reasoning
+        ) | (
             V3ResponsesSseContentRewrite::FunctionArguments(_),
             V3ResponsesSseOutputItemKind::FunctionCall,
-        )
-        | (
+        ) | (
             V3ResponsesSseContentRewrite::CustomToolInput(_),
             V3ResponsesSseOutputItemKind::CustomToolCall,
-        ) => true,
-        _ => false,
-    };
+        )
+    );
     if !compatible {
         let content = match rewrite {
             V3ResponsesSseContentRewrite::Text(_) | V3ResponsesSseContentRewrite::Refusal(_) => {

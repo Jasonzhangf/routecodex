@@ -36,7 +36,7 @@ impl V3ResponsesSseProtocolMetadata {
     pub fn from_event(event: &Value) -> Result<Self, V3ResponsesSseTreeError> {
         let object = event
             .as_object()
-            .ok_or_else(|| V3ResponsesSseTreeError::EventNotObject)?;
+            .ok_or(V3ResponsesSseTreeError::EventNotObject)?;
         let event_type = object
             .get("type")
             .and_then(Value::as_str)
@@ -552,7 +552,7 @@ pub enum V3ResponsesSseTerminalState {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct V3ResponsesSseReducerState {
     pub response: Option<V3ResponsesSseResponseContainer>,
     pub response_output_slots: Vec<usize>,
@@ -647,20 +647,6 @@ impl V3ResponsesJsonDocument {
             value_object.insert(extension.name.clone(), extension.value.clone());
         }
         value
-    }
-}
-
-impl Default for V3ResponsesSseReducerState {
-    fn default() -> Self {
-        Self {
-            response: None,
-            response_output_slots: Vec::new(),
-            items: Vec::new(),
-            output_text: String::new(),
-            terminal: None,
-            sequence_number: None,
-            extensions: Vec::new(),
-        }
     }
 }
 

@@ -1061,7 +1061,7 @@ async fn run_issue0afb440_cancel_after_recovery(relay: bool) {
         "the real upstream 503 must be observed before the successor is cancelled"
     );
     assert!(
-        rows.as_ref().map_or(true, |rows| rows.iter().all(|row| {
+        rows.as_ref().is_none_or(|rows| rows.iter().all(|row| {
             row["event_type"] != json!("request.failed")
                 && row["event_type"] != json!("request.completed")
         })),
@@ -1295,16 +1295,15 @@ async fn held_probe_does_not_block_healthy_sibling_admission() {
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let leading = spawn_peer("leading").await;
     let healthy = spawn_peer("healthy").await;
-    let route_pools = format!(
-        r#"
+    let route_pools = r#"
 [route_groups.owned.pools.default]
-selection = {{ strategy = "priority" }}
+selection = { strategy = "priority" }
 targets = [
-  {{ kind = "provider_model", provider = "leading", model = "model", key = "key", priority = 2 }},
-  {{ kind = "provider_model", provider = "healthy", model = "model", key = "key", priority = 1 }}
+  { kind = "provider_model", provider = "leading", model = "model", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "healthy", model = "model", key = "key", priority = 1 }
 ]
 "#
-    );
+    .to_string();
     let handle = spawn_v3_server_aggregate(manifest(
         free_port(),
         &[

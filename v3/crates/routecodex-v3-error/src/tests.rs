@@ -1,6 +1,96 @@
 use super::*;
 
 #[test]
+fn serialized_internal_and_external_error_envelopes_keep_exact_public_shape() {
+    let unlinked = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ClientDisconnect,
+        "V3ServerRespOutbound06ClientFrame",
+        "client_disconnect",
+        "client disconnected",
+    );
+    assert!(unlinked.internal_error.is_none());
+    assert!(unlinked.external_error.is_none());
+    assert_eq!(
+        serde_json::to_value(&unlinked).expect("serialize source without envelopes"),
+        serde_json::json!({
+            "source_kind": "client_disconnect",
+            "source_stage": "V3ServerRespOutbound06ClientFrame",
+            "code": "client_disconnect",
+            "message": "client disconnected"
+        })
+    );
+
+    let internal = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ResponsesDirect11Policy",
+        "direct_policy_internal_failure",
+        "policy SDK failed",
+        V3InternalErrorCode::V3ResponsesDirect11Policy,
+    );
+    let internal_envelope = internal
+        .internal_error
+        .as_deref()
+        .expect("internal source retains its registered envelope");
+    assert_eq!(internal_envelope.internal_code, "500-149");
+    assert_eq!(internal_envelope.stage, "V3ResponsesDirect11Policy");
+    assert_eq!(
+        serde_json::to_value(&internal).expect("serialize internal source"),
+        serde_json::json!({
+            "source_kind": "runtime_failure",
+            "source_stage": "V3ResponsesDirect11Policy",
+            "code": "direct_policy_internal_failure",
+            "message": "policy SDK failed",
+            "internal_error": {
+                "internal_code": "500-149",
+                "lane": "request",
+                "node_id": "V3ResponsesDirect11Policy",
+                "owner_feature_id": "v3.responses_direct_mvp_architecture",
+                "module_block": "500-14x",
+                "stage": "V3ResponsesDirect11Policy"
+            }
+        })
+    );
+
+    let external = build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_http_429",
+        "rate limited",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("rate_limit_exceeded".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: Some("upstream-request".to_string()),
+            message: Some("retry later".to_string()),
+        },
+    );
+    let external_link = external
+        .external_error
+        .as_deref()
+        .expect("external source retains its provider link");
+    assert_eq!(external_link.provider_http_status(), Some(429));
+    assert_eq!(external_link.message.as_deref(), Some("retry later"));
+    assert_eq!(
+        serde_json::to_value(&external).expect("serialize external source"),
+        serde_json::json!({
+            "source_kind": "provider_failure",
+            "source_stage": "V3ProviderRespInbound01Raw",
+            "code": "provider_http_429",
+            "message": "rate limited",
+            "external_error": {
+                "kind": "provider",
+                "status": 429,
+                "code": "rate_limit_exceeded",
+                "provider_id": "provider-a",
+                "upstream_request_id": "upstream-request",
+                "message": "retry later"
+            }
+        })
+    );
+}
+
+#[test]
 fn session_turn_limit_requires_exact_code_in_complete_http_400() {
     let exact = br#"{"error":{"code":"session_turn_limit_exceeded","message":"105 model turns"}}"#;
     assert!(

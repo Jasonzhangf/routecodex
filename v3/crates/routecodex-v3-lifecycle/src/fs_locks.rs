@@ -258,6 +258,7 @@ fn acquire_status_file_lock(instance_dir: &Path) -> Result<StatusFileLock, V3Lif
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .mode(0o600)
         .open(path)?;
     let deadline = Instant::now() + STATUS_LOCK_TIMEOUT;

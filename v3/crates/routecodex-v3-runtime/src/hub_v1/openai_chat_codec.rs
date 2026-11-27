@@ -253,7 +253,7 @@ pub(crate) fn project_v3_openai_chat_client_response_with_source_terminal(
                 if let Some(item) = item.as_object() {
                     tool_calls.push(
                         super::responses_openai_codec::project_v3_responses_tool_call_to_openai_chat(
-                            item, &call_id, name,
+                            item, call_id, name,
                         ),
                     );
                 }

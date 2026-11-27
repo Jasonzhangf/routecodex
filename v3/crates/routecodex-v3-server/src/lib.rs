@@ -27,10 +27,8 @@ mod webui_observability_endpoints;
 use compaction_request::classify_v3_request_purpose;
 use console::*;
 use endpoint_handlers::{
-    allocate_v3_console_request_id, allocate_v3_console_request_identity,
-    format_v3_request_id_entry, format_v3_request_id_token,
-    merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
-    merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
+    allocate_v3_console_request_id, merge_v3_direct_handoff_provider_failure_events,
+    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
     next_v3_console_request_identity, pending_endpoint_after_json_parse,
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
     prepend_v3_relay_handoff_trace_to_direct_frame,
@@ -40,14 +38,11 @@ pub(crate) use frame_builders::*;
 pub(crate) use live_snapshot::*;
 pub(crate) use live_snapshot_projections::*;
 pub(crate) use metadata_center::*;
-use request_id::{
-    format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
-    V3RequestIdCounter,
-};
+use request_id::{format_v3_tm, V3AllocatedRequestIdentity, V3RequestIdCounter};
 pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 pub(crate) use scope_metadata::*;
-use websocket::{responses_websocket_endpoint, responses_websocket_session};
+use websocket::responses_websocket_endpoint;
 #[cfg(test)]
 pub(crate) use websocket::{
     send_responses_websocket_error_sdk_result, take_responses_websocket_sdk_fault_diagnostics,
@@ -56,50 +51,45 @@ use webui_observability::V3WebuiObservability;
 
 use axum::body::{to_bytes, Body};
 use axum::extract::{
-    ws::{Message, WebSocket, WebSocketUpgrade},
+    ws::{Message, WebSocket},
     ConnectInfo, Request, State,
 };
 use axum::http::{
     header::{CONTENT_LENGTH, CONTENT_TYPE},
-    HeaderMap, HeaderValue, Response, StatusCode,
+    HeaderMap, Response,
 };
 use axum::routing::{get, post};
 use axum::Router;
 use client_sse_transport::{accept_v3_client_sse_transport, V3ClientDisconnectSlot};
 use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sink;
-use futures_util::{stream, StreamExt};
+use futures_util::stream;
+#[cfg(test)]
+use futures_util::StreamExt;
 use libc::EINTR;
 use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
 use responses_direct_server_outcome::{
     execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
 };
 use routecodex_v3_config::{
-    collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
-    V3AdminWebuiManifest, V3Config05ManifestPublished, V3DebugManifest,
-    V3EntryProtocolExecutionMode, V3ServerManifest,
+    resolve_routecodex_package_version_from_executable, V3AdminWebuiManifest,
+    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugBoundedTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    is_v3_client_disconnect_source, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    V3Error01SourceRaised, V3ErrorSourceKind, V3HttpBoundaryErrorKind,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw, build_v3_server_03_http_request_raw_with_purpose,
-    build_v3_server_03_http_request_raw_with_purpose_and_port,
     build_v3_server_03_http_request_raw_with_purpose_and_scope,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_response_dry_run_runtime,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
-    execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
-    execute_v3_gemini_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
-    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
-    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_client_identity,
@@ -117,32 +107,28 @@ use routecodex_v3_runtime::{
     register_responses_direct_hooks, V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput,
     V3AnthropicRelayRuntimeOutput, V3ChatDirectCodec, V3ClientBody, V3ClientSseStream,
     V3CommittedClientSseStream, V3CommittedSseTerminal, V3Execution11ProtocolDecisionMode,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
-    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
-    V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthListenerScope,
-    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
-    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
-    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayRuntimeSeeds, V3RuntimeObservability, V3RuntimeObservabilityAccumulator,
-    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
-    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
-    V3RuntimeUsageSummary, V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayRuntimeInput,
+    V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
+    V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthListenerScope, V3RelayProviderSnapshots,
+    V3RequestExecutionControl, V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState,
+    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ResponsesRelayDryRunOutcome, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeSeeds,
+    V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
+    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
+    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
-    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
-    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03,
-    build_v3_sse_transport_out_04_keepalive_comment, SseField, SseIncrementalDecoder,
-    SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_out_04_keepalive_comment,
+    SseField, SseIncrementalDecoder, SseTransportLimits,
 };
 use routecodex_v3_target::{
     V3ActiveKeyIdentity, V3ActiveKeyScope, V3ActiveKeySelectionState, V3TargetInterpreter,
 };
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use session_admission::{
     hold_response_body_request_activity_permit, V3ServerMaintenanceGuard,
     V3ServerRequestActivityGate,
@@ -150,15 +136,12 @@ use session_admission::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
-use std::fs;
 use std::future::Future;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Write as _};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -881,7 +864,7 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     manifest: V3Config05ManifestPublished,
     admin_webui: Option<V3AdminWebuiManifest>,
     admin_config_path: Option<std::path::PathBuf>,
-    hooks_sidecar_socket: Option<PathBuf>,
+    _hooks_sidecar_socket: Option<PathBuf>,
     observation_clock: Option<Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>>,
     active_key_startup: Option<&V3ActiveKeyControlStartup>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
@@ -1518,7 +1501,7 @@ async fn virtual_router_dry_run(
                 &state.server,
                 "/_routecodex/diagnostics/virtual-router/dry-run",
                 "pre-request",
-                projected,
+                *projected,
             );
         }
     };
@@ -1916,7 +1899,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                 Ok(request_id) => request_id,
                 Err(response) => return *response,
             };
-            let projected = match projected {
+            let projected = match *projected {
                 Ok(projected) => projected,
                 Err(fault) => {
                     persist_v3_chat_failure_evidence_sources(
@@ -1925,8 +1908,8 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                         &path,
                         &request_id,
                         &[],
-                        Some(&fault.policy_failure),
-                        fault.original_source.as_ref(),
+                        Some(fault.policy_failure.as_ref()),
+                        fault.original_source.as_deref(),
                     );
                     return foundation_output_response(foundation_output_from_error_sdk_result(
                         "V3Server03HttpRequestRaw",

@@ -436,37 +436,41 @@ targets = [
 
     // Verify zero fallback hits and strict mapped-wire expectations on both JSON and SSE attempts.
     assert_eq!(state.openai_chat_hits.load(Ordering::SeqCst), 0);
-    let captured = state.anthropic_requests.lock().unwrap();
-    assert_eq!(captured.len(), 3, "{captured:?}");
-    for idx in [0usize, 1usize] {
-        assert!(
-            captured[idx].get("store").is_none(),
-            "{idx}: {}",
-            captured[idx]
+    {
+        let captured = state.anthropic_requests.lock().unwrap();
+        assert_eq!(captured.len(), 3, "{captured:?}");
+        for idx in [0usize, 1usize] {
+            assert!(
+                captured[idx].get("store").is_none(),
+                "{idx}: {}",
+                captured[idx]
+            );
+            assert!(
+                captured[idx].get("prompt_cache_key").is_none(),
+                "{idx}: {}",
+                captured[idx]
+            );
+            assert_eq!(captured[idx]["model"], "anthropic-wire");
+        }
+        assert_eq!(
+            captured[2].get("metadata").and_then(|m| m.get("user_id")),
+            Some(&json!("u-public-1"))
         );
-        assert!(
-            captured[idx].get("prompt_cache_key").is_none(),
-            "{idx}: {}",
-            captured[idx]
-        );
-        assert_eq!(captured[idx]["model"], "anthropic-wire");
     }
-    assert_eq!(
-        captured[2].get("metadata").and_then(|m| m.get("user_id")),
-        Some(&json!("u-public-1"))
-    );
 
-    let responses_captured = state.responses_requests.lock().unwrap();
-    assert_eq!(responses_captured.len(), 1, "{responses_captured:?}");
-    assert_eq!(
-        responses_captured[0]["metadata"],
-        json!({
-            "user_id": "  u-public-raw  ",
-            "custom_trace": "trace-abc",
-            "session_hint": "h-42"
-        }),
-        "MAP-001 Inbound must pass all metadata keys and exact untrimmed values through Chat Process"
-    );
+    {
+        let responses_captured = state.responses_requests.lock().unwrap();
+        assert_eq!(responses_captured.len(), 1, "{responses_captured:?}");
+        assert_eq!(
+            responses_captured[0]["metadata"],
+            json!({
+                "user_id": "  u-public-raw  ",
+                "custom_trace": "trace-abc",
+                "session_hint": "h-42"
+            }),
+            "MAP-001 Inbound must pass all metadata keys and exact untrimmed values through Chat Process"
+        );
+    }
 
     // Verify scoped projection drop log contains BOTH request-side drops (store & prompt_cache_key)
     // AND response-side omitted unrepresentable blocks (container_upload, bash_code_execution_tool_result)
@@ -1723,14 +1727,15 @@ targets = [
         .await
         .unwrap();
     assert_eq!(resp_res.status(), StatusCode::OK);
-    let resp_captured = state.responses_captured.lock().unwrap();
-    assert_eq!(resp_captured.len(), 1);
-    assert!(
-        resp_captured[0].get("reasoning").is_none(),
-        "{}",
-        resp_captured[0]
-    );
-    drop(resp_captured);
+    {
+        let resp_captured = state.responses_captured.lock().unwrap();
+        assert_eq!(resp_captured.len(), 1);
+        assert!(
+            resp_captured[0].get("reasoning").is_none(),
+            "{}",
+            resp_captured[0]
+        );
+    }
     drop(responses_server);
 
     let chat_port = test_ports::free_port();
@@ -1790,13 +1795,15 @@ targets = [
         .await
         .unwrap();
     assert_eq!(chat_res.status(), StatusCode::OK);
-    let chat_captured = state.chat_captured.lock().unwrap();
-    assert_eq!(chat_captured.len(), 1);
-    assert!(
-        chat_captured[0].get("reasoning_effort").is_none(),
-        "{}",
-        chat_captured[0]
-    );
+    {
+        let chat_captured = state.chat_captured.lock().unwrap();
+        assert_eq!(chat_captured.len(), 1);
+        assert!(
+            chat_captured[0].get("reasoning_effort").is_none(),
+            "{}",
+            chat_captured[0]
+        );
+    }
 
     let drops_raw = std::fs::read_to_string(&drop_log)
         .expect("Direct provider compat drop must persist to projection-drops.jsonl");
@@ -2622,12 +2629,14 @@ targets = [
         .await
         .unwrap();
     assert_eq!(ok_reason.status(), StatusCode::OK);
-    let captured = state.requests.lock().unwrap();
-    assert_eq!(captured.len(), 2);
-    assert_eq!(
-        captured[1].1["generationConfig"]["thinkingConfig"]["thinkingLevel"],
-        "HIGH"
-    );
+    {
+        let captured = state.requests.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(
+            captured[1].1["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "HIGH"
+        );
+    }
 
     let drops_raw = std::fs::read_to_string(&drop_log)
         .expect("Gemini unmapped reasoning effort drop must persist locally");
@@ -2810,12 +2819,14 @@ targets = [
         "callable_kept"
     );
 
-    let captured = state.requests.lock().unwrap();
-    assert_eq!(captured.len(), 2);
-    assert!(captured[0].get("tools").is_none(), "{}", captured[0]);
-    assert!(captured[0].get("tool_choice").is_none(), "{}", captured[0]);
-    assert_eq!(captured[1]["tools"][0]["function"]["name"], "lookup");
-    assert_eq!(captured[1]["tool_choice"], "required");
+    {
+        let captured = state.requests.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert!(captured[0].get("tools").is_none(), "{}", captured[0]);
+        assert!(captured[0].get("tool_choice").is_none(), "{}", captured[0]);
+        assert_eq!(captured[1]["tools"][0]["function"]["name"], "lookup");
+        assert_eq!(captured[1]["tool_choice"], "required");
+    }
 
     let drops_raw = std::fs::read_to_string(&drop_log)
         .expect("hosted-only required tool_choice drop must persist locally");
@@ -4437,27 +4448,124 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
         post(move |Json(body): Json<Value>| {
             let captured_ref = captured_ref.clone();
             async move {
+                let has_invalid_hosted_search = body.get("web_search_options").is_some()
+                    || body
+                        .get("tools")
+                        .and_then(Value::as_array)
+                        .is_some_and(|tools| {
+                            tools.iter().any(|tool| {
+                                matches!(
+                                    tool.get("type").and_then(Value::as_str),
+                                    Some("web_search" | "web_search_preview" | "web_search_20250305")
+                                )
+                            })
+                        });
+                let has_unsatisfiable_required = body
+                    .get("tool_choice")
+                    .and_then(Value::as_str)
+                    == Some("required")
+                    && body
+                        .get("tools")
+                        .and_then(Value::as_array)
+                        .is_none_or(Vec::is_empty);
+                if has_invalid_hosted_search || has_unsatisfiable_required {
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "error": {
+                                    "message": "unexpected web_search_options or unsatisfiable tool_choice",
+                                    "type": "invalid_request_error"
+                                }
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap();
+                }
+
+                let messages = body.get("messages").and_then(Value::as_array);
+                let has_matched_tool_result = messages.is_some_and(|items| {
+                    items.iter().any(|msg| {
+                        msg.get("role").and_then(Value::as_str) == Some("tool")
+                            && msg.get("tool_call_id").and_then(Value::as_str)
+                                == Some("call_read_file_case3")
+                            && msg.get("content").and_then(Value::as_str)
+                                == Some("contract verified")
+                    })
+                });
+                let has_read_file_tool = body
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .is_some_and(|tools| {
+                        tools.iter().any(|tool| {
+                            tool.pointer("/function/name").and_then(Value::as_str)
+                                == Some("read_file")
+                        })
+                    });
+                let is_case3_first_turn = !has_matched_tool_result
+                    && has_read_file_tool
+                    && body.get("tool_choice").and_then(Value::as_str) == Some("required");
+
                 captured_ref.lock().unwrap().push(body);
+                let response_payload = if is_case3_first_turn {
+                    json!({
+                        "id": "chatcmpl_case3_tool_call",
+                        "object": "chat.completion",
+                        "model": "gpt-5.5",
+                        "choices": [{
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": null,
+                                "tool_calls": [{
+                                    "id": "call_read_file_case3",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "read_file",
+                                        "arguments": "{\"path\":\"AGENTS.md\"}"
+                                    }
+                                }]
+                            }
+                        }],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 6, "total_tokens": 11}
+                    })
+                } else if has_matched_tool_result {
+                    json!({
+                        "id": "chatcmpl_case3_followup_ok",
+                        "object": "chat.completion",
+                        "model": "gpt-5.5",
+                        "choices": [{
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {
+                                "role": "assistant",
+                                "content": "read_file follow-up verified"
+                            }
+                        }],
+                        "usage": {"prompt_tokens": 8, "completion_tokens": 5, "total_tokens": 13}
+                    })
+                } else {
+                    json!({
+                        "id": "chatcmpl_offline_ok",
+                        "object": "chat.completion",
+                        "model": "gpt-5.5",
+                        "choices": [{
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {
+                                "role": "assistant",
+                                "content": "answered without live web search"
+                            }
+                        }],
+                        "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
+                    })
+                };
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "application/json")
-                    .body(Body::from(
-                        json!({
-                            "id": "chatcmpl_offline_ok",
-                            "object": "chat.completion",
-                            "model": "gpt-5.5",
-                            "choices": [{
-                                "index": 0,
-                                "finish_reason": "stop",
-                                "message": {
-                                    "role": "assistant",
-                                    "content": "answered without live web search"
-                                }
-                            }],
-                            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
-                        })
-                        .to_string(),
-                    ))
+                    .body(Body::from(response_payload.to_string()))
                     .unwrap()
             }
         }),
@@ -4504,9 +4612,20 @@ supports_streaming = true
 max_tokens = 4096
 max_context_tokens = 128000
 
+[providers.chat_search.models."gpt-5.5-no-search"]
+wire_name = "gpt-5.5-no-search"
+aliases = ["web-search-incapable"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.5", key = "key", priority = 1 }}]
+targets = [
+  {{ kind = "provider_model", provider = "chat_search", model = "gpt-5.5", key = "key", priority = 1 }},
+  {{ kind = "provider_model", provider = "chat_search", model = "gpt-5.5-no-search", key = "key", priority = 2 }}
+]
 "#,
         hub_v1_fixture::hub_v1_test_declaration(),
         listen_port,
@@ -4596,24 +4715,25 @@ targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.
         .await
         .unwrap();
     assert_eq!(resp2.status(), StatusCode::OK);
-    let wires = captured_wires.lock().unwrap();
-    assert_eq!(wires.len(), 2);
-    assert!(
-        wires[1].get("web_search_options").is_none(),
-        "preexisting web_search_options must be stripped on external_web_access=false: {}",
-        wires[1]
-    );
-    assert!(
-        wires[1].get("tool_choice").is_none(),
-        "unsatisfiable tool_choice='required' must be stripped when hosted search was the only tool: {}",
-        wires[1]
-    );
-    assert!(
-        wires[1].get("tools").is_none(),
-        "hosted-only omitted search must leave no tools array: {}",
-        wires[1]
-    );
-    drop(wires);
+    {
+        let wires = captured_wires.lock().unwrap();
+        assert_eq!(wires.len(), 2);
+        assert!(
+            wires[1].get("web_search_options").is_none(),
+            "preexisting web_search_options must be stripped on external_web_access=false: {}",
+            wires[1]
+        );
+        assert!(
+            wires[1].get("tool_choice").is_none(),
+            "unsatisfiable tool_choice='required' must be stripped when hosted search was the only tool: {}",
+            wires[1]
+        );
+        assert!(
+            wires[1].get("tools").is_none(),
+            "hosted-only omitted search must leave no tools array: {}",
+            wires[1]
+        );
+    }
     let drop_rows2: Vec<Value> = std::fs::read_to_string(&drop_log)
         .unwrap()
         .lines()
@@ -4634,7 +4754,8 @@ targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.
         "expected $.tool_choice='required' drop record: {drop_rows2:?}"
     );
 
-    // Case 3: `external_web_access=false` alongside a retained function tool preserves `tool_choice="required"`.
+    // Case 3: `external_web_access=false` alongside a retained function tool preserves
+    // `tool_choice="required"` + `read_file` on wire and completes matched client tool follow-up.
     let resp3 = client
         .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
         .json(&json!({
@@ -4651,11 +4772,104 @@ targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.
         .await
         .unwrap();
     assert_eq!(resp3.status(), StatusCode::OK);
-    let wires = captured_wires.lock().unwrap();
-    assert_eq!(wires.len(), 3);
-    assert_eq!(wires[2]["tool_choice"], "required");
-    assert!(wires[2].get("web_search_options").is_none());
-    drop(wires);
+    let body3: Value = resp3.json().await.unwrap();
+    assert_eq!(body3["output"][0]["type"], "function_call");
+    assert_eq!(body3["output"][0]["name"], "read_file");
+    assert_eq!(body3["output"][0]["call_id"], "call_read_file_case3");
+    {
+        let wires = captured_wires.lock().unwrap();
+        assert_eq!(wires.len(), 3);
+        assert_eq!(wires[2]["tool_choice"], "required");
+        assert!(wires[2].get("web_search_options").is_none());
+        let wire3_tools = wires[2]["tools"].as_array().unwrap();
+        assert_eq!(wire3_tools.len(), 1);
+        assert_eq!(wire3_tools[0]["function"]["name"], "read_file");
+    }
+
+    let resp3_followup = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "web-search-cap",
+            "input": [
+                {"type": "message", "role": "user", "content": "call retained function"},
+                body3["output"][0].clone(),
+                {"type": "function_call_output", "call_id": "call_read_file_case3", "output": "contract verified"}
+            ],
+            "tools": [
+                {"type": "web_search", "external_web_access": false},
+                {"type": "function", "name": "read_file", "parameters": {"type": "object"}}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp3_followup.status(), StatusCode::OK);
+    let body3_followup: Value = resp3_followup.json().await.unwrap();
+    assert_eq!(
+        body3_followup["output"][0]["content"][0]["text"],
+        "read_file follow-up verified"
+    );
+    {
+        let wires = captured_wires.lock().unwrap();
+        assert_eq!(wires.len(), 4);
+        assert!(wires[3].get("web_search_options").is_none());
+        assert!(wires[3]["messages"].as_array().unwrap().iter().any(|msg| {
+            msg.get("role").and_then(Value::as_str) == Some("tool")
+                && msg.get("tool_call_id").and_then(Value::as_str) == Some("call_read_file_case3")
+                && msg.get("content").and_then(Value::as_str) == Some("contract verified")
+        }));
+    }
+
+    // Case 4: Selected model WITHOUT `web_search` capability must still honor
+    // `external_web_access=false` and strip preexisting `web_search_options`
+    // and orphaned `tool_choice="required"` on the first attempt.
+    let drop_before_case4 = std::fs::read_to_string(&drop_log)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    let resp4 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "web-search-incapable",
+            "input": "answer offline on model without search",
+            "web_search_options": {"search_context_size": "high"},
+            "tools": [{"type": "web_search", "external_web_access": false}],
+            "tool_choice": "required",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp4.status(), StatusCode::OK);
+    {
+        let wires = captured_wires.lock().unwrap();
+        assert_eq!(wires.len(), 5);
+        assert_eq!(wires[4]["model"], "gpt-5.5-no-search");
+        assert!(wires[4].get("web_search_options").is_none());
+        assert!(wires[4].get("tool_choice").is_none());
+        assert!(wires[4].get("tools").is_none());
+    }
+    let drop_rows4: Vec<Value> = std::fs::read_to_string(&drop_log)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .skip(drop_before_case4)
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    assert!(
+        drop_rows4
+            .iter()
+            .any(|row| row["json_path"] == "$.web_search_options"),
+        "expected $.web_search_options drop on incapable target: {drop_rows4:?}"
+    );
+    assert!(
+        drop_rows4
+            .iter()
+            .any(|row| row["json_path"] == "$.tool_choice"),
+        "expected $.tool_choice drop on incapable target: {drop_rows4:?}"
+    );
 
     drop(server);
     let _ = sd.send(());
@@ -4814,21 +5028,26 @@ targets = [{{ kind = "provider_model", provider = "resp_relay", model = "respons
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect();
+    let listen_port_text = listen_port.to_string();
     let resp_req_id = drop_rows
         .iter()
         .find(|row| {
             row["stage"] == "response_target_protocol_projection"
                 && row["target_protocol"] == "responses"
                 && row["reason"] == "unregistered_output_item_ignored"
-                && row["entry_port"] == listen_port.to_string()
+                && row["entry_port"] == listen_port_text
+                && row["route_name"] == "default"
+                && row["provider_id"] == "resp_relay"
                 && !row["request_id"].as_str().unwrap_or("").is_empty()
                 && row["source_value"]["type"] == "future_telemetry_widget"
         })
         .and_then(|row| row["request_id"].as_str())
         .map(ToOwned::to_owned)
-        .expect(&format!(
-            "expected scoped response_target_protocol_projection drop rows on Responses Relay: {drop_rows:?}"
-        ));
+        .unwrap_or_else(|| {
+            panic!(
+                "expected scoped response_target_protocol_projection drop rows on Responses Relay: {drop_rows:?}"
+            )
+        });
 
     // Anthropic Messages (/v1/messages) Relay SSE closeout must likewise persist scoped drop rows.
     let before_anth_len = drop_rows.len();
@@ -4864,7 +5083,9 @@ targets = [{{ kind = "provider_model", provider = "resp_relay", model = "respons
             row["stage"] == "response_target_protocol_projection"
                 && row["target_protocol"] == "responses"
                 && row["reason"] == "unregistered_output_item_ignored"
-                && row["entry_port"] == listen_port.to_string()
+                && row["entry_port"] == listen_port_text
+                && row["route_name"] == "default"
+                && row["provider_id"] == "resp_relay"
                 && !row["request_id"].as_str().unwrap_or("").is_empty()
                 && row["request_id"] != resp_req_id
                 && row["source_value"]["type"] == "future_telemetry_widget"
@@ -4904,7 +5125,9 @@ targets = [{{ kind = "provider_model", provider = "resp_relay", model = "respons
             row["stage"] == "response_target_protocol_projection"
                 && row["target_protocol"] == "responses"
                 && row["reason"] == "unregistered_output_item_ignored"
-                && row["entry_port"] == listen_port.to_string()
+                && row["entry_port"] == listen_port_text
+                && row["route_name"] == "default"
+                && row["provider_id"] == "resp_relay"
                 && !row["request_id"].as_str().unwrap_or("").is_empty()
                 && row["request_id"] != resp_req_id
                 && row["request_id"] != anth_req_id

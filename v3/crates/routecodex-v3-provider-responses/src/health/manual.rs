@@ -13,6 +13,7 @@ use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
+use crate::provider_identity::V3ProviderIdentityRef;
 
 /// 手动冷却时长上限（24 小时）。这是操作员输入时长的唯一真源。
 pub const V3_COOLDOWN_MANUAL_MAX_MS: u64 = 24 * 60 * 60 * 1000;
@@ -112,14 +113,17 @@ impl V3ProviderHealthStore {
     /// 实际读取的键，也是唯一被持久化的那一半。
     pub fn add_cooldown_entry_for_interface(
         &self,
-        provider_id: &str,
+        identity: V3ProviderIdentityRef<'_>,
         interface_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
         kind: &str,
         duration_ms: u64,
         now_ms: u64,
     ) -> Result<u64, V3ProviderHealthError> {
+        let V3ProviderIdentityRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = identity;
         let provider_id = provider_id.trim();
         if provider_id.is_empty() {
             return Err(invalid_manual_cooldown("provider_id must not be empty"));
@@ -232,10 +236,8 @@ impl V3ProviderHealthStore {
         now_ms: u64,
     ) -> Result<u64, V3ProviderHealthError> {
         self.add_cooldown_entry_for_interface(
-            provider_id,
+            V3ProviderIdentityRef::new(provider_id, auth_alias, model_id),
             "default",
-            auth_alias,
-            model_id,
             kind,
             duration_ms,
             now_ms,

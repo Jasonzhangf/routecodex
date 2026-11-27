@@ -1806,7 +1806,7 @@ pub(crate) fn is_registered_codex_tool_schema(
                     .and_then(Value::as_object)
                     .and_then(|property| property.get("type"))
                     .and_then(Value::as_str)
-                    .map_or(false, |actual| actual == *expected)
+                    == Some(*expected)
             }
         })
         && required.len() == required_names.len()

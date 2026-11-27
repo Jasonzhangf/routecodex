@@ -148,7 +148,7 @@ fn validate_followup(body: &Value) -> Result<(), String> {
 
 async fn upstream(State(state): State<ProviderState>, Json(body): Json<Value>) -> Response<Body> {
     let rejection = validate_followup(&body).err();
-    let _ = state
+    state
         .captures
         .send(ProviderCapture {
             body: body.clone(),

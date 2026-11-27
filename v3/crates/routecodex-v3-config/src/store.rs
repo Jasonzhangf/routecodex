@@ -158,6 +158,29 @@ pub fn v3_active_key_control_paths(
     crate::V3ActiveKeyControlPaths::new(config_path.as_ref(), server_id)
 }
 
+/// Canonical per-listener request-records store. The configured debug log
+/// determines its parent directory.
+pub fn v3_webui_observability_store_path(
+    config_path: impl AsRef<Path>,
+    debug_log_path: Option<&str>,
+    port: u16,
+) -> PathBuf {
+    let default_log_path = config_path
+        .as_ref()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("logs")
+        .join(format!("server-v3-{port}.log"));
+    let log_path = debug_log_path
+        .map(PathBuf::from)
+        .unwrap_or(default_log_path);
+    let store_name = format!("server-v3-{port}.request-records.jsonl");
+    match log_path.parent() {
+        Some(parent) => parent.join(store_name),
+        None => PathBuf::from(store_name),
+    }
+}
+
 #[cfg(test)]
 mod active_key_control_path_tests {
     use super::*;
@@ -239,28 +262,5 @@ mod active_key_control_path_tests {
         assert!(!paths.root.exists());
         assert!(lock.is_file());
         std::fs::remove_dir_all(directory).unwrap();
-    }
-}
-
-/// Canonical per-listener request-records store. The configured debug log
-/// determines its parent directory.
-pub fn v3_webui_observability_store_path(
-    config_path: impl AsRef<Path>,
-    debug_log_path: Option<&str>,
-    port: u16,
-) -> PathBuf {
-    let default_log_path = config_path
-        .as_ref()
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("logs")
-        .join(format!("server-v3-{port}.log"));
-    let log_path = debug_log_path
-        .map(PathBuf::from)
-        .unwrap_or(default_log_path);
-    let store_name = format!("server-v3-{port}.request-records.jsonl");
-    match log_path.parent() {
-        Some(parent) => parent.join(store_name),
-        None => PathBuf::from(store_name),
     }
 }

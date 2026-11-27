@@ -895,10 +895,12 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<V3ProviderFailureRecord, String> {
         self.record_provider_transient_bypass_in_session_for_interface(
             failure_session_scope,
-            provider_id,
+            routecodex_v3_provider_responses::V3ProviderIdentityRef::new(
+                provider_id,
+                auth_alias,
+                model_id,
+            ),
             "default",
-            auth_alias,
-            model_id,
             reason,
             now_ms,
         )
@@ -907,20 +909,16 @@ impl V3ProviderFailureRuntimeHealth {
     pub(crate) fn record_provider_transient_bypass_in_session_for_interface(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
+        identity: routecodex_v3_provider_responses::V3ProviderIdentityRef<'_>,
         interface_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
         reason: Option<&str>,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
         self.store
             .record_provider_transient_bypass_in_session_for_interface(
                 failure_session_scope,
-                provider_id,
+                identity,
                 interface_id,
-                auth_alias,
-                model_id,
                 reason,
                 now_ms,
             )

@@ -2,10 +2,8 @@ use super::relay_runtime_shared::bind_v3_selected_business_auth_kind;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::*;
 use crate::operation_runner::plan_execution::{
-    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
-    V3PlanExecutionTargetSource,
+    V3PlanExecutionModePolicy, V3PlanExecutionStop, V3PlanExecutionTargetSource,
 };
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use serde_json::{json, Value};
 
 fn construct_responses_relay_transport_request(
@@ -169,7 +167,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         // A request that declares tools enters Relay Chat Process tool
         // governance, which may rewrite tool markup in the complete response.
         // Such a request keeps the whole-attempt client projection.
-        let relay_request_declares_tools = relay_request_declares_tools(&input.payload);
+        let _relay_request_declares_tools = relay_request_declares_tools(&input.payload);
         if input
             .payload
             .get("previous_response_id")
@@ -419,7 +417,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
         let mut last_external_http = None;
         let mut active_episode = None::<routecodex_v3_target::V3ActiveKeyEpisode>;
-        let mut active_attempt_dispatched = false;
+        let mut active_attempt_dispatched;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
         let attempt_budget = request_execution_control.attempt_budget();
         let mut provider_send_attempts = attempt_budget.transport_attempts();
@@ -1298,8 +1296,15 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     } else {
                         stream
                     };
+                    let attempt_drop_context = projection_drop_context
+                        .clone()
+                        .with_attempt_target(&selected.route.pool_id, &selected_target_provider_id);
                     let stream_observation = V3RuntimeStreamObservation::default()
-                        .with_projection_drop_context(projection_drop_context.clone());
+                        .with_projection_drop_context(attempt_drop_context.clone());
+                    let attempt_anthropic_response_projection_context =
+                        anthropic_response_projection_context
+                            .clone()
+                            .with_projection_drop_context(attempt_drop_context);
                     let stream =
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle_with_first_frame_elapsed(
                             &input.request_id,
@@ -1321,7 +1326,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         provider_wire_protocol,
                         stream,
                         &stream_observation,
-                        &anthropic_response_projection_context,
+                        &attempt_anthropic_response_projection_context,
                     )
                     .await;
                     if let Some(error) = local_failure

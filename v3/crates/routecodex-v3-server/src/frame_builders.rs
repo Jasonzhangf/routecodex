@@ -64,7 +64,7 @@ pub(crate) async fn debug_dry_run(
                 &state.server,
                 "/_routecodex/debug/dry-run",
                 "pre-request",
-                projected,
+                *projected,
             );
         }
     };
@@ -250,7 +250,7 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
         || output.diagnostic_source.is_some()
         || output.status >= 400;
     let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
         .header("content-type", &frame.content_type);
     let body = match frame.body {
@@ -473,7 +473,7 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
         });
         return response;
     }
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
         .header("content-type", &frame.content_type);
     let body = match frame.body {
@@ -945,10 +945,10 @@ pub(crate) fn v3_client_sse_body(
             if done {
                 return None;
             }
-            match stream.next().await {
-                Some(chunk) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-                None => None,
-            }
+            stream
+                .next()
+                .await
+                .map(|chunk| (Ok::<Vec<u8>, io::Error>(chunk), (stream, false)))
         },
     ));
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
@@ -1219,7 +1219,7 @@ fn v3_io_sse_body_for_protocol(
             };
             match next {
                 Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
-                Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
+                Some((Err(error), (_stream, interval, _, keepalive_chunk))) => {
                     let frame = if find_v3_post_commit_sse_transport_error(&error).is_some() {
                         error
                     } else {
@@ -1368,7 +1368,7 @@ pub(crate) fn build_v3_debug_runtime_from_manifest(
             .copied()
             .unwrap_or(200) as usize,
         event_retention: manifest.retention.get("events").copied().unwrap_or(512) as usize,
-        redaction: V3RedactionPolicy::default(),
+        redaction: V3RedactionPolicy,
     })
 }
 
@@ -1387,7 +1387,7 @@ pub(crate) type V3HttpInputErrorProjection = Result<
 
 pub(crate) async fn read_json_payload(
     request: Request,
-) -> Result<serde_json::Value, V3HttpInputErrorProjection> {
+) -> Result<serde_json::Value, Box<V3HttpInputErrorProjection>> {
     let content_length = request
         .headers()
         .get(CONTENT_LENGTH)
@@ -1398,30 +1398,32 @@ pub(crate) async fn read_json_payload(
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok());
     let Some(content_type) = content_type else {
-        return Err(project_http_input_error(
+        return Err(Box::new(project_http_input_error(
             V3HttpBoundaryErrorKind::ContentTypeRequired,
             "content-type application/json is required",
-        ));
+        )));
     };
     if !content_type
         .split(';')
         .next()
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
     {
-        return Err(project_http_input_error(
+        return Err(Box::new(project_http_input_error(
             V3HttpBoundaryErrorKind::ContentTypeUnsupported,
             format!("unsupported content-type {content_type}"),
-        ));
+        )));
     }
     let bytes = to_bytes(request.into_body(), V3_MAX_REQUEST_BODY_BYTES)
         .await
         .map_err(|error| {
-            project_http_input_error(
-                V3HttpBoundaryErrorKind::BodyTooLarge,
-                format!("request body exceeds {V3_MAX_REQUEST_BODY_BYTES} bytes: {error}"),
-            )
+            Box::new({
+                project_http_input_error(
+                    V3HttpBoundaryErrorKind::BodyTooLarge,
+                    format!("request body exceeds {V3_MAX_REQUEST_BODY_BYTES} bytes: {error}"),
+                )
+            })
         })?;
-    serde_json::from_slice(&bytes).map_err(|error| {
+    serde_json::from_slice(&bytes).map_err(|error| Box::new({
         let content_length = content_length
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unknown".to_string());
@@ -1432,7 +1434,7 @@ pub(crate) async fn read_json_payload(
                 bytes.len()
             ),
         )
-    })
+    }))
 }
 
 pub(crate) async fn method_not_allowed(
@@ -1494,18 +1496,20 @@ pub(crate) fn project_http_input_error(
 
 fn resolve_http_input_error_projection(
     projection: V3HttpInputErrorProjection,
-) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Box<Response<Body>>> {
     projection.map_err(|fault| {
-        let stage = fault
-            .original_source
-            .as_ref()
-            .map_or("V3Server03HttpRequestRaw", |source| source.source_stage);
-        foundation_output_response(foundation_output_from_error_sdk_result(
-            stage,
-            vec![stage],
-            None,
-            Err(fault),
-        ))
+        Box::new({
+            let stage = fault
+                .original_source
+                .as_ref()
+                .map_or("V3Server03HttpRequestRaw", |source| source.source_stage);
+            foundation_output_response(foundation_output_from_error_sdk_result(
+                stage,
+                vec![stage],
+                None,
+                Err(fault),
+            ))
+        })
     })
 }
 
@@ -1530,7 +1534,7 @@ pub(crate) fn error_output_response_for_server_with_project_path(
     if endpoint.starts_with("/_routecodex/") {
         let projected = match resolve_http_input_error_projection(projection) {
             Ok(projected) => projected,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
         let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
         emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);

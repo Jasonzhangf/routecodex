@@ -735,7 +735,7 @@ async fn transport_success_body_read_failure_is_a_network_failure() {
             assert_eq!(status, 200);
             assert!(
                 headers.iter().any(|header| {
-                    header.name == "content-type" && header.value == &b"application/json"[..]
+                    header.name == "content-type" && header.value.as_slice() == b"application/json"
                 }),
                 "the received head must survive a failed body read: {headers:?}"
             );
@@ -1383,4 +1383,51 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         err.to_string().contains("SSE prefix exceeded buffer limit"),
         "expected SSE prefix limit error, got {err}"
     );
+
+    // 6. Post-read elapsed-budget exit preserves the received HTTP head, headers,
+    // and upstream request ID via `response_body_read_error` (body_read_failure=Some)
+    // so it remains ineligible for final HTTP projection while retaining provenance.
+    let err = super::sse_first_frame_timeout_error_if_elapsed(
+        Duration::from_millis(81),
+        Duration::from_millis(80),
+        200,
+        "req-deadline-boundary-200",
+        "deadline-boundary-provider",
+        &[
+            V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            },
+            V3ProviderResponseHeader {
+                name: "x-request-id".into(),
+                value: b"up-deadline-boundary-200".to_vec(),
+            },
+        ],
+    )
+    .expect_err("elapsed past sse_first_frame_budget must fail cleanly");
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            request_id,
+            provider_id,
+            status,
+            headers,
+            reason,
+        } => {
+            assert_eq!(status, 200);
+            assert_eq!(request_id, "req-deadline-boundary-200");
+            assert_eq!(provider_id, "deadline-boundary-provider");
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-deadline-boundary-200"
+                }),
+                "expected retained upstream x-request-id header: {headers:?}"
+            );
+            assert!(
+                reason.contains("did not produce a first frame"),
+                "expected first-frame reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable preserving HTTP 200 head, got {other:?}"),
+    }
 }

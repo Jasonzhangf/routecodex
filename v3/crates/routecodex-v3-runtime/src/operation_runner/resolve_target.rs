@@ -71,22 +71,17 @@ impl std::fmt::Display for V3ResolveTargetOperatorError {
 
 impl std::error::Error for V3ResolveTargetOperatorError {}
 
+type V3ResolveTargetInnerResult = Result<
+    V3Error01SourceRaised,
+    crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+>;
+type V3ResolveTargetSideOutputSlot =
+    Arc<Mutex<Option<Result<V3ResolveTargetSideOutput, V3ResolveTargetInnerResult>>>>;
+
 struct ResolveTargetOperator {
     mode: V3ResolveTargetExecutionMode,
     has_unprojected_history_images: bool,
-    side_output: Arc<
-        Mutex<
-            Option<
-                Result<
-                    V3ResolveTargetSideOutput,
-                    Result<
-                        V3Error01SourceRaised,
-                        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
-                    >,
-                >,
-            >,
-        >,
-    >,
+    side_output: V3ResolveTargetSideOutputSlot,
 }
 
 impl Operator for ResolveTargetOperator {

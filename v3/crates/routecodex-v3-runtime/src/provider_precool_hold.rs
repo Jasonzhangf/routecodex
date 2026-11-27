@@ -1,4 +1,6 @@
 type V3PrecoolIdentity = routecodex_v3_provider_responses::V3ProviderCooldownProbeKey;
+type V3PrecoolProbeKeyResult =
+    Result<Vec<(String, String, Option<String>, Option<String>)>, String>;
 
 #[derive(Debug)]
 struct V3DeferredProviderFailure {
@@ -236,7 +238,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     fn precool_probe_keys(
         &self,
-    ) -> Result<Vec<(String, String, Option<String>, Option<String>)>, String> {
+    ) -> V3PrecoolProbeKeyResult {
         let pending = self.precool.lock().map_err(|error| error.to_string())?;
         Ok(pending
             .keys()

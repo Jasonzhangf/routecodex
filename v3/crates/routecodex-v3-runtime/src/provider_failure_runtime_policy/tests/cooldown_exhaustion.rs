@@ -1,15 +1,14 @@
 use super::*;
 use crate::hub_v1::V3HubEntryProtocol;
 use crate::operation_runner::plan_execution::{
-    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
+    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy,
     V3PlanExecutionTargetSource,
 };
 use serde_json::json;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, oneshot};
 
 fn set_provider_interface_base_url(
     manifest: &mut V3Config05ManifestPublished,
@@ -200,7 +199,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
         "default",
         "http://127.0.0.1:1/v1".to_string(),
     );
-    let mut third_provider = manifest
+    let third_provider = manifest
         .providers
         .get("second")
         .expect("second provider")

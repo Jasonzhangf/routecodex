@@ -269,9 +269,9 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
 pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     payload: &mut Value,
     _model_id: Option<&str>,
-    web_search_execution_mode: V3WebSearchExecutionMode,
+    _web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
-    drop_context: &V3ProjectionDropContext,
+    _drop_context: &V3ProjectionDropContext,
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
@@ -349,20 +349,24 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             tool_type,
             Some("web_search" | "web_search_preview" | "web_search_20250305")
         ) {
-            if has_web_search_capability {
-                if merge_openai_chat_web_search_options(
+            if tool_forbids_live_web_search(tool, &format!("$.tools[{index}]"))? {
+                forbids_live_web_search = true;
+                has_web_search = false;
+                drops.push(V3ProjectionDropRecord::new(
+                    "openai_chat",
+                    format!("$.tools[{index}]"),
+                    "unmapped_target_protocol_field_unrepresentable",
+                    tool.clone(),
+                    "merge_openai_chat_web_search_options",
+                ));
+            } else if has_web_search_capability && !forbids_live_web_search {
+                merge_openai_chat_web_search_options(
                     &mut web_search_options,
                     tool,
                     &format!("$.tools[{index}]"),
                     drops,
-                )? {
-                    if !forbids_live_web_search {
-                        has_web_search = true;
-                    }
-                } else {
-                    forbids_live_web_search = true;
-                    has_web_search = false;
-                }
+                )?;
+                has_web_search = true;
             }
             // provider 无 web_search 能力或显式禁止外部实时搜索（external_web_access=false）时，
             // 移除 hosted web_search 声明与 web_search_options，避免无能力/越权调用。
@@ -467,36 +471,33 @@ fn push_provider_tool_with_refresh_precedence(
     }
 }
 
+fn tool_forbids_live_web_search(tool: &Value, path: &str) -> Result<bool, String> {
+    let row = tool
+        .as_object()
+        .ok_or_else(|| format!("MalformedOutboundField target_protocol=openai_chat path={path}"))?;
+    let Some(external_web_access) = row.get("external_web_access") else {
+        return Ok(false);
+    };
+    let Some(enabled) = external_web_access.as_bool() else {
+        return Err(format!(
+            "MalformedOutboundField target_protocol=openai_chat path={path}.external_web_access"
+        ));
+    };
+    // `external_web_access=false` explicitly forbids live web search even when
+    // the selected model lacks `web_search` capability so preexisting
+    // `web_search_options` or orphaned `tool_choice` cannot survive on wire.
+    Ok(!enabled)
+}
+
 fn merge_openai_chat_web_search_options(
     output: &mut Map<String, Value>,
     tool: &Value,
     path: &str,
     drops: &mut Vec<V3ProjectionDropRecord>,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let row = tool
         .as_object()
         .ok_or_else(|| format!("MalformedOutboundField target_protocol=openai_chat path={path}"))?;
-    if let Some(external_web_access) = row.get("external_web_access") {
-        let Some(enabled) = external_web_access.as_bool() else {
-            return Err(format!(
-                "MalformedOutboundField target_protocol=openai_chat path={path}.external_web_access"
-            ));
-        };
-        if !enabled {
-            // `external_web_access=false` explicitly forbids live web search.
-            // OpenAI Chat `web_search_options` always enables live web search and has
-            // no toggle for offline-only search, so omit the entire hosted web_search
-            // tool instead of weakening the client restriction.
-            drops.push(V3ProjectionDropRecord::new(
-                "openai_chat",
-                path.to_string(),
-                "unmapped_target_protocol_field_unrepresentable",
-                tool.clone(),
-                "merge_openai_chat_web_search_options",
-            ));
-            return Ok(false);
-        }
-    }
     for (key, value) in row {
         if !matches!(
             key.as_str(),
@@ -561,7 +562,7 @@ fn merge_openai_chat_web_search_options(
         }
         output.insert(key.to_string(), value.clone());
     }
-    Ok(true)
+    Ok(())
 }
 
 pub(super) fn normalize_openai_chat_provider_tool_with_drops(
@@ -710,7 +711,7 @@ fn is_named_tool_search_choice(choice: &Value) -> bool {
 
 fn normalize_openai_chat_function_tool(
     row: &Map<String, Value>,
-    path: &str,
+    _path: &str,
 ) -> Result<Value, String> {
     if let Some(function) = row.get("function").and_then(Value::as_object) {
         // Req04 owns the only Tool-Thinking schema compilation. Preserve the
