@@ -4,6 +4,33 @@
 // the former inline `mod tests`.
 
 use super::*;
+
+#[test]
+fn responses_reasoning_invalid_carriers_return_errors_and_valid_input_still_decodes() {
+    for extension in [
+        json!(false),
+        json!([]),
+        json!({"responses_reasoning_items":false}),
+        json!({"responses_reasoning_items":[false]}),
+    ] {
+        let result = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"thought"}],"routecodex_chat_extension":extension}]
+        }));
+        assert!(
+            result.is_err(),
+            "invalid registered carrier must return an error"
+        );
+    }
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "input":[{"type":"reasoning","id":"rs_owned","summary":[{"type":"summary_text","text":"thought"}],
+            "routecodex_chat_extension":{"responses_reasoning_items":[{"id":"rs_client"}]}}]
+    })).unwrap();
+    let entries =
+        &canonical["messages"][0]["routecodex_chat_extension"][RESPONSES_REASONING_ITEMS_EXTENSION];
+    assert_eq!(entries.as_array().unwrap().len(), 1);
+    assert_eq!(entries[0]["id"], "rs_owned");
+    assert_eq!(entries[0]["source_input_order"], 0);
+}
 use serde_json::{json, Value};
 
 #[test]

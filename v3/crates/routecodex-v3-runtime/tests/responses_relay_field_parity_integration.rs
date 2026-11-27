@@ -645,6 +645,39 @@ async fn issue4a0b3aa_paired_historical_inline_image_projects_on_text_responses_
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r6_pending_assistant_and_native_search_keep_first_provider_order() {
+    for middle in [
+        serde_json::json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible pending text"}]}),
+        serde_json::json!({"type":"web_search_call","id":"ws_native","status":"completed","action":{"type":"search","query":"native query"}}),
+    ] {
+        let input = serde_json::json!([
+            {"type":"function_call","id":"fc_pending","name":"lookup","call_id":"call_pending","arguments":"{}"},
+            middle,
+            {"type":"function_call_output","id":"fco_extra","call_id":"call_orphan","output":"orphan"},
+            {"type":"function_call_output","call_id":"call_pending","output":"paired"}
+        ]);
+        let transport = ProviderProjectionJsonTransport {
+            captures: Mutex::new(Vec::new()),
+            response: serde_json::json!({"id":"resp-r6","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+        };
+        let outcome = execute_v3_responses_relay_runtime(
+            &manifest_provider_wire("responses"),
+            responses_relay_input(
+                "req-r6-history",
+                serde_json::json!({"input":input.clone(),"stream":false}),
+            ),
+            &transport,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.status, 200);
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 1);
+        assert_eq!(provider_projection_body(&captures[0])["input"], input);
+    }
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_then_drop_on_chat_wire(
 ) {
     let payload = serde_json::json!({
@@ -675,7 +708,7 @@ async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_t
         .unwrap();
     assert_eq!(output["call_id"], "call_extra");
     assert_eq!(output["output"], "done");
-    assert_eq!(output["id"], "fc_fco_extra");
+    assert_eq!(output["id"], "fco_extra");
     assert_eq!(output["status"], "completed");
     assert_eq!(output["opaque_business"], serde_json::json!({"ticket":42}));
     drop(captures);

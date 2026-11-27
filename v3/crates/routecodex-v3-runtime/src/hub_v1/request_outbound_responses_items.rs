@@ -113,6 +113,15 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         .and_then(|extension| extension.get("responses_tool_call_type"))
         .and_then(Value::as_str)
         .unwrap_or("function_call");
+    if responses_tool_call_type == "web_search_call"
+        && row
+            .get("routecodex_chat_extension")
+            .and_then(|extension| extension.get("responses_tool_input_order"))
+            .is_some()
+    {
+        // The synthetic Chat result carries the complete native hosted item.
+        return Ok(None);
+    }
     let call_id = row
         .get("call_id")
         .or_else(|| row.get("tool_call_id"))
@@ -275,6 +284,11 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
         })
         .unwrap_or_default();
+    if responses_tool_output_type == "web_search_call" {
+        return serde_json::from_str(&output)
+            .map(Some)
+            .map_err(|error| format!("MalformedOutboundField web_search_call: {error}"));
+    }
     if responses_tool_output_type == "tool_search_output" {
         let call_id = call_id.ok_or_else(|| {
             "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_output.call_id".to_string()
@@ -312,7 +326,8 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             if let Some(content) = extension
                 .and_then(|fields| fields.get("responses_tool_output_content"))
                 .filter(|content| {
-                    content.is_string() || (content.is_array() && output == content.to_string())
+                    (content.is_string() && row.get("content") == Some(*content))
+                        || (content.is_array() && output == content.to_string())
                 })
             {
                 content.clone()
@@ -354,7 +369,9 @@ pub(super) fn chat_tool_result_to_responses_input_item(
                 .and_then(Value::as_bool)
                 != Some(true)
         {
-            let item_id = if responses_tool_output_type == "custom_tool_call_output" {
+            let item_id = if responses_tool_output_type == "custom_tool_call_output"
+                || extension.is_some_and(|fields| fields.contains_key("responses_tool_input_order"))
+            {
                 responses_custom_item_id(row, call_id)
             } else {
                 responses_function_item_id(row, call_id)

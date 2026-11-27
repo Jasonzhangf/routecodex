@@ -1229,13 +1229,19 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 }
             }
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                let start = output.len();
                 for call in tool_calls {
                     if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
                         output.push((source_order(call), item));
                     }
                 }
-                if output.len() != start {
+                if !tool_calls.is_empty()
+                    && !(source_order(message).is_some()
+                        && row.get("content").is_some_and(|content| match content {
+                            Value::String(text) => !text.trim().is_empty(),
+                            Value::Array(parts) => !parts.is_empty(),
+                            _ => false,
+                        }))
+                {
                     continue;
                 }
             }

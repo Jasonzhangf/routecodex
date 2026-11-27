@@ -141,18 +141,32 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                 turn_assistant_tail_index = Some(messages.len() - 1);
             }
             "reasoning" => {
+                if let Some(extension) = item.get("routecodex_chat_extension") {
+                    let extension = extension.as_object().ok_or_else(|| {
+                        "Responses reasoning routecodex_chat_extension must be an object"
+                            .to_string()
+                    })?;
+                    if let Some(entries) = extension.get(RESPONSES_REASONING_ITEMS_EXTENSION) {
+                        let entries = entries.as_array().ok_or_else(|| {
+                            "Responses responses_reasoning_items must be an array".to_string()
+                        })?;
+                        if entries.iter().any(|entry| !entry.is_object()) {
+                            return Err(
+                                "Responses responses_reasoning_items entries must be objects"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
                 if let Some(mut message) = build_v3_openai_chat_assistant_reasoning_message(item) {
                     if native_responses {
-                        let extension = &mut message["routecodex_chat_extension"];
-                        if extension.get(RESPONSES_REASONING_ITEMS_EXTENSION).is_none() {
-                            extension[RESPONSES_REASONING_ITEMS_EXTENSION] = json!([item]);
-                        }
-                        for entry in extension[RESPONSES_REASONING_ITEMS_EXTENSION]
-                            .as_array_mut()
-                            .unwrap()
-                        {
-                            entry["source_input_order"] = json!(input_index);
-                        }
+                        // This entry belongs to this decoded input item. Client
+                        // carrier entries do not inherit its source position.
+                        let mut entry = item.clone();
+                        entry.remove("routecodex_chat_extension");
+                        entry.insert("source_input_order".to_string(), json!(input_index));
+                        message["routecodex_chat_extension"][RESPONSES_REASONING_ITEMS_EXTENSION] =
+                            json!([entry]);
                     }
                     append_v3_openai_chat_message_preserving_tool_adjacency(
                         &mut messages,
@@ -186,6 +200,20 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
             | "tool_message" => {
                 let mut message = build_v3_openai_chat_tool_result_message(item, native_responses)?;
                 if native_responses {
+                    let call_id = message.get("tool_call_id").and_then(Value::as_str);
+                    let paired = call_id.is_some_and(|id| {
+                        messages.iter().any(|message| {
+                            collect_v3_openai_chat_tool_call_ids(message)
+                                .iter()
+                                .any(|call| call == id)
+                        })
+                    });
+                    if !paired {
+                        if let Some(output) = item.get("output").filter(|value| value.is_string()) {
+                            // An orphan has no declared tool media semantics.
+                            message["content"] = output.clone();
+                        }
+                    }
                     set_v3_responses_tool_input_order(&mut message, input_index);
                 }
                 append_v3_openai_chat_tool_result_message(
@@ -495,7 +523,12 @@ pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
             .and_then(Value::as_str)
             .unwrap_or("user")
             .trim();
-        if role.eq_ignore_ascii_case("assistant") {
+        if role.eq_ignore_ascii_case("assistant")
+            && !(message
+                .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                .is_some()
+                && !v3_openai_chat_content_is_empty(message.get("content").unwrap_or(&Value::Null)))
+        {
             merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
             return Ok(());
         }
@@ -1304,6 +1337,8 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
         build_v3_openai_chat_hosted_tool_result_message(item, call_id.as_str(), kind)?;
     if native_responses {
         set_v3_responses_tool_input_order(&mut tool_result, input_index);
+        tool_result["routecodex_chat_extension"]["responses_tool_output_type"] =
+            json!(kind.responses_item_type());
     }
     append_v3_openai_chat_tool_call_message(
         messages,

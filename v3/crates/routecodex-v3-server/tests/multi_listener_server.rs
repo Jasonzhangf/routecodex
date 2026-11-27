@@ -6263,6 +6263,30 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
     let manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    for extension in [
+        json!(false),
+        json!({"responses_reasoning_items":false}),
+        json!({"responses_reasoning_items":[false]}),
+    ] {
+        let response = reqwest::Client::new()
+            .post(&endpoint)
+            .json(&json!({"model":"client-test","input":[{
+                "type":"reasoning","summary":[{"type":"summary_text","text":"bad carrier"}],
+                "routecodex_chat_extension":extension
+            }],"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response.json::<Value>().await.unwrap()["error"]["code"],
+            "invalid_responses_request"
+        );
+        assert!(
+            captures.try_recv().is_err(),
+            "invalid carrier is request-local and must not dispatch"
+        );
+    }
     let cases = [
         json!([
             {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
@@ -6282,6 +6306,18 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
             {"type":"function_call_output","call_id":"call_image","output":"data:image/png;base64,AAAA"},
             {"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous answer"}]},
             {"type":"message","role":"user","content":[{"type":"input_text","text":"later text turn"}]}
+        ]),
+        json!([
+            {"type":"function_call","id":"fc_pending","name":"lookup","call_id":"call_pending","arguments":"{}"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible while call is pending"}]},
+            {"type":"function_call_output","id":"fco_extra","call_id":"call_orphan","output":"orphan result"},
+            {"type":"function_call_output","call_id":"call_pending","output":"paired result"}
+        ]),
+        json!([
+            {"type":"function_call","id":"fc_before_search","name":"lookup","call_id":"call_pending","arguments":"{}"},
+            {"type":"web_search_call","id":"ws_native","status":"completed","action":{"type":"search","query":"native search"}},
+            {"type":"function_call_output","id":"fco_extra","call_id":"call_orphan","output":"orphan result"},
+            {"type":"function_call_output","call_id":"call_pending","output":"paired result"}
         ]),
     ];
     let mut results = Vec::new();
