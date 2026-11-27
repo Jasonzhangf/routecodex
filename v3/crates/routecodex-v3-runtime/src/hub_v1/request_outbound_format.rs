@@ -1153,7 +1153,7 @@ fn project_openai_responses_reasoning_extensions_to_reasoning(
     Ok(())
 }
 
-fn json_path_child(parent: &str, key: &str) -> String {
+pub(super) fn json_path_child(parent: &str, key: &str) -> String {
     // An empty key must take the quoted branch: the bare form would render as
     // `$.`, which the path reader rejects, so the drop would be recorded
     // without ever being removed from the wire.

@@ -339,28 +339,47 @@ fn openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context()
 }
 
 #[test]
-fn openai_chat_wire_omits_unknown_client_metadata_with_drop_record() {
+fn openai_chat_wire_omits_unknown_client_metadata_with_records() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
-        "client_metadata": {"unknown":{"nested":true}}
+        "client_metadata": {"user_id":"client-user", "unknown":{"nested":true},
+            "future.key":{"values":[1,"two"]}, "bracket]quote\"": [true], "": 7}
     });
 
-    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
-        &payload,
-        V3OutboundTargetProtocol::OpenAiChat,
-    )
-    .expect("unknown client_metadata without target slot must warn/omit without blocking request");
-
-    assert!(request.get("client_metadata").is_none(), "{request}");
-    assert!(request.get("metadata").is_none(), "{request}");
-    assert_eq!(request["messages"][0]["content"], "hello");
-    assert!(
-        drops
-            .iter()
-            .any(|drop| drop.json_path == "$.client_metadata.unknown"),
-        "expected drop record for $.client_metadata.unknown: {drops:?}"
+    let context = V3ProjectionDropContext::new(
+        "metadata-control",
+        "12345",
+        None,
+        std::sync::Arc::new(payload.clone()),
     );
+    let (wire, mut records) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(&payload, &context)
+            .expect("structured unknown values are omitted without rejecting mapped remainder");
+    context.restamp_and_emit(&mut records);
+    assert!(wire.get("client_metadata").is_none());
+    assert_eq!(wire["metadata"], json!({"user_id":"client-user"}));
+    assert_eq!(records.len(), 4);
+    for (key, path) in [
+        ("unknown", "$.client_metadata.unknown"),
+        ("future.key", "$.client_metadata[\"future.key\"]"),
+        (
+            "bracket]quote\"",
+            "$.client_metadata[\"bracket]quote\\\"\"]",
+        ),
+        ("", "$.client_metadata[\"\"]"),
+    ] {
+        let record = records
+            .iter()
+            .find(|r| r.json_path == path)
+            .expect("correct escaped path");
+        assert_eq!(record.source_value, payload["client_metadata"][key]);
+        assert_eq!(record.canonical_value, payload["client_metadata"][key]);
+        assert_eq!(
+            record.drop_site,
+            "project_openai_client_metadata_to_metadata"
+        );
+    }
 }
 
 #[test]
@@ -376,6 +395,47 @@ fn openai_chat_wire_projects_exact_client_metadata_user_id() {
 
     assert!(request.get("client_metadata").is_none(), "{request}");
     assert_eq!(request["metadata"], json!({"user_id":"client-user"}));
+}
+
+#[test]
+fn openai_chat_wire_metadata_malformed_and_conflicting_controls() {
+    for (client_metadata, metadata, expected) in [
+        (
+            json!("not-an-object"),
+            Value::Null,
+            "MalformedOutboundField",
+        ),
+        (json!({"user_id":19}), Value::Null, "MalformedOutboundField"),
+        (
+            json!({"user_id":null}),
+            Value::Null,
+            "MalformedOutboundField",
+        ),
+        (
+            json!({"user_id":"   "}),
+            Value::Null,
+            "MalformedOutboundField",
+        ),
+        (
+            json!({"user_id":"client"}),
+            json!({"user_id":"other"}),
+            "ConflictingOutboundFields",
+        ),
+        (json!({}), json!("not-an-object"), "MalformedOutboundField"),
+        (json!({}), json!({"number":1}), "MalformedOutboundField"),
+    ] {
+        let mut payload = json!({"model":"gpt-test","messages":[{"role":"user","content":"hello"}],"client_metadata":client_metadata});
+        if let Some(object) = payload["client_metadata"].as_object_mut() {
+            object.insert("unknown".into(), json!({"nested":true}));
+        }
+        if !metadata.is_null() {
+            payload["metadata"] = metadata;
+        }
+        let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+            .expect_err("malformed/conflicting mapping must retain its boundary");
+        assert!(error.contains(expected), "{payload}: {error}");
+        eprintln!("METADATA_BOUNDARY_BASELINE {payload} => {error}");
+    }
 }
 
 #[test]
