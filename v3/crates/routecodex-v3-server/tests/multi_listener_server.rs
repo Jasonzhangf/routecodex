@@ -7112,8 +7112,9 @@ async fn issue4a0b3aa_r10_legacy_merge_named_orphan_alias_reasoning_and_provenan
         legacy_preceding_capture.body
     );
 
-    // Preceding legacy-parent literal representation conflict must still be rejected.
-    let legacy_conflict_res = client
+    // Equivalent literal matching the native output merges cleanly at ReqInbound02
+    // even when a preceding legacy parent is present, and Req04 governs it as paired media.
+    let legacy_paired_literal_res = client
         .post(&endpoint)
         .json(&json!({
             "model": "gpt-5.5",
@@ -7141,14 +7142,57 @@ async fn issue4a0b3aa_r10_legacy_merge_named_orphan_alias_reasoning_and_provenan
             ]
         }))
         .send()
+        .await
+        .expect("equivalent literal matching native output with preceding legacy parent must merge cleanly");
+    assert_eq!(legacy_paired_literal_res.status(), StatusCode::OK);
+    let legacy_paired_literal_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("preceding legacy parent literal merge capture timeout")
+        .expect("preceding legacy parent literal merge capture");
+    assert_eq!(
+        legacy_paired_literal_capture.body["input"][1]["output"],
+        json!([{"type": "input_text", "text": "[Image]"}]),
+        "preceding legacy parent with matching literal must let Req04 govern paired media: {}",
+        legacy_paired_literal_capture.body
+    );
+
+    // Genuine representation conflict (different string from native output) must still be rejected.
+    let legacy_conflict_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_b",
+                "output": encoded_image
+            }],
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_b",
+                        "type": "function",
+                        "function": {"name": "read_image", "arguments": "{}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_b",
+                    "content": "conflicting-output"
+                }
+            ]
+        }))
+        .send()
         .await;
     assert!(
         legacy_conflict_res.is_err(),
-        "preceding legacy-parent literal mismatch must still fail ReqInbound02: {legacy_conflict_res:?}"
+        "genuine legacy-parent content mismatch must still fail ReqInbound02: {legacy_conflict_res:?}"
     );
     assert!(
         captures.try_recv().is_err(),
-        "preceding legacy-parent conflict must not dispatch upstream"
+        "genuine legacy-parent conflict must not dispatch upstream"
     );
 
     // P1-2: Supported named orphan output with JSON-encoded image string keeps exact
@@ -8703,6 +8747,320 @@ async fn issue4a0b3aa_r15_outbound_orphan_literal_and_cross_entry_public() {
         json!("[Image]"),
         "non-Responses Relay entry must keep base text-only image placeholder projection: {}",
         anthropic_entry_capture.body
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r17_responses_direct_dual_json_string_vision_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    let provider_body = json!({
+        "id": "resp_r17_direct_dual_vision",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "vision ok"}]}]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "issue4a0b3aa-r17-direct-vision-key",
+    );
+    let mut manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &provider_url,
+        r#""direct""#,
+    );
+    manifest
+        .providers
+        .get_mut("mixed")
+        .unwrap()
+        .models
+        .get_mut("wire-protocol")
+        .unwrap()
+        .capabilities
+        .push("vision".to_string());
+    manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(&endpoint)
+        .json(&json!({
+            "model": "wire-protocol",
+            "stream": false,
+            "messages": [],
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_r17_direct_dual_vision",
+                "output": encoded_image
+            }]
+        }))
+        .send()
+        .await
+        .expect("Direct dual-history vision request must succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("Direct dual-history vision capture timeout")
+        .expect("Direct dual-history vision capture");
+    let output = &capture.body["input"][0]["output"];
+    assert!(
+        output.is_string(),
+        "Direct dual-history collapse must preserve exact string type on vision target: {}",
+        capture.body
+    );
+    assert_eq!(
+        output,
+        &json!(encoded_image),
+        "Direct dual-history collapse must preserve exact JSON string value: {}",
+        capture.body
+    );
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r17_dual_paired_and_orphan_json_string_relay_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    let responses_provider_body = json!({
+        "id": "resp_r17_dual_paired_orphan",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r17-dual-paired-orphan-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    // 1. Equivalent dual history WITH preceding parent must merge cleanly and let Req04
+    // govern it as paired media (text-only target projects [Image]).
+    let paired_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_r17_dual_paired",
+                        "type": "function",
+                        "function": {"name": "read_image", "arguments": "{}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_r17_dual_paired",
+                    "content": encoded_image
+                }
+            ],
+            "input": [
+                {
+                    "type": "function_call",
+                    "id": "fc_r17_dual_paired",
+                    "call_id": "call_r17_dual_paired",
+                    "name": "read_image",
+                    "arguments": "{}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_r17_dual_paired",
+                    "output": encoded_image
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("equivalent dual history with preceding parent must succeed");
+    assert_eq!(paired_res.status(), StatusCode::OK);
+    let paired_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("paired dual-history capture timeout")
+        .expect("paired dual-history capture");
+    assert_eq!(
+        paired_capture.body["input"][1]["output"],
+        json!([{"type": "input_text", "text": "[Image]"}]),
+        "paired dual-history image output must follow Req04 paired media governance: {}",
+        paired_capture.body
+    );
+
+    // 2. Equivalent dual history WITHOUT preceding parent must merge cleanly and let Req04
+    // restore the literal string for the orphaned output.
+    let orphan_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "call_r17_dual_orphan",
+                "content": encoded_image
+            }],
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_r17_dual_orphan",
+                "output": encoded_image
+            }]
+        }))
+        .send()
+        .await
+        .expect("equivalent dual history without preceding parent must succeed");
+    assert_eq!(orphan_res.status(), StatusCode::OK);
+    let orphan_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("orphan dual-history capture timeout")
+        .expect("orphan dual-history capture");
+    assert_eq!(
+        orphan_capture.body["input"][0]["output"],
+        json!(encoded_image),
+        "orphaned dual-history output must keep its exact literal string via Req04: {}",
+        orphan_capture.body
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r17_dual_idless_then_exact_item_id_tool_search_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r17_dual_tso_exact",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r17-dual-tso-exact-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let tool_one =
+        json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+    let tool_two =
+        json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_one).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_two).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_item_id": "tso_2",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                }
+            ],
+            "input": [
+                {
+                    "type": "tool_search_output",
+                    "id": "tso_2",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_two
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("dual-history ID-less receipt then tso_2 with native twin tso_2 must succeed");
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history exact tso_2 capture timeout")
+        .expect("dual-history exact tso_2 capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        input.len(),
+        2,
+        "earlier ID-less receipt must be retained and tso_2 merged cleanly once: {}",
+        capture.body
+    );
+    assert!(
+        input[0].get("id").is_none(),
+        "earlier ID-less receipt must remain ID-less: {}",
+        capture.body
+    );
+    assert_eq!(input[0]["type"], "tool_search_output");
+    assert_eq!(input[0]["call_id"], "call_1");
+    assert_eq!(input[0]["tools"], tool_one);
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "tool_search_output",
+            "id": "tso_2",
+            "call_id": "call_1",
+            "execution": "client",
+            "status": "completed",
+            "tools": tool_two
+        })
     );
 
     resp_handle.shutdown().await;

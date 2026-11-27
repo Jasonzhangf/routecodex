@@ -3,7 +3,8 @@ use crate::direct_response_hooks::{
     V3DirectResponseCompatContext, V3DirectResponseHookFailure,
 };
 use crate::kernel::direct_request_key_hooks::{
-    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog, V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
+    V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
@@ -19,9 +20,9 @@ use crate::shared::{
     V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3InternalErrorCode,
+    V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -533,7 +534,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                 input_only
             } else {
                 let (source_body, provenance) = if request_body.get("input").is_some() {
-                    let contribution =
+                    let mut contribution =
                         crate::hub_v1::v3_hub_responses_accepted_chat_contribution(&request_body)
                             .map_err(|error| {
                             raise_v3_source_via_err01(
@@ -547,6 +548,24 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                             )
                             .map(|(_, source)| source)
                         })?;
+                    for (msg_idx, message) in contribution.messages.iter_mut().enumerate() {
+                        if contribution
+                            .provenance
+                            .message_entry(msg_idx)
+                            .is_some_and(|entry| entry.decoder_captured_responses_tool_output)
+                        {
+                            if let Some(raw_output) = message
+                                .pointer("/routecodex_chat_extension/responses_tool_output_content")
+                                .filter(|value| value.is_string())
+                                .cloned()
+                            {
+                                // Direct bypasses Req04; restore decoder-owned string outputs
+                                // before outbound item projection so JSON-encoded image strings
+                                // keep their exact native string type and value.
+                                message["content"] = raw_output;
+                            }
+                        }
+                    }
                     let mut collapsed = request_body.clone();
                     if let Some(object) = collapsed.as_object_mut() {
                         object.remove("input");

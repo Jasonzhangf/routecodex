@@ -563,44 +563,10 @@ fn merge_responses_chat_histories(
         strip_client_history_provenance_fields_from_message(message);
     }
     if sanitized_source.len() == decoded.len() {
-        let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
-            std::collections::HashMap::new();
         let mut merged = Vec::with_capacity(sanitized_source.len());
         let mut all_matched = true;
-        for (msg_idx, (src, dec)) in sanitized_source.iter().zip(decoded).enumerate() {
-            let output_order = decoded_provenance.message_order(msg_idx);
-            let is_named_output_in_source = src
-                .pointer("/routecodex_chat_extension/responses_tool_output_name")
-                .is_some()
-                && src.get("tool_call_id").is_none();
-            let orphan_tool_in_source = is_named_output_in_source
-                || (src.get("role").and_then(Value::as_str) == Some("tool")
-                    && !src
-                        .get("tool_call_id")
-                        .and_then(Value::as_str)
-                        .is_some_and(|id| {
-                            seen_calls.get(id).is_some_and(|call_orders| {
-                                call_orders.iter().any(|call_order| {
-                                    match (call_order, output_order) {
-                                        (Some(call_pos), Some(output_pos)) => {
-                                            call_pos < &output_pos
-                                        }
-                                        _ => true,
-                                    }
-                                })
-                            })
-                        }));
-            if let Some(value) = merge_equivalent_chat_value(src, dec, orphan_tool_in_source) {
-                for (call_idx, call_id) in
-                    super::responses_openai_codec::collect_v3_openai_chat_tool_call_ids_with_indices(
-                        &value,
-                    )
-                {
-                    seen_calls
-                        .entry(call_id)
-                        .or_default()
-                        .push(decoded_provenance.tool_call_order(msg_idx, call_idx));
-                }
+        for (src, dec) in sanitized_source.iter().zip(decoded) {
+            if let Some(value) = merge_equivalent_chat_value(src, dec) {
                 merged.push(value);
             } else {
                 all_matched = false;
@@ -626,29 +592,33 @@ fn merge_responses_chat_histories(
                 .cloned()
                 .unwrap_or_default();
             let result_item_id = tool_output_item_id(result);
-            if let Some(pos) = (0..original_source_len).find(|&idx| {
-                if source_matched[idx]
-                    || merged[idx]["role"] != "tool"
-                    || merged[idx].get("tool_call_id") != result.get("tool_call_id")
-                {
-                    return false;
-                }
-                match (tool_output_item_id(&merged[idx]), result_item_id) {
-                    (Some(source_id), Some(incoming_id)) => source_id == incoming_id,
-                    _ => true,
-                }
-            }) {
-                source_matched[pos] = true;
-                let call_id = merged[pos].get("tool_call_id").and_then(Value::as_str);
-                let orphan_tool_in_source = !call_id.is_some_and(|id| {
-                    merged[..pos].iter().any(|message| {
-                        super::responses_openai_codec::collect_v3_openai_chat_tool_call_ids(message)
-                            .iter()
-                            .any(|call| call == id)
+            let is_candidate_row = |idx: usize| {
+                !source_matched[idx]
+                    && merged[idx]["role"] == "tool"
+                    && merged[idx].get("tool_call_id") == result.get("tool_call_id")
+            };
+            let matched_pos = if let Some(incoming_id) = result_item_id {
+                (0..original_source_len)
+                    .find(|&idx| {
+                        is_candidate_row(idx)
+                            && tool_output_item_id(&merged[idx]) == Some(incoming_id)
                     })
-                });
+                    .or_else(|| {
+                        (0..original_source_len).find(|&idx| {
+                            is_candidate_row(idx) && tool_output_item_id(&merged[idx]).is_none()
+                        })
+                    })
+            } else {
+                (0..original_source_len)
+                    .find(|&idx| {
+                        is_candidate_row(idx) && tool_output_item_id(&merged[idx]).is_none()
+                    })
+                    .or_else(|| (0..original_source_len).find(|&idx| is_candidate_row(idx)))
+            };
+            if let Some(pos) = matched_pos {
+                source_matched[pos] = true;
                 let existing = &mut merged[pos];
-                *existing = merge_equivalent_chat_value(existing, result, orphan_tool_in_source).ok_or_else(|| {
+                *existing = merge_equivalent_chat_value(existing, result).ok_or_else(|| {
                     "Responses inbound canonicalization failed: conflicting tool output representations".to_string()
                 })?;
                 merged_entries[pos] = result_provenance;
@@ -670,11 +640,7 @@ fn merge_responses_chat_histories(
     )
 }
 
-fn merge_equivalent_chat_value(
-    source: &Value,
-    decoded: &Value,
-    allow_orphan_tool_literal_content: bool,
-) -> Option<Value> {
+fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value> {
     match (source, decoded) {
         (Value::Object(source), Value::Object(decoded)) => {
             let empty_assistant_content = |object: &serde_json::Map<String, Value>| {
@@ -745,21 +711,24 @@ fn merge_equivalent_chat_value(
                     // Encrypted-only Responses reasoning omits reasoning_content,
                     // while a Chat twin may carry empty/null reasoning_content.
                 } else if key == "content"
-                    && (comparable_chat_content(&source[key]) == comparable_chat_content(value)
-                        || (allow_orphan_tool_literal_content
-                            && source[key].is_string()
-                            && decoded
-                                .get("routecodex_chat_extension")
-                                .and_then(|ext| ext.get("responses_tool_output_content"))
-                                == Some(&source[key])))
+                    && comparable_chat_content(&source[key]) == comparable_chat_content(value)
                 {
                     // Preserve the source representation; only singleton plain text
-                    // is equivalent to its scalar Chat spelling, and genuinely
-                    // orphaned tool results keep their literal string.
+                    // is equivalent to its scalar Chat spelling.
+                } else if key == "content"
+                    && source[key].is_string()
+                    && decoded
+                        .get("routecodex_chat_extension")
+                        .and_then(|ext| ext.get("responses_tool_output_content"))
+                        == Some(&source[key])
+                {
+                    // Retain the normalized content and let Req04 decide whether
+                    // to restore the literal string for an orphaned output.
+                    merged.insert(key.clone(), value.clone());
                 } else {
                     merged.insert(
                         key.clone(),
-                        merge_equivalent_chat_value(&source[key], value, false)?,
+                        merge_equivalent_chat_value(&source[key], value)?,
                     );
                 }
             }
@@ -768,7 +737,7 @@ fn merge_equivalent_chat_value(
         (Value::Array(source), Value::Array(decoded)) if source.len() == decoded.len() => source
             .iter()
             .zip(decoded)
-            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded, false))
+            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded))
             .collect::<Option<Vec<_>>>()
             .map(Value::Array),
         _ if source == decoded => Some(source.clone()),
@@ -1623,6 +1592,199 @@ mod tests {
         assert!(
             err.contains("conflicting tool output representations"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dual_history_tool_string_matching_decoder_content_merges_with_and_without_parent_and_keeps_normalized_content(
+    ) {
+        let alias_image_json =
+            r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+        for include_parent in [false, true] {
+            let (messages, input) = if include_parent {
+                (
+                    json!([
+                        {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": "call_dual_parent",
+                                "type": "function",
+                                "function": {"name": "read_image", "arguments": "{}"}
+                            }]
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_dual_parent",
+                            "content": alias_image_json
+                        }
+                    ]),
+                    json!([
+                        {
+                            "type": "function_call",
+                            "call_id": "call_dual_parent",
+                            "name": "read_image",
+                            "arguments": "{}"
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_dual_parent",
+                            "output": alias_image_json
+                        }
+                    ]),
+                )
+            } else {
+                (
+                    json!([{
+                        "role": "tool",
+                        "tool_call_id": "call_dual_orphan",
+                        "content": alias_image_json
+                    }]),
+                    json!([{
+                        "type": "function_call_output",
+                        "call_id": "call_dual_orphan",
+                        "output": alias_image_json
+                    }]),
+                )
+            };
+            let raw = raw_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": messages,
+                    "input": input
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+            let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+                .unwrap_or_else(|error| {
+                    panic!("equivalent dual history (include_parent={include_parent}) must merge cleanly at ReqInbound02: {error}")
+                });
+            let merged_messages = normalized.previous.payload.0["messages"]
+                .as_array()
+                .expect("canonical Chat messages");
+            let tool_idx = usize::from(include_parent);
+            assert!(
+                merged_messages[tool_idx]["content"].is_array(),
+                "ReqInbound02 must retain normalized image array regardless of parent presence (include_parent={include_parent}): {}",
+                merged_messages[tool_idx]
+            );
+            assert_eq!(
+                merged_messages[tool_idx]["routecodex_chat_extension"]
+                    ["responses_tool_output_content"],
+                json!(alias_image_json)
+            );
+        }
+
+        // Legacy dual history (preceding assistant call in `messages`, tool output in both)
+        let legacy_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_legacy_paired",
+                            "type": "function",
+                            "function": {"name": "read_image", "arguments": "{}"}
+                        }]
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_legacy_paired",
+                        "content": alias_image_json
+                    }
+                ],
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_legacy_paired",
+                    "output": alias_image_json
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let legacy_normalized =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(legacy_raw)
+                .expect("legacy dual history with preceding parent must merge cleanly");
+        assert!(
+            legacy_normalized.previous.payload.0["messages"][1]["content"].is_array(),
+            "legacy dual merge must retain normalized image array: {}",
+            legacy_normalized.previous.payload.0["messages"][1]
+        );
+    }
+
+    #[test]
+    fn dual_history_tool_search_output_prefers_exact_item_id_over_earlier_idless_row() {
+        let tool_one =
+            json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+        let tool_two =
+            json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": serde_json::to_string(&tool_one).unwrap(),
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_type": "tool_search_output",
+                            "responses_output_field": "tools",
+                            "responses_status": "completed",
+                            "responses_execution": "client"
+                        }
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": serde_json::to_string(&tool_two).unwrap(),
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_type": "tool_search_output",
+                            "responses_output_field": "tools",
+                            "responses_item_id": "tso_2",
+                            "responses_status": "completed",
+                            "responses_execution": "client"
+                        }
+                    }
+                ],
+                "input": [{
+                    "type": "tool_search_output",
+                    "id": "tso_2",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_two
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("exact item_id match must take precedence over earlier ID-less row");
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(messages.len(), 2, "{messages:#?}");
+        assert!(messages[0]["routecodex_chat_extension"]
+            .get("responses_item_id")
+            .is_none());
+        assert_eq!(
+            messages[0]["content"],
+            json!(serde_json::to_string(&tool_one).unwrap())
+        );
+        assert_eq!(
+            messages[1]["routecodex_chat_extension"]["responses_item_id"],
+            json!("tso_2")
+        );
+        assert_eq!(
+            messages[1]["content"],
+            json!(serde_json::to_string(&tool_two).unwrap())
         );
     }
 }
