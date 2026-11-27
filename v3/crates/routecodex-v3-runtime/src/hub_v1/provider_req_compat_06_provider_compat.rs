@@ -138,34 +138,12 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let openai_chat_orphan_tool_literals: Vec<bool> = if input.provider_protocol
-        == V3HubProviderWireProtocol::OpenAiChat
-        && input.previous.previous.execution == super::V3HubExecutionMode::Relay
-    {
-        let provenance = &input
-            .previous
-            .previous
-            .previous
-            .previous
-            .explicit_history_pairing;
-        input
-            .governed_payload()
-            .get("messages")
-            .and_then(Value::as_array)
-            .map(|messages| {
-                messages
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, message)| {
-                        message.get("role").and_then(Value::as_str) == Some("tool")
-                    })
-                    .map(|(msg_idx, _)| provenance.preserve_orphan_tool_output_literal(msg_idx))
-                    .collect()
-            })
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let orphan_tool_output_literals: Vec<bool> =
+        if input.previous.previous.execution == super::V3HubExecutionMode::Relay {
+            input.orphan_tool_output_literals.clone()
+        } else {
+            Vec::new()
+        };
     let side_output = Arc::new(AdjustProviderPrivateRequestSideOutput::default());
     let output = run_v3_single_node_operator(
         V3OperationGraph::Request,
@@ -179,7 +157,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
             side_output: Arc::clone(&side_output),
             execution_mode: input.previous.previous.execution,
             entry_protocol: input.entry_protocol(),
-            openai_chat_orphan_tool_literals,
+            openai_chat_orphan_tool_literals: orphan_tool_output_literals,
         },
     );
     let typed_outcome = side_output

@@ -14,6 +14,7 @@ const OPERATOR_VERSION: &str = "1";
 pub(crate) struct StandardProjectionSideOutput {
     pub(crate) drops: Vec<V3ProjectionDropRecord>,
     pub(crate) namespace_registry: NamespaceToolIdentityRegistry,
+    pub(crate) orphan_tool_output_literals: Vec<bool>,
 }
 
 pub(crate) struct ProjectStandardProviderRequestOperator {
@@ -77,6 +78,7 @@ impl Operator for ProjectStandardProviderRequestOperator {
         *holder = Some(StandardProjectionSideOutput {
             drops: projected.drops,
             namespace_registry: projected.namespace_registry,
+            orphan_tool_output_literals: projected.orphan_tool_output_literals,
         });
         Ok(projected.payload)
     }

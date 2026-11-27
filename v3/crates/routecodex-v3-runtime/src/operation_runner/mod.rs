@@ -624,6 +624,7 @@ pub(crate) fn execute_v3_operation_runner_request_project_standard_provider_requ
         payload,
         drops: side_output.drops,
         namespace_registry: side_output.namespace_registry,
+        orphan_tool_output_literals: side_output.orphan_tool_output_literals,
     })
 }
 

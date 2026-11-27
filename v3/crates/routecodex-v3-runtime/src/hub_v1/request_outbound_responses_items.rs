@@ -1,7 +1,25 @@
+use crate::projection_drop_log::V3ProjectionDropRecord;
 use crate::protocol_tables::{
     map_field as table_map_field, map_value as table_map_value, V3TableDirection, V3TableKind,
 };
 use serde_json::{json, Map, Value};
+
+const RESPONSES_HOSTED_WEB_SEARCH_CALL_REGISTERED_FIELDS: &[&str] = &[
+    "type",
+    "id",
+    "call_id",
+    "tool_call_id",
+    "status",
+    "action",
+    "arguments",
+    "execution",
+    "result",
+    "result_items",
+    "results",
+    "output",
+    "error",
+    "errors",
+];
 
 use super::super::request_outbound_mcp_names::provider_function_name;
 use super::super::request_outbound_tool_id::compact_tool_id;
@@ -262,6 +280,25 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
     preserve_native_tool_output_id: bool,
     restore_responses_hosted_web_search: bool,
 ) -> Result<Option<Value>, String> {
+    let mut unused_drops = Vec::new();
+    chat_tool_result_to_responses_input_item_with_provenance_and_drops(
+        row,
+        omit_tool_output_id,
+        preserve_native_tool_output_id,
+        restore_responses_hosted_web_search,
+        None,
+        &mut unused_drops,
+    )
+}
+
+pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops(
+    row: &Map<String, Value>,
+    omit_tool_output_id: bool,
+    preserve_native_tool_output_id: bool,
+    restore_responses_hosted_web_search: bool,
+    source_input_index: Option<usize>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Option<Value>, String> {
     let raw_responses_tool_output_type = row
         .get("routecodex_chat_extension")
         .and_then(|extension| extension.get("responses_tool_output_type"))
@@ -297,7 +334,12 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
         })
         .unwrap_or_default();
     if responses_tool_output_type == "web_search_call" {
-        return build_typed_responses_hosted_web_search_call_item(&output).map(Some);
+        return build_typed_responses_hosted_web_search_call_item(
+            &output,
+            source_input_index,
+            drops,
+        )
+        .map(Some);
     }
     if responses_tool_output_type == "tool_search_output" {
         let call_id = call_id.ok_or_else(|| {
@@ -414,7 +456,11 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
     Ok(Some(Value::Object(item)))
 }
 
-fn build_typed_responses_hosted_web_search_call_item(output: &str) -> Result<Value, String> {
+fn build_typed_responses_hosted_web_search_call_item(
+    output: &str,
+    source_input_index: Option<usize>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Value, String> {
     let parsed: Value = serde_json::from_str(output).map_err(|error| {
         format!("MalformedOutboundField target_protocol=responses path=$.input[].web_search_call: {error}")
     })?;
@@ -428,7 +474,29 @@ fn build_typed_responses_hosted_web_search_call_item(output: &str) -> Result<Val
                 .to_string(),
         );
     }
-    Ok(parsed)
+    let parent_path = match source_input_index {
+        Some(index) => format!("$.input[{index}]"),
+        None => "$.input[].web_search_call".to_string(),
+    };
+    let mut projected = Map::new();
+    for (key, value) in object {
+        if RESPONSES_HOSTED_WEB_SEARCH_CALL_REGISTERED_FIELDS.contains(&key.as_str()) {
+            projected.insert(key.clone(), value.clone());
+            continue;
+        }
+        // Reserved internal carriers must never be emitted or re-interpreted on wire.
+        if key == "routecodex_chat_extension" {
+            continue;
+        }
+        drops.push(V3ProjectionDropRecord::new(
+            "responses",
+            super::json_path_child(&parent_path, key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "build_typed_responses_hosted_web_search_call_item",
+        ));
+    }
+    Ok(Value::Object(projected))
 }
 
 fn project_responses_item_extension_fields(

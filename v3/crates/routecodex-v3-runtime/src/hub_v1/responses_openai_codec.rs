@@ -1882,7 +1882,7 @@ fn build_v3_openai_chat_hosted_tool_result_event(
         }
     }
     for (key, value) in item {
-        if event.contains_key(key) {
+        if key == "routecodex_chat_extension" || event.contains_key(key) {
             continue;
         }
         event.insert(key.clone(), value.clone());

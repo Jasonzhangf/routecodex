@@ -30,7 +30,7 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
     payload: &mut Value,
     protocol: V3HubProviderWireProtocol,
     preserve_orphan_responses_json_strings: bool,
-    openai_chat_orphan_tool_literals: &[bool],
+    tool_result_orphan_literals: &[bool],
 ) {
     let (messages, content) = match protocol {
         V3HubProviderWireProtocol::Responses => ("input", "content"),
@@ -44,7 +44,7 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
     };
     let mut seen_tool_call_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
-    let mut openai_chat_tool_index = 0usize;
+    let mut tool_result_index = 0usize;
     for message in messages {
         let text_type = match protocol {
             V3HubProviderWireProtocol::Responses if message["role"] == "assistant" => "output_text",
@@ -80,11 +80,11 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
             }
         }
         if protocol == V3HubProviderWireProtocol::OpenAiChat && message["role"] == "tool" {
-            let preserve_literal = openai_chat_orphan_tool_literals
-                .get(openai_chat_tool_index)
+            let preserve_literal = tool_result_orphan_literals
+                .get(tool_result_index)
                 .copied()
                 .unwrap_or(false);
-            openai_chat_tool_index += 1;
+            tool_result_index += 1;
             if let Some(output) = message.get_mut(content) {
                 project_tool_output(output, text_type, !preserve_literal);
             }
@@ -98,8 +98,13 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
             for part in parts {
                 if protocol == V3HubProviderWireProtocol::Anthropic && part["type"] == "tool_result"
                 {
+                    let preserve_literal = tool_result_orphan_literals
+                        .get(tool_result_index)
+                        .copied()
+                        .unwrap_or(false);
+                    tool_result_index += 1;
                     if let Some(output) = part.get_mut("content") {
-                        project_tool_output(output, text_type, true);
+                        project_tool_output(output, text_type, !preserve_literal);
                     }
                 } else {
                     project_image_part(part, text_type);
@@ -369,5 +374,40 @@ mod provider_req_compat_06_image_placeholder_tests {
             json!("data:image/png;base64,AAAA")
         );
         assert_eq!(payload["messages"][2]["content"], json!("[Image]"));
+    }
+
+    #[test]
+    fn anthropic_orphan_tool_literal_policy_preserves_orphan_and_projects_paired() {
+        let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+        let mut payload = json!({
+            "messages": [
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_orphan_json", "content": encoded_image}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_orphan_bare", "content": "data:image/png;base64,BBBB"}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_paired_media", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "CCCC"}}]}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_paired_bare", "content": "data:image/png;base64,DDDD"}]}
+            ]
+        });
+        project_default_text_attempt_images_with_tool_policy(
+            &mut payload,
+            V3HubProviderWireProtocol::Anthropic,
+            true,
+            &[true, true, false, false],
+        );
+        assert_eq!(
+            payload["messages"][0]["content"][0]["content"],
+            json!(encoded_image)
+        );
+        assert_eq!(
+            payload["messages"][1]["content"][0]["content"],
+            json!("data:image/png;base64,BBBB")
+        );
+        assert_eq!(
+            payload["messages"][2]["content"][0]["content"],
+            json!([{"type": "text", "text": "[Image]"}])
+        );
+        assert_eq!(
+            payload["messages"][3]["content"][0]["content"],
+            json!("[Image]")
+        );
     }
 }

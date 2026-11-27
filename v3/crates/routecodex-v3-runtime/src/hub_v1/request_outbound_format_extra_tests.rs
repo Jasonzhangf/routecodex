@@ -1750,3 +1750,49 @@ fn legacy_messages_web_search_call_marker_cannot_replace_type_or_call_id() {
         json!("{\"type\":\"message\",\"role\":\"developer\",\"content\":\"hijack\"}")
     );
 }
+
+#[test]
+fn native_hosted_web_search_call_projects_registered_fields_and_records_unmapped_drops() {
+    let (canonical, provenance) =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_with_provenance(
+            &json!({
+                "model": "gpt-test",
+                "input": [{
+                    "type": "web_search_call",
+                    "id": "ws_native_fields",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "RouteCodex"},
+                    "vendor_extra": {"ticket": 7},
+                    "routecodex_chat_extension": {"spoof": true}
+                }]
+            }),
+        )
+        .expect("native web_search_call must decode");
+    let (wire, drops) =
+        super::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            &canonical,
+            true,
+            false,
+            Some(&provenance),
+        )
+        .expect("native hosted web_search_call projection must succeed");
+    assert_eq!(
+        wire["input"],
+        json!([{
+            "type": "web_search_call",
+            "id": "ws_native_fields",
+            "status": "completed",
+            "action": {"type": "search", "query": "RouteCodex"}
+        }])
+    );
+    assert!(wire["input"][0].get("vendor_extra").is_none());
+    assert!(wire["input"][0].get("routecodex_chat_extension").is_none());
+    assert_eq!(drops.len(), 1, "{drops:?}");
+    assert_eq!(drops[0].target_protocol, "responses");
+    assert_eq!(drops[0].json_path, "$.input[0].vendor_extra");
+    assert_eq!(
+        drops[0].reason,
+        "unmapped_target_protocol_field_unrepresentable"
+    );
+    assert_eq!(drops[0].canonical_value, json!({"ticket": 7}));
+}

@@ -7,10 +7,10 @@ use super::{
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance,
     classify_v3_provider_compat_error,
-    encode_v3_responses_semantic_as_anthropic_request_with_drops, provider_protocol_compat_id,
-    V3HubEntryProtocol, V3HubExplicitHistoryProvenance, V3HubProviderWireProtocol,
-    V3HubReqTarget06Resolved, V3HubTransportIntent, V3ProviderCompatError,
-    V3ProviderCompatProfileId,
+    encode_v3_responses_semantic_as_anthropic_request_with_drops_and_provenance,
+    provider_protocol_compat_id, V3HubEntryProtocol, V3HubExplicitHistoryProvenance,
+    V3HubProviderWireProtocol, V3HubReqTarget06Resolved, V3HubTransportIntent,
+    V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use crate::selected_provider_model_binding::{
@@ -28,6 +28,7 @@ pub struct V3HubReqOutbound07ProviderSemantic {
     pub(crate) standard_provider_payload: super::V3HubOpaquePayload,
     pub(crate) drops: Vec<V3ProjectionDropRecord>,
     pub(crate) namespace_registry: NamespaceToolIdentityRegistry,
+    pub(crate) orphan_tool_output_literals: Vec<bool>,
 }
 
 pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
@@ -70,6 +71,7 @@ pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         standard_provider_payload: super::V3HubOpaquePayload(Arc::new(projected.payload)),
         drops: projected.drops,
         namespace_registry: projected.namespace_registry,
+        orphan_tool_output_literals: projected.orphan_tool_output_literals,
     })
 }
 
@@ -109,6 +111,7 @@ pub(crate) struct V3HubReqOutbound07StandardProjection {
     pub(crate) payload: Value,
     pub(crate) drops: Vec<V3ProjectionDropRecord>,
     pub(crate) namespace_registry: NamespaceToolIdentityRegistry,
+    pub(crate) orphan_tool_output_literals: Vec<bool>,
 }
 
 pub(crate) fn project_v3_operation_runner_standard_provider_request(
@@ -141,8 +144,27 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
         governed_payload,
         &provider_protocol_compat_id(provider_protocol),
     )?;
+    let mut orphan_tool_output_literals = Vec::new();
     let mut provider_protocol_payload = match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
+            orphan_tool_output_literals = governed_payload
+                .get("messages")
+                .and_then(Value::as_array)
+                .map(|messages| {
+                    messages
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, message)| {
+                            message.get("role").and_then(Value::as_str) == Some("tool")
+                        })
+                        .map(|(msg_idx, _)| {
+                            explicit_history_pairing.is_some_and(|provenance| {
+                                provenance.preserve_orphan_tool_output_literal(msg_idx)
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let (payload, openai_chat_drops) =
                 build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
                     governed_payload,
@@ -183,9 +205,13 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
                     governed_payload,
                     entry_protocol,
                 )?;
-            let (payload, semantic_drops) =
-                encode_v3_responses_semantic_as_anthropic_request_with_drops(source)
-                    .map_err(|error| error.to_string())?;
+            let (payload, semantic_drops, anthropic_orphan_literals) =
+                encode_v3_responses_semantic_as_anthropic_request_with_drops_and_provenance(
+                    source,
+                    explicit_history_pairing,
+                )
+                .map_err(|error| error.to_string())?;
+            orphan_tool_output_literals = anthropic_orphan_literals;
             anthropic_drops.extend(semantic_drops);
             drops.extend(anthropic_drops);
             payload
@@ -219,5 +245,6 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
         payload,
         drops,
         namespace_registry,
+        orphan_tool_output_literals,
     })
 }
