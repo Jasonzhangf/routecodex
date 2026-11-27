@@ -6649,6 +6649,8 @@ async fn responses_client_anthropic_cache_usage_projects_openai_details_shape() 
 #[derive(Clone)]
 struct ControlledAnthropicReasoningState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
+    request_count: Arc<std::sync::atomic::AtomicUsize>,
+    strict_reasoning_lookup_followup: bool,
 }
 
 fn anthropic_sse_bytes(events: Vec<Value>) -> Vec<u8> {
@@ -6749,6 +6751,20 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     let messages = body["messages"]
         .as_array()
         .ok_or_else(|| format!("missing provider messages: {body}"))?;
+    let opening_message = messages
+        .first()
+        .ok_or_else(|| format!("missing opening user message: {body}"))?;
+    if opening_message["role"] != "user"
+        || opening_message["content"]
+            .as_array()
+            .and_then(|content| content.first())
+            .and_then(|block| block["text"].as_str())
+            != Some(REASONING_LOOKUP_CONTROL)
+    {
+        return Err(format!(
+            "missing opening reasoning lookup control text: {body}"
+        ));
+    }
     let mut tool_use_at = None;
     let mut tool_result_at = None;
     for (message_index, message) in messages.iter().enumerate() {
@@ -6815,12 +6831,14 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
     let tool_result =
         json!({"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"});
     let valid = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[tool_use.clone()]},
         {"role":"user","content":[tool_result.clone()]}
     ]});
     assert!(validate_reasoning_lookup_followup(&valid).is_ok());
 
     let reversed = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_result.clone()]},
         {"role":"assistant","content":[tool_use.clone()]}
     ]});
@@ -6829,6 +6847,7 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         .contains("must immediately follow"));
 
     let wrong_roles = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_use.clone()]},
         {"role":"assistant","content":[tool_result.clone()]}
     ]});
@@ -6837,6 +6856,7 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         .contains("assistant message"));
 
     let intervening_message = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[tool_use.clone()]},
         {"role":"user","content":[{"type":"text","text":"intervening"}]},
         {"role":"user","content":[tool_result.clone()]}
@@ -6846,12 +6866,55 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         .contains("must immediately follow"));
 
     let text_before_result = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[tool_use]},
         {"role":"user","content":[{"type":"text","text":"before result"},tool_result]}
     ]});
     assert!(validate_reasoning_lookup_followup(&text_before_result)
         .unwrap_err()
         .contains("must start its user message content"));
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let first = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"messages":[
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":REASONING_LOOKUP_CALL_ID,
+                "name":REASONING_LOOKUP_TOOL,
+                "input":{"query":"p0 reasoning","limit":3}
+            }]},
+            {"role":"user","content":[
+                {"type":"text","text":"misplaced result"},
+                {"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"}
+            ]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    shutdown.send(()).unwrap();
 }
 
 // Controlled provider fixture: a reasoning block that omits its native
@@ -6903,6 +6966,9 @@ async fn controlled_anthropic_reasoning_upstream(
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    let request_index = state
+        .request_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let provider_stream = body["stream"].as_bool().unwrap_or(false);
     assert_eq!(
         header_text(&headers, "x-api-key").as_deref(),
@@ -6932,14 +6998,18 @@ async fn controlled_anthropic_reasoning_upstream(
     let mixed_reasoning_order = control("mixed-reasoning-order");
     let empty_signed_reasoning = control("empty-signed-reasoning-control");
     let null_empty_ciphertext_reasoning = control(REASONING_LOOKUP_CONTROL);
-    let bytes = if null_empty_ciphertext_reasoning && followup {
-        if let Err(error) = validate_reasoning_lookup_followup(&body) {
-            return Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::from(error))
-                .unwrap();
+    let bytes = if state.strict_reasoning_lookup_followup {
+        if request_index == 0 {
+            anthropic_sse_reasoning_tool_call_fixture()
+        } else {
+            if let Err(error) = validate_reasoning_lookup_followup(&body) {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(error))
+                    .unwrap();
+            }
+            anthropic_sse_final_fixture()
         }
-        anthropic_sse_final_fixture()
     } else if null_empty_ciphertext_reasoning {
         anthropic_sse_reasoning_tool_call_fixture()
     } else if empty_signed_reasoning && provider_stream {
@@ -6971,7 +7041,9 @@ async fn controlled_anthropic_reasoning_upstream(
         .unwrap()
 }
 
-async fn start_controlled_anthropic_reasoning_upstream() -> (
+async fn start_controlled_anthropic_reasoning_upstream_with_mode(
+    strict_reasoning_lookup_followup: bool,
+) -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
     oneshot::Sender<()>,
@@ -6987,6 +7059,8 @@ async fn start_controlled_anthropic_reasoning_upstream() -> (
         )
         .with_state(Arc::new(ControlledAnthropicReasoningState {
             captures: captures_tx,
+            request_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            strict_reasoning_lookup_followup,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -6997,6 +7071,22 @@ async fn start_controlled_anthropic_reasoning_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_controlled_anthropic_reasoning_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    start_controlled_anthropic_reasoning_upstream_with_mode(false).await
+}
+
+async fn start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    start_controlled_anthropic_reasoning_upstream_with_mode(true).await
 }
 
 fn reasoning_client_completed_response(body: &str) -> Value {
@@ -7211,7 +7301,7 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
-        start_controlled_anthropic_reasoning_upstream().await;
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
     let manifest = responses_relay_provider_protocol_manifest(
         free_port(),
         free_port(),
