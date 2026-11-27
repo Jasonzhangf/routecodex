@@ -326,6 +326,7 @@ pub(super) struct V3ProviderHealthState {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 struct V3ProviderAdaptiveHistory {
     rate_limit_episode: Option<V3ProviderRateLimitEpisode>,
     attempts: u32,
@@ -373,12 +374,14 @@ struct V3ProviderFailureSessionKey {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 struct V3ProviderCooldown {
     reason: String,
     until_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 struct V3ProviderConsecutiveFailure {
     failure_count: u32,
     last_failure_at_ms: u64,
@@ -2592,6 +2595,9 @@ fn global_availability_projection(
 
 include!("health/runtime_projection.rs");
 include!("health/legacy_api.rs");
+
+#[cfg(any(test, feature = "test-health-observer"))]
+pub mod test_observer;
 
 #[cfg(test)]
 #[path = "health_tests.rs"]

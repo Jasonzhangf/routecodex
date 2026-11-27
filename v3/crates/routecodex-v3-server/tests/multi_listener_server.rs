@@ -8,7 +8,7 @@ use axum::{
     routing::post,
     Router,
 };
-use futures_util::{future::join_all, SinkExt, StreamExt};
+use futures_util::{future::join_all, FutureExt, SinkExt, StreamExt};
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, parse_v3_config_02_authoring, V3EntryProtocolExecutionMode,
 };
@@ -2229,6 +2229,61 @@ fn p6_manifest(
     p6_manifest_with_context_window(port_a, port_b, provider_base_url, 128_000)
 }
 
+fn target_origin_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    provider_enabled: bool,
+    debug_log: &std::path::Path,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let debug_log = serde_json::to_string(&debug_log.to_string_lossy()).unwrap();
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+enabled = {provider_enabled}
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools", "vision"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+log_file = {debug_log}
+snapshots = false
+dry_run = false
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 /// `max_context_tokens` bounds every candidate in the p6 route pools, so a
 /// window too small for the request forces a selection-time pool exhaustion
 /// with no provider attempt at all.
@@ -3280,6 +3335,15 @@ async fn controlled_responses_upstream(
     }
 }
 
+async fn target_origin_provider_ingress(
+    State(ingress): State<Arc<std::sync::atomic::AtomicUsize>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response<Body> {
+    ingress.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    next.run(request).await
+}
+
 async fn controlled_responses_relay_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -3402,6 +3466,46 @@ async fn start_controlled_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_target_origin_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<std::sync::atomic::AtomicUsize>,
+    oneshot::Sender<()>,
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let ingress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_responses_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&ingress),
+            target_origin_provider_ingress,
+        ));
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        ingress,
+        shutdown_tx,
+        task,
+        address,
+    )
 }
 
 #[derive(Clone)]
@@ -12393,10 +12497,20 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
                 let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
                 assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
-                assert!(
-                    captures.try_recv().is_ok(),
+                let capture = captures.try_recv().expect(&format!(
                     "{endpoint} must exercise actual provider transport"
-                );
+                ));
+                if endpoint == "/v1/responses/compact" && streaming {
+                    assert_eq!(
+                        capture.body,
+                        json!({
+                            "model":"wire-test",
+                            "input":"hello",
+                            "max_output_tokens":4096
+                        }),
+                        "native compact must omit the client stream field from its provider body"
+                    );
+                }
                 assert!(
                     received.is_ok(),
                     "{endpoint} failed to reach a terminal transport outcome"
@@ -12614,111 +12728,825 @@ async fn p6_provider_503_reaches_a_streaming_client() {
     failure_shutdown.send(()).unwrap();
 }
 
-#[tokio::test]
-async fn responses_selection_exhaustion_never_reaches_the_client() {
-    let _test_guard = TEST_LOCK.lock().await;
-    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-selection-exhaustion");
-    let handle = spawn_v3_server_aggregate(p6_manifest_with_context_window(
-        free_port(),
-        free_port(),
-        &success_base_url,
-        2_000,
-    ))
-    .await
-    .unwrap();
-    let client = reqwest::Client::new();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+const TARGET_ORIGIN_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);
 
-    // Positive control: the same upstream serves real business content while
-    // its provider is enabled.
-    let served = client
-        .post(&endpoint)
-        .json(&json!({"model":"client-test","input":"hello"}))
-        .send()
-        .await
-        .expect("an enabled provider must serve the control request");
-    assert_eq!(served.status(), StatusCode::OK);
-    let served_body: Value = served.json().await.unwrap();
-    assert_eq!(served_body["output_text"], "ok");
-    assert_eq!(served_body["status"], "completed");
-    let control_capture = captures.recv().await.unwrap();
-    assert_eq!(
-        control_capture.body["input"],
-        json!([{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}])
-    );
-    assert!(captures.try_recv().is_err());
-    handle.shutdown().await;
+struct TargetOriginEnvGuard {
+    previous: Vec<(&'static str, Option<OsString>)>,
+}
 
-    // A separate declared manifest disables every candidate provider. This
-    // causes genuine selection exhaustion without rejecting context estimates.
-    let mut manifest =
-        p6_manifest_with_context_window(free_port(), free_port(), &success_base_url, 2_000);
-    for provider in manifest.providers.values_mut() {
-        provider.enabled = false;
+impl TargetOriginEnvGuard {
+    fn new(key_value: Option<&str>, cooldown_state: Option<&str>) -> Self {
+        let previous = vec![
+            ("V3_P6_TEST_KEY", std::env::var_os("V3_P6_TEST_KEY")),
+            (
+                "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+                std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE"),
+            ),
+        ];
+        for (name, value) in [
+            ("V3_P6_TEST_KEY", key_value),
+            ("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE", cooldown_state),
+        ] {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        Self { previous }
     }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let addr = handle.listeners[0].addr;
-    let endpoint = format!("http://{addr}/v1/responses");
-    let long_input = "context window exhaustion probe ".repeat(600);
-    let mut streaming = client
-        .post(&endpoint)
-        .json(&json!({"model":"client-test","input":long_input,"stream":true}))
-        .send()
-        .await
-        .expect("a streaming client must receive the SSE response head");
-    assert_eq!(streaming.status(), StatusCode::OK);
-    assert_eq!(streaming.headers()["content-type"], "text/event-stream");
-    let mut stream_bytes = Vec::new();
-    loop {
-        match streaming.chunk().await {
-            Ok(Some(chunk)) => stream_bytes.extend_from_slice(&chunk),
-            Err(_) => break,
-            Ok(None) => panic!("an exhausted selection must abort the streaming body"),
+}
+
+impl Drop for TargetOriginEnvGuard {
+    fn drop(&mut self) {
+        for (name, value) in &self.previous {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
         }
     }
-    let stream_text = String::from_utf8(stream_bytes).unwrap();
-    assert!(
-        stream_text.starts_with(":"),
-        "SSE must emit a transport comment: {stream_text}"
-    );
-    assert!(
-        stream_text
-            .lines()
-            .all(|line| line.is_empty() || line.starts_with(':')),
-        "SSE exhaustion must emit only comments, no business/error/DONE events: {stream_text}"
-    );
+}
 
-    let nonstreaming = client
-        .post(&endpoint)
-        .json(&json!({"model":"client-test","input":long_input}))
-        .send()
-        .await;
+struct TargetOriginHttpResponse {
+    status: StatusCode,
+    body: Vec<u8>,
+}
+
+async fn target_origin_http(
+    client: &reqwest::Client,
+    request: reqwest::Request,
+    context: &str,
+) -> TargetOriginHttpResponse {
+    timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, async {
+        let response = client
+            .execute(request)
+            .await
+            .unwrap_or_else(|error| panic!("{context} request failed: {error}"));
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .unwrap_or_else(|error| panic!("{context} body failed: {error}"))
+            .to_vec();
+        TargetOriginHttpResponse { status, body }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context} exchange must not time out"))
+}
+
+async fn target_origin_raw_request(
+    addr: std::net::SocketAddr,
+    head: String,
+    body: &[u8],
+    context: &str,
+) -> Vec<u8> {
+    timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, async {
+        let mut socket = TcpStream::connect(addr)
+            .await
+            .unwrap_or_else(|error| panic!("{context} connect failed: {error}"));
+        socket
+            .write_all(head.as_bytes())
+            .await
+            .unwrap_or_else(|error| panic!("{context} head write failed: {error}"));
+        socket
+            .write_all(body)
+            .await
+            .unwrap_or_else(|error| panic!("{context} body write failed: {error}"));
+        let mut wire = Vec::new();
+        socket
+            .read_to_end(&mut wire)
+            .await
+            .unwrap_or_else(|error| panic!("{context} close failed: {error}"));
+        wire
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context} must complete without a transport timeout"))
+}
+
+async fn target_origin_raw_json(addr: std::net::SocketAddr, context: &str) -> Vec<u8> {
+    let body = serde_json::to_vec(&json!({"model":"client-test","input":"hello"})).unwrap();
+    target_origin_raw_request(
+        addr,
+        format!(
+            "POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        ),
+        &body,
+        context,
+    )
+    .await
+}
+
+async fn assert_target_origin_listener_healthy(
+    client: &reqwest::Client,
+    addr: std::net::SocketAddr,
+    context: &str,
+) {
+    let health = client.get(format!("http://{addr}/health")).build().unwrap();
+    let health = target_origin_http(client, health, &format!("{context} health")).await;
     assert!(
-        nonstreaming.is_err(),
-        "an exhausted selection must close the nonstreaming client without a payload"
+        health.status.is_success(),
+        "{context} health returned {}: {:?}",
+        health.status,
+        String::from_utf8_lossy(&health.body)
     );
-    let body = serde_json::to_vec(&json!({"model":"client-test","input":long_input})).unwrap();
-    let mut socket = TcpStream::connect(addr).await.unwrap();
-    socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
-    socket.write_all(&body).await.unwrap();
-    let mut wire = Vec::new();
-    timeout(Duration::from_secs(5), socket.read_to_end(&mut wire))
-        .await
-        .expect("JSON exhaustion must terminate promptly")
+    let cooldown = client
+        .get(format!("http://{addr}/_routecodex/health/cooldown-pool"))
+        .build()
         .unwrap();
+    let cooldown = target_origin_http(client, cooldown, &format!("{context} cooldown")).await;
     assert!(
-        wire.is_empty(),
-        "JSON exhaustion must send zero response bytes: {wire:?}"
+        cooldown.status.is_success(),
+        "{context} cooldown returned {}: {:?}",
+        cooldown.status,
+        String::from_utf8_lossy(&cooldown.body)
     );
-    assert!(
-        captures.try_recv().is_err(),
-        "disabled providers must receive no requests after control"
-    );
+    let cooldown: Value = serde_json::from_slice(&cooldown.body)
+        .unwrap_or_else(|error| panic!("{context} cooldown body is not JSON: {error}"));
+    assert_eq!(cooldown["entries"], json!([]), "{context}");
+}
 
-    std::env::remove_var("V3_P6_TEST_KEY");
-    handle.shutdown().await;
-    success_shutdown.send(()).unwrap();
+async fn close_target_origin_upstream(
+    shutdown: oneshot::Sender<()>,
+    mut task: tokio::task::JoinHandle<()>,
+    address: std::net::SocketAddr,
+    context: &str,
+) {
+    let mut errors = Vec::new();
+    if shutdown.send(()).is_err() {
+        errors.push(format!("{context} upstream shutdown receiver was lost"));
+    }
+    match timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, &mut task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => errors.push(format!("{context} upstream task failed: {error}")),
+        Err(_) => {
+            task.abort();
+            let joined = timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, task).await;
+            errors.push(format!(
+                "{context} upstream shutdown timed out; aborted task join: {joined:?}"
+            ));
+        }
+    }
+    errors.extend(wait_for_target_origin_addresses_released(&[address], context).await);
+    assert!(
+        errors.is_empty(),
+        "{context} upstream closeout failed: {errors:?}"
+    );
+}
+
+async fn wait_for_target_origin_addresses_released(
+    addresses: &[std::net::SocketAddr],
+    context: &str,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    for address in addresses {
+        let release = timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, async {
+            loop {
+                match tokio::net::TcpListener::bind(address).await {
+                    Ok(listener) => {
+                        drop(listener);
+                        return Ok(());
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+        })
+        .await;
+        match release {
+            Ok(Ok(())) => eprintln!("{context} address={address} released=true"),
+            Ok(Err(error)) => errors.push(format!(
+                "{context} address {address} release check failed: {error}"
+            )),
+            Err(_) => errors.push(format!(
+                "{context} address {address} was not released within {TARGET_ORIGIN_EXCHANGE_TIMEOUT:?}"
+            )),
+        }
+    }
+    errors
+}
+
+struct TargetOriginAggregatePhaseOutcome {
+    phase: Result<(), Box<dyn std::any::Any + Send>>,
+    closeout_errors: Vec<String>,
+}
+
+struct TargetOriginPublicPhases {
+    enabled: TargetOriginAggregatePhaseOutcome,
+    disabled: TargetOriginAggregatePhaseOutcome,
+}
+
+struct TargetOriginPublicFixtureOutcome {
+    execution: Result<TargetOriginPublicPhases, Box<dyn std::any::Any + Send>>,
+    upstream_cleanup: Result<(), Box<dyn std::any::Any + Send>>,
+    ingress_after_upstream: usize,
+    capture_after_upstream_empty: bool,
+    env_restored: bool,
+    home_removed: bool,
+}
+
+fn target_origin_panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            panic
+                .downcast_ref::<&str>()
+                .map(|message| message.to_string())
+        })
+        .unwrap_or_else(|| "non-string panic payload".to_string())
+}
+
+fn assert_target_origin_aggregate_phase_succeeded(
+    outcome: &TargetOriginAggregatePhaseOutcome,
+    context: &str,
+) {
+    assert!(
+        outcome.phase.is_ok(),
+        "{context} phase failed: {}",
+        outcome
+            .phase
+            .as_ref()
+            .err()
+            .map(|panic| target_origin_panic_message(panic.as_ref()))
+            .unwrap_or_default()
+    );
+    assert!(
+        outcome.closeout_errors.is_empty(),
+        "{context} closeout failed: {:?}",
+        outcome.closeout_errors
+    );
+}
+
+async fn run_target_origin_aggregate_phase(
+    handle: routecodex_v3_server::V3ServerAggregateHandle,
+    addresses: Vec<std::net::SocketAddr>,
+    phase: impl std::future::Future<Output = ()>,
+    context: &str,
+) -> TargetOriginAggregatePhaseOutcome {
+    let phase = std::panic::AssertUnwindSafe(phase).catch_unwind().await;
+    let mut closeout_errors = Vec::new();
+    let closeout = timeout(
+        TARGET_ORIGIN_EXCHANGE_TIMEOUT,
+        std::panic::AssertUnwindSafe(handle.shutdown()).catch_unwind(),
+    )
+    .await;
+    match closeout {
+        Ok(Ok(failures)) => closeout_errors.extend(
+            failures
+                .into_iter()
+                .map(|failure| format!("{context} aggregate shutdown failure: {failure:?}")),
+        ),
+        Ok(Err(panic)) => closeout_errors.push(format!(
+            "{context} aggregate shutdown panicked while preserving later assertion ownership: {}",
+            panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| {
+                    panic
+                        .downcast_ref::<&str>()
+                        .map(|message| message.to_string())
+                })
+                .unwrap_or_else(|| "non-string panic payload".to_string())
+        )),
+        Err(_) => closeout_errors.push(format!(
+            "{context} aggregate shutdown exceeded {TARGET_ORIGIN_EXCHANGE_TIMEOUT:?}"
+        )),
+    }
+    closeout_errors.extend(
+        wait_for_target_origin_addresses_released(&addresses, &format!("{context} closeout")).await,
+    );
+    if phase.is_err() && !closeout_errors.is_empty() {
+        eprintln!(
+            "{context} aggregate closeout failed while preserving the original phase assertion: {closeout_errors:?}"
+        );
+    }
+    TargetOriginAggregatePhaseOutcome {
+        phase,
+        closeout_errors,
+    }
+}
+
+#[tokio::test]
+async fn responses_selection_exhaustion_never_reaches_the_client() {
+    let outcome = run_target_origin_public_fixture(false).await;
+    let phases = outcome.execution.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "legal public fixture execution failed before cleanup: {}",
+            target_origin_panic_message(panic.as_ref())
+        )
+    });
+    assert_target_origin_aggregate_phase_succeeded(&phases.enabled, "enabled provider control");
+    assert_target_origin_aggregate_phase_succeeded(&phases.disabled, "disabled provider Target09");
+    assert_eq!(
+        outcome.ingress_after_upstream, 1,
+        "legal fixture must retain exactly the enabled control ingress after the upstream join"
+    );
+    assert!(
+        outcome.capture_after_upstream_empty,
+        "legal fixture must leave no parsed capture after the upstream join"
+    );
+    outcome.upstream_cleanup.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "upstream cleanup failed after the legal fixture: {}",
+            target_origin_panic_message(panic.as_ref())
+        )
+    });
+    assert!(
+        outcome.env_restored,
+        "fixture environment variables must be restored"
+    );
+    assert!(
+        outcome.home_removed,
+        "isolated fixture directory must be removed"
+    );
+}
+
+#[tokio::test]
+async fn target_origin_disabled_phase_rejects_pre_handler_ingress() {
+    let outcome = run_target_origin_public_fixture(true).await;
+    let preserved_phase_message = outcome
+        .execution
+        .as_ref()
+        .ok()
+        .and_then(|phases| phases.disabled.phase.as_ref().err())
+        .map(|panic| target_origin_panic_message(panic.as_ref()))
+        .unwrap_or_else(|| "<disabled phase did not panic>".to_string());
+    assert!(
+        outcome.capture_after_upstream_empty,
+        "the negative control must not accept any parsed capture"
+    );
+    assert_eq!(
+        outcome.ingress_after_upstream, 2,
+        "negative control must observe exactly one enabled request plus one injected pre-handler request through the upstream join"
+    );
+    outcome.upstream_cleanup.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "upstream cleanup failed after the negative control: {}; preserved disabled phase: {preserved_phase_message}",
+            target_origin_panic_message(panic.as_ref()),
+        )
+    });
+    assert!(
+        outcome.env_restored,
+        "fixture environment variables must be restored"
+    );
+    assert!(
+        outcome.home_removed,
+        "isolated fixture directory must be removed"
+    );
+    let phases = outcome.execution.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "negative control execution failed before cleanup: {}",
+            target_origin_panic_message(panic.as_ref())
+        )
+    });
+    assert_target_origin_aggregate_phase_succeeded(
+        &phases.enabled,
+        "negative-control enabled provider phase",
+    );
+    assert!(
+        phases.disabled.closeout_errors.is_empty(),
+        "negative-control disabled-phase closeout failed: {:?}; preserved disabled phase: {preserved_phase_message}",
+        phases.disabled.closeout_errors,
+    );
+    let disabled_panic = phases.disabled.phase.as_ref().unwrap_err();
+    let message = target_origin_panic_message(disabled_panic.as_ref());
+    assert!(
+        message.contains("disabled pre-handler ingress must retain the enabled total"),
+        "shared pre-request guard was not preserved: {message}"
+    );
+    eprintln!(
+        "pre-handler counterexample: original ingress assertion preserved after fixture cleanup; ingress_after_upstream=2 capture_empty=true"
+    );
+}
+
+async fn run_target_origin_public_fixture(
+    inject_pre_handler_ingress: bool,
+) -> TargetOriginPublicFixtureOutcome {
+    let _test_guard = TEST_LOCK.lock().await;
+    let original_home = std::env::var_os("HOME");
+    let fixture_home = TestHomeGuard::new("target-origin-public");
+    let debug_log = fixture_home.path.join("target-origin-debug.log");
+    let original_key = std::env::var_os("V3_P6_TEST_KEY");
+    let original_state = std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE");
+    let env_guard = TargetOriginEnvGuard::new(Some("secret-selection-exhaustion"), None);
+    let (success_base_url, mut captures, ingress, success_shutdown, upstream_task, upstream_addr) =
+        start_target_origin_upstream().await;
+    let client = reqwest::Client::new();
+    let execution = std::panic::AssertUnwindSafe(async {
+        let handle = spawn_v3_server_aggregate(target_origin_manifest(
+            free_port(),
+            free_port(),
+            &success_base_url,
+            true,
+            &debug_log,
+        ))
+        .await
+        .unwrap();
+        let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+        let enabled_listener_addresses = handle
+            .listeners
+            .iter()
+            .map(|listener| listener.addr)
+            .collect::<Vec<_>>();
+        let enabled = run_target_origin_aggregate_phase(
+            handle,
+            enabled_listener_addresses,
+            async {
+                let request = client
+                    .post(&endpoint)
+                    .json(&json!({"model":"client-test","input":"hello"}))
+                    .build()
+                    .unwrap();
+                let served = target_origin_http(&client, request, "enabled provider control").await;
+                assert_eq!(served.status, StatusCode::OK);
+                let served_body: Value = serde_json::from_slice(&served.body).unwrap();
+                assert_eq!(served_body["output_text"], "ok");
+                assert_eq!(served_body["status"], "completed");
+                let control_capture = timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, captures.recv())
+                    .await
+                    .expect("enabled provider capture must not time out")
+                    .expect("enabled provider must capture the control request");
+                assert_eq!(control_capture.body["model"], "wire-test");
+                assert_eq!(
+                    control_capture.body["input"],
+                    json!([{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}])
+                );
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    1,
+                    "the enabled control must reach the controlled origin once"
+                );
+            },
+            "enabled provider control",
+        )
+        .await;
+        assert_target_origin_aggregate_phase_succeeded(&enabled, "enabled provider control");
+        let enabled_control_ingress = ingress.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            enabled_control_ingress, 1,
+            "the enabled control total must remain one after aggregate release"
+        );
+        let disabled_ingress_expected = enabled_control_ingress;
+
+        let handle = spawn_v3_server_aggregate(target_origin_manifest(
+            free_port(),
+            free_port(),
+            &success_base_url,
+            false,
+            &debug_log,
+        ))
+        .await
+        .unwrap();
+        let listeners = handle
+            .listeners
+            .iter()
+            .map(|listener| listener.addr)
+            .collect::<Vec<_>>();
+        let addr = listeners[0];
+        let disabled = run_target_origin_aggregate_phase(
+            handle,
+            listeners.clone(),
+            async {
+                let endpoint = format!("http://{addr}/v1/responses");
+                let mut diagnostic_offset =
+                    fs::read_to_string(&debug_log).unwrap_or_default().len();
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    enabled_control_ingress,
+                    "disabled startup must not replace the enabled ingress total"
+                );
+                let expected_terminal = format!(
+                    "[{}] v3 model transport terminal source_kind=RuntimeFailure source_stage=V3Target09CandidateSetExpanded code=target_resolution_candidate_expansion_failed message=provider test is absent or disabled",
+                    addr.port()
+                );
+                let assert_target09 = |fresh: &str| {
+                    let terminals = fresh
+                        .lines()
+                        .filter(|line| line.contains("v3 model transport terminal"))
+                        .collect::<Vec<_>>();
+                    assert_eq!(terminals.len(), 1, "{fresh}");
+                    assert_eq!(terminals[0], expected_terminal, "{fresh}");
+                };
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "disabled baseline",
+                    )
+                    .await;
+                }
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    enabled_control_ingress,
+                    "disabled baseline must not reach the controlled origin"
+                );
+
+                if inject_pre_handler_ingress {
+                    let malformed = b"{\"model\":";
+                    let malformed_wire = target_origin_raw_request(
+                        upstream_addr,
+                        format!(
+                            "POST /v1/responses HTTP/1.1\r\nHost: {upstream_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            malformed.len()
+                        ),
+                        malformed,
+                        "disabled pre-handler counterexample",
+                    )
+                    .await;
+                    assert!(
+                        !malformed_wire.is_empty(),
+                        "the pre-handler counterexample must receive a rejected HTTP response"
+                    );
+                    let malformed_status = String::from_utf8_lossy(&malformed_wire)
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .to_string();
+                    assert!(
+                        malformed_status.contains(" 400 "),
+                        "malformed pre-handler JSON must be rejected: {malformed_status}"
+                    );
+                }
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    enabled_control_ingress,
+                    "disabled pre-handler ingress must retain the enabled total"
+                );
+                let request = client
+                    .post(&endpoint)
+                    .json(&json!({"model":"client-test","input":"hello","stream":true}))
+                    .build()
+                    .unwrap();
+                let deadline = tokio::time::Instant::now() + TARGET_ORIGIN_EXCHANGE_TIMEOUT;
+                let mut streaming =
+                    tokio::time::timeout_at(deadline, client.execute(request))
+                        .await
+                        .expect("SSE response head must not time out")
+                        .expect("a streaming client must receive the SSE response head");
+                assert_eq!(streaming.status(), StatusCode::OK);
+                assert_eq!(streaming.headers()["content-type"], "text/event-stream");
+                let mut stream_bytes = Vec::new();
+                let mut ended_with_transport_error = false;
+                loop {
+                    match tokio::time::timeout_at(deadline, streaming.chunk())
+                        .await
+                        .expect("SSE Target09 termination must not time out")
+                    {
+                        Ok(Some(chunk)) => stream_bytes.extend_from_slice(&chunk),
+                        Err(_) => {
+                            ended_with_transport_error = true;
+                            break;
+                        }
+                        Ok(None) => break,
+                    }
+                }
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    disabled_ingress_expected,
+                    "SSE Target09 must not reach the controlled origin"
+                );
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                let diagnostic = fs::read_to_string(&debug_log).unwrap_or_default();
+                assert_target09(&diagnostic[diagnostic_offset..]);
+                diagnostic_offset = diagnostic.len();
+                let stream_text = String::from_utf8(stream_bytes).unwrap();
+                assert!(
+                    stream_text.starts_with(":"),
+                    "SSE must emit a transport comment: {stream_text}"
+                );
+                assert!(
+                    stream_text
+                        .lines()
+                        .all(|line| line.is_empty() || line.starts_with(':')),
+                    "Target09 SSE must emit only comments, no business/error/DONE events: {stream_text}"
+                );
+                assert!(
+                    ended_with_transport_error,
+                    "Target09 SSE must abort instead of reaching clean EOF"
+                );
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "after SSE Target09",
+                    )
+                    .await;
+                }
+
+                let request = client
+                    .post(&endpoint)
+                    .json(&json!({"model":"client-test","input":"hello"}))
+                    .build()
+                    .unwrap();
+                let nonstreaming =
+                    timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, client.execute(request))
+                        .await
+                        .expect("JSON Target09 termination must not time out");
+                let nonstreaming = nonstreaming.expect_err(
+                    "a Target09 failure must close the nonstreaming client without a payload",
+                );
+                assert!(!nonstreaming.is_timeout(), "{nonstreaming}");
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    disabled_ingress_expected,
+                    "JSON Target09 must not reach the controlled origin"
+                );
+                let diagnostic = fs::read_to_string(&debug_log).unwrap_or_default();
+                assert_target09(&diagnostic[diagnostic_offset..]);
+                diagnostic_offset = diagnostic.len();
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "after JSON Target09",
+                    )
+                    .await;
+                }
+
+                let wire = target_origin_raw_json(addr, "raw JSON Target09").await;
+                assert!(
+                    wire.is_empty(),
+                    "JSON Target09 failure must send zero response bytes: {wire:?}"
+                );
+                let diagnostic = fs::read_to_string(&debug_log).unwrap_or_default();
+                assert_target09(&diagnostic[diagnostic_offset..]);
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    disabled_ingress_expected,
+                    "raw JSON Target09 must not reach the controlled origin"
+                );
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "after raw JSON Target09",
+                    )
+                    .await;
+                }
+            },
+            "disabled provider Target09",
+        )
+        .await;
+        TargetOriginPublicPhases { enabled, disabled }
+    })
+    .catch_unwind()
+    .await;
+
+    let upstream_cleanup = std::panic::AssertUnwindSafe(close_target_origin_upstream(
+        success_shutdown,
+        upstream_task,
+        upstream_addr,
+        "target-origin",
+    ))
+    .catch_unwind()
+    .await;
+    drop(env_guard);
+    let ingress_after_upstream = ingress.load(std::sync::atomic::Ordering::SeqCst);
+    let capture_after_upstream_empty = captures.try_recv().is_err();
+    let fixture_path = fixture_home.path.clone();
+    drop(fixture_home);
+    let env_restored = std::env::var_os("V3_P6_TEST_KEY") == original_key
+        && std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") == original_state
+        && std::env::var_os("HOME") == original_home;
+    let home_removed = !fixture_path.exists();
+    eprintln!(
+        "target-origin cleanup: upstream_released={} env_restored={env_restored} home_removed={home_removed} ingress_after_upstream={ingress_after_upstream} capture_empty={capture_after_upstream_empty} execution_failed={}",
+        upstream_cleanup.is_ok(),
+        execution.is_err()
+    );
+    TargetOriginPublicFixtureOutcome {
+        execution,
+        upstream_cleanup,
+        ingress_after_upstream,
+        capture_after_upstream_empty,
+        env_restored,
+        home_removed,
+    }
+}
+
+#[tokio::test]
+async fn target_origin_ingress_counter_observes_requests_before_provider_capture() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (_, mut captures, ingress, shutdown, task, address) = start_target_origin_upstream().await;
+    let malformed = b"{\"model\":";
+    let malformed_wire = target_origin_raw_request(
+        address,
+        format!(
+            "POST /v1/responses HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            malformed.len()
+        ),
+        malformed,
+        "malformed provider JSON proof",
+    )
+    .await;
+    assert!(
+        !malformed_wire.is_empty(),
+        "the rejected JSON must receive an HTTP response"
+    );
+    assert_eq!(
+        ingress.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "ingress must count malformed JSON before the handler parses it"
+    );
+    assert!(matches!(
+        captures.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+
+    let wrong_path_wire = target_origin_raw_request(
+        address,
+        format!(
+            "POST /v1/unmatched HTTP/1.1\r\nHost: {address}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ),
+        b"",
+        "unmatched provider route proof",
+    )
+    .await;
+    assert!(
+        !wrong_path_wire.is_empty(),
+        "the unmatched route must receive an HTTP response"
+    );
+    assert_eq!(
+        ingress.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "ingress must count an unmatched route before route matching"
+    );
+    assert!(matches!(
+        captures.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+    close_target_origin_upstream(shutdown, task, address, "ingress proof").await;
+}
+
+#[tokio::test]
+async fn target_origin_stalled_body_times_out_and_releases_owned_upstream() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from_stream(futures_util::stream::pending::<
+                    Result<Vec<u8>, std::io::Error>,
+                >()))
+                .unwrap()
+        }),
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::new();
+    let request = client
+        .post(format!("http://{address}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .build()
+        .unwrap();
+    let result = std::panic::AssertUnwindSafe(target_origin_http(
+        &client,
+        request,
+        "intentional stalled response body",
+    ))
+    .catch_unwind()
+    .await;
+    drop(client);
+    close_target_origin_upstream(shutdown, task, address, "stalled body proof").await;
+    let panic = result.err().expect("a stalled body must fail the exchange");
+    let message = panic.downcast_ref::<String>().unwrap();
+    assert!(
+        message.contains("intentional stalled response body exchange must not time out"),
+        "{message}"
+    );
+    eprintln!("stalled body counterexample: timeout detected; owned upstream released");
 }
 
 #[tokio::test]

@@ -14,6 +14,7 @@ mod frame_sdk_fault;
 mod local599_output;
 mod post_commit_sse_sdk_fault;
 mod provider_request_dry_run_handoff;
+mod target_origin_health_neutrality;
 mod terminal_probe_join;
 mod terminal_usage_closeout;
 mod websocket_sdk_fault;

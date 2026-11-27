@@ -672,7 +672,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         )
         .map(|(_, source)| source)
     })?;
-    let endpoint = if policy.request_purpose == crate::nodes::V3RequestPurpose::NativeCompaction {
+    let native_compaction =
+        policy.request_purpose == crate::nodes::V3RequestPurpose::NativeCompaction;
+    if native_compaction {
+        if let Some(body) = request_body.as_object_mut() {
+            body.remove("stream");
+        }
+    }
+    let endpoint = if native_compaction {
         routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Compact
     } else {
         routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Responses
