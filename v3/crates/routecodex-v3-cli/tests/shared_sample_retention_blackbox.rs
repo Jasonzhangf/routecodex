@@ -187,6 +187,52 @@ fn find_request_contains(
     })
 }
 
+fn assert_failed_attempt_artifact(
+    request_dir: &Path,
+    request_id: &str,
+    provider_status: u16,
+    payload_marker: &str,
+) {
+    assert!(request_dir.is_dir(), "failure ID disappeared: {request_id}");
+    assert_eq!(retention_kind(request_dir).as_deref(), Some("failure"));
+    let text = fs::read_to_string(request_dir.join("provider-failed-attempts.json")).unwrap();
+    let payload: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        payload["object"],
+        "routecodex.v3.provider_failed_attempt_evidence"
+    );
+    assert_eq!(
+        payload["request_id"],
+        request_dir.file_name().unwrap().to_str().unwrap()
+    );
+    let expected_body = json!({
+        "error": { "message": format!("retention-provider-{provider_status}-body") }
+    });
+    let attempt = payload["attempts"]
+        .as_array()
+        .and_then(|attempts| {
+            attempts.iter().find(|attempt| {
+                attempt["provider_status"] == provider_status
+                    && attempt["failed_attempt_evidence"]["provider_response"]["status"]
+                        == provider_status
+            })
+        })
+        .expect("matching failed attempt evidence");
+    let body_bytes = attempt["failed_attempt_evidence"]["provider_response"]["body"]["bytes"]
+        .as_array()
+        .expect("provider response bytes")
+        .iter()
+        .map(|byte| byte.as_u64().expect("provider response byte") as u8)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body_bytes).unwrap(),
+        expected_body
+    );
+    assert!(fs::read_to_string(request_dir.join("request.json"))
+        .unwrap()
+        .contains(payload_marker));
+}
+
 fn write_floor_failure(request_dir: &Path) {
     fs::create_dir_all(request_dir).unwrap();
     let nanoseconds = SystemTime::now()
@@ -269,12 +315,13 @@ async fn shared_sample_retention_parallel_cli_startup_blackbox() {
             })
         });
         if complete {
-            assert!(
-                dirs.len() <= 100,
-                "global sample retention exceeded: {}",
-                dirs.len()
-            );
-            break;
+            let success_dirs = dirs
+                .iter()
+                .filter(|dir| retention_kind(dir).as_deref() != Some("failure"))
+                .count();
+            if success_dirs <= 100 {
+                break;
+            }
         }
         assert!(
             Instant::now() < deadline,
@@ -374,13 +421,17 @@ async fn shared_sample_retention_floor_preserves_exact_failure_ids_beyond_succes
         .into_owned();
 
     for index in 0..105 {
-        let response = retention_request(
-            &client,
-            server.port,
-            &format!("retention-success-{index:03}"),
-        )
-        .await;
+        let request_id = format!("retention-success-{index:03}");
+        let response = retention_request(&client, server.port, &request_id).await;
         assert_eq!(response.status(), StatusCode::OK);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while find_request_contains(&samples, server.port, "request.json", &request_id).is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "success sample was not persisted: {request_id}"
+            );
+            sleep(Duration::from_millis(25)).await;
+        }
     }
 
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -396,18 +447,20 @@ async fn shared_sample_retention_floor_preserves_exact_failure_ids_beyond_succes
             "request.json",
             "retention-success-104",
         )
-        .is_some();
+        .is_some_and(|request_dir| retention_kind(&request_dir).as_deref() == Some("success"));
         if latest_success && success_count == 100 {
-            assert!(
-                failures.0.is_dir(),
-                "400 failure ID disappeared: {failure_400_id}"
+            assert_failed_attempt_artifact(
+                &failures.0,
+                &failure_400_id,
+                400,
+                "retention-provider-400",
             );
-            assert!(
-                failures.1.is_dir(),
-                "502 failure ID disappeared: {failure_502_id}"
+            assert_failed_attempt_artifact(
+                &failures.1,
+                &failure_502_id,
+                502,
+                "retention-provider-502",
             );
-            assert!(failures.0.join("provider-failed-attempts.json").is_file());
-            assert!(failures.1.join("provider-failed-attempts.json").is_file());
             break;
         }
         assert!(

@@ -336,8 +336,9 @@ verification:
   notes:
   - No flag enables only error samples; --snap and --snapall authorize full Direct
     and Relay samples; blank stage selectors are rejected.
-  - Server persists only Debug-redacted/budgeted copies, captures live Direct JSON/SSE
-    without changing transport semantics, propagates filesystem scan/write/eviction
-    failures, and retains at most 100 request directories per endpoint/port.
+  - Server captures live Direct JSON/SSE without changing transport semantics; Debug
+    persists only redacted/budgeted copies, propagates filesystem scan/write/eviction
+    failures, retains one global budget of 100 ordinary success request directories,
+    and keeps a separate 256-directory failure reserve for 30 minutes from persistence.
   - Live closure requires final no-flag restart after controlled --snap and --snapall
     replays.
