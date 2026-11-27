@@ -1831,6 +1831,7 @@ features:
 - feature_id: v3.hub_relay_request_semantics
   owner_crate: routecodex-v3-runtime
   owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  orphan_output_policy: Req04 preserves Responses-derived tool outputs when only parent history is absent; normalization and Provider Compat do not repair pairing
   resource_bindings:
   - v3.request.normal_payload
   - v3.hub.entry_protocol
