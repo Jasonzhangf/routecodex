@@ -5728,7 +5728,85 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
 }
 
 #[tokio::test]
-async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_parent_call() {
+async fn issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("issue4a0b3aa-orphan");
+    let provider_error = json!({"error": {
+        "message":"issue4a0b3aa_actual_provider_400",
+        "type":"invalid_request_error",
+        "code":"issue4a0b3aa_orphan_rejected"
+    }});
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::BAD_REQUEST,
+        "application/json",
+        serde_json::to_vec(&provider_error).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-fixture");
+    let manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    assert_eq!(manifest.providers.len(), 1);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let port = handle.listeners[0].addr.port();
+    let input = json!([{
+        "type":"function_call_output",
+        "call_id":"call_4a0b3aa_orphan",
+        "output":"tool failure remains data\r\nexact output"
+    }]);
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test", "input":input, "stream":false}))
+        .send()
+        .await;
+    let capture = timeout(Duration::from_secs(2), captures.recv()).await;
+    eprintln!("issue4a0b3aa client={response:?}; first_provider={capture:?}");
+    // Shut down test-owned listeners even when the baseline forwarding assertion fails.
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let capture = capture
+        .expect("Req04 must forward the orphan to the first Provider")
+        .expect("Provider capture must remain available");
+    assert_eq!(capture.request_path.as_deref(), Some("/v1/responses"));
+    assert_eq!(
+        capture.body["input"], input,
+        "first Provider item must stay exact"
+    );
+    assert!(capture.body["input"][0].get("id").is_none());
+    assert!(
+        captures.try_recv().is_err(),
+        "sole Provider must receive one attempt"
+    );
+    let response = response.expect("actual final Provider HTTP 400 must reach the client");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.json::<Value>().await.unwrap(), provider_error);
+    let samples = home_guard.codex_samples_root(port);
+    let terminal = wait_for_v3_provider_terminal_evidence(&samples).await;
+    assert_eq!(terminal["kind"], "external_http", "{terminal}");
+    assert_eq!(terminal["status"], 400, "{terminal}");
+    assert_eq!(
+        terminal["body"],
+        json!(serde_json::to_vec(&provider_error).unwrap())
+    );
+    let failures = wait_for_concurrency_failure_source(&samples).await;
+    let attempts = failures["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 1, "{failures}");
+    assert_eq!(attempts[0]["provider_id"], "test", "{failures}");
+    assert_eq!(
+        attempts[0]["provider_key"], "test:default:key:test",
+        "{failures}"
+    );
+    assert_eq!(attempts[0]["provider_status"], 400, "{failures}");
+    assert_eq!(
+        attempts[0]["diagnostic_source"]["code"], "provider_http_400",
+        "{failures}"
+    );
+    eprintln!(
+        "issue4a0b3aa exact_input={input}; client_error={provider_error}; typed_error={failures}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -5776,10 +5854,7 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
         }))
         .send()
         .await;
-    assert!(
-        second.is_err(),
-        "orphan tool output must fail without client error response"
-    );
+    assert_eq!(second.unwrap().status(), StatusCode::OK);
 
     let first_capture = timeout(Duration::from_secs(2), captures.recv())
         .await
@@ -5788,7 +5863,14 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
     assert_eq!(first_capture.body["model"], "wire-test");
     assert!(first_capture.body.get("client_metadata").is_none());
     assert!(first_capture.body.get("metadata").is_none());
-    assert_no_remote_continuation_provider_send(&mut captures).await;
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        second_capture.body["input"][0]["call_id"],
+        "call_body_metadata"
+    );
+    assert!(second_capture.body.get("client_metadata").is_none());
+    assert!(second_capture.body.get("metadata").is_none());
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -5796,7 +5878,7 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
 }
 
 #[tokio::test]
-async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_output() {
+async fn responses_relay_different_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -5845,17 +5927,12 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
         }))
         .send()
         .await;
-    assert!(
-        second.is_err(),
-        "wrong scope must fail without client error response"
-    );
+    assert_eq!(second.unwrap().status(), StatusCode::OK);
     let _first_capture = captures.recv().await.unwrap();
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "payload metadata must fail before the second provider send"
-    );
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(second_capture.body["input"][0]["output"], "wrong scope");
+    assert!(second_capture.body.get("client_metadata").is_none());
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -5863,7 +5940,7 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
 }
 
 #[tokio::test]
-async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
+async fn responses_relay_orphan_tool_output_without_client_scope_reaches_provider() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -5909,16 +5986,10 @@ async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
         }))
         .send()
         .await;
-    assert!(
-        response.is_err(),
-        "missing scope must fail without client error response"
-    );
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "missing continuation scope must fail before provider send"
-    );
+    assert_eq!(response.unwrap().status(), StatusCode::OK);
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(second_capture.body["input"][0]["output"], "missing scope");
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

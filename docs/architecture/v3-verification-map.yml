@@ -784,8 +784,10 @@ features:
   - Req04 runs tool/history governance and never restores local context or repairs history
   - every Req01 through Req04 owner operation emits deterministic entry and exit hook evidence
   - required hook failures and malformed tool outputs are explicit fail-fast errors
+  - Responses-derived orphan tool outputs pass Req04 unchanged when only parent history is absent; malformed identity and actual kind mismatch retain their separate checks
   - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400 -- --exact --nocapture --test-threads=1
   - npm run test:v3-relay-request-semantics
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
@@ -2076,6 +2078,10 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
+  orphan_output_regression:
+    issue: 4a0b3aa
+    test: issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400
+    contract: Responses Relay preserves the exact orphan item on its first Provider request, including absent id and exact string values; the sole Provider's complete actual HTTP 400 follows the typed final-error path
   governance_clauses:
     status: approved_candidate_unbound
     ontology: docs/architecture/v3-protocol-mapping-ontology.md
@@ -2514,7 +2520,7 @@ features:
   - V2 default config projection binds /v1/responses to the Responses Direct runtime owner while explicit Relay remains a valid controlled/manual binding
   - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-14 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - Responses Relay provider-facing JSON blackbox preserves tools and the current-turn function_call/function_call_output pairing
-  - wrong Responses Relay call_id fails before provider send
+  - missing Responses Relay parent history alone preserves the orphan unchanged through the first Provider send; issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400 proves exact item fidelity and actual final HTTP 400 projection
   - the Chat Process response hook profile is consumed by Runtime response governance
   - Responses Relay separates provider request transport intent, provider response body kind, and client response projection intent; client `stream=true` remains SSE even if provider raw body is JSON, and
     client `stream=false` remains JSON even if a controlled provider raw body is SSE

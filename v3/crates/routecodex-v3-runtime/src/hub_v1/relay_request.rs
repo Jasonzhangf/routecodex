@@ -295,9 +295,11 @@ fn govern_chat_request_at_req04(
             normalized.entry_protocol(),
             V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini
         );
+    let allow_missing_parent = normalized.entry_protocol() == V3HubEntryProtocol::Responses;
     let tool_output_count = govern_tool_outputs_at_req04(
         Arc::make_mut(&mut normalized.previous.payload.0),
         govern_chat_messages_tool_outputs,
+        allow_missing_parent,
         current_payload_start,
     )?;
     events.push(V3HubRelayRequestHookEvent::Req04ToolGoverned);
@@ -496,13 +498,18 @@ fn govern_openai_chat_tool_identity_at_req04(
 fn govern_tool_outputs_at_req04(
     payload: &mut Value,
     govern_chat_messages: bool,
+    allow_missing_parent: bool,
     current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
     if payload.get("input").and_then(Value::as_array).is_none()
         && payload.get("messages").and_then(Value::as_array).is_some()
         && govern_chat_messages
     {
-        return govern_chat_tool_outputs_at_req04(payload, current_payload_start);
+        return govern_chat_tool_outputs_at_req04(
+            payload,
+            allow_missing_parent,
+            current_payload_start,
+        );
     }
     let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
         BTreeMap::new();
@@ -555,7 +562,7 @@ fn govern_tool_outputs_at_req04(
                     call_id: call_id.to_owned(),
                 });
             }
-        } else {
+        } else if !allow_missing_parent {
             return Err(V3HubRelayRequestError::OrphanToolOutput {
                 index,
                 call_id: call_id.to_owned(),
@@ -567,6 +574,7 @@ fn govern_tool_outputs_at_req04(
 
 fn govern_chat_tool_outputs_at_req04(
     payload: &mut Value,
+    allow_missing_parent: bool,
     current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
@@ -616,12 +624,15 @@ fn govern_chat_tool_outputs_at_req04(
             }
             return Err(V3HubRelayRequestError::MalformedToolOutput { index });
         };
-        let expected_kinds = expected_outputs.get(&call_id).ok_or_else(|| {
-            V3HubRelayRequestError::OrphanToolOutput {
+        let Some(expected_kinds) = expected_outputs.get(&call_id) else {
+            if allow_missing_parent {
+                continue;
+            }
+            return Err(V3HubRelayRequestError::OrphanToolOutput {
                 index,
                 call_id: call_id.to_owned(),
-            }
-        })?;
+            });
+        };
         if message
             .pointer("/routecodex_chat_extension/responses_tool_output_type")
             .is_none()

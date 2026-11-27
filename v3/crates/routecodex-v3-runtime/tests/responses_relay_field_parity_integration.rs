@@ -233,10 +233,6 @@ async fn responses_openai_chat_field_parity_normalization_preserves_failure_boun
             "conflicting input and messages",
         ),
         (
-            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"function_call_output","call_id":"call_orphan","output":"unpaired"}]}),
-            "orphan tool output",
-        ),
-        (
             serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"custom_tool_call_output","call_id":"call_known","output":"wrong kind"}]}),
             "tool output kind mismatch",
         ),

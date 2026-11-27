@@ -326,12 +326,19 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         ),
     ]);
     if let Some(call_id) = call_id {
-        let item_id = if responses_tool_output_type == "custom_tool_call_output" {
-            responses_custom_item_id(row, call_id)
-        } else {
-            responses_function_item_id(row, call_id)
-        };
-        item.insert("id".to_string(), Value::String(item_id));
+        // Responses-derived outputs retain an absent item id through the round trip.
+        if responses_item_id_from_chat_extension(row).is_some()
+            || extension
+                .and_then(|fields| fields.get("responses_tool_output_type"))
+                .is_none()
+        {
+            let item_id = if responses_tool_output_type == "custom_tool_call_output" {
+                responses_custom_item_id(row, call_id)
+            } else {
+                responses_function_item_id(row, call_id)
+            };
+            item.insert("id".to_string(), Value::String(item_id));
+        }
         item.insert("call_id".to_string(), Value::String(call_id.to_string()));
     } else if let Some(name) = named_output {
         item.insert("name".to_string(), name.clone());
