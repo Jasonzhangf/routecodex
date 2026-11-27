@@ -9341,6 +9341,71 @@ async fn issue4a0b3aa_r19_dual_idless_named_receipt_with_existing_explicit_named
         })
     );
 
+    // Identical output text on fco_2 in `messages` and ID-less native named receipt in `input`
+    // must bypass equal-length positional merge and keep both receipts.
+    let same_output_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": "second-output",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_name": "send_message_to_thread",
+                    "responses_tool_output_namespace": "codex_tui",
+                    "responses_item_id": "fco_2"
+                }
+            }],
+            "input": [{
+                "type": "function_call_output",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "second-output"
+            }]
+        }))
+        .send()
+        .await
+        .expect("identical-output ID-less named receipt with existing fco_2 must succeed");
+    assert_eq!(same_output_res.status(), StatusCode::OK);
+    let same_output_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history r20 identical-output named receipt capture timeout")
+        .expect("dual-history r20 identical-output named receipt capture");
+    let same_output_input = same_output_capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        same_output_input.len(),
+        2,
+        "identical output text must still keep both fco_2 and ID-less named receipt: {}",
+        same_output_capture.body
+    );
+    assert_eq!(
+        same_output_input[0],
+        json!({
+            "type": "function_call_output",
+            "id": "fco_2",
+            "name": "send_message_to_thread",
+            "namespace": "codex_tui",
+            "output": "second-output"
+        })
+    );
+    assert!(
+        same_output_input[1].get("id").is_none() && same_output_input[1].get("call_id").is_none(),
+        "identical-output ID-less named receipt must remain ID-less without call_id: {}",
+        same_output_capture.body
+    );
+    assert_eq!(
+        same_output_input[1],
+        json!({
+            "type": "function_call_output",
+            "name": "send_message_to_thread",
+            "namespace": "codex_tui",
+            "output": "second-output"
+        })
+    );
+
     resp_handle.shutdown().await;
     let _ = resp_shutdown.send(());
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -9473,6 +9538,111 @@ async fn issue4a0b3aa_r19_dual_idless_before_exact_twin_with_chat_user_row_publi
     );
     assert_eq!(input[2]["type"], "message");
     assert_eq!(input[2]["role"], "user");
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r20_dual_idless_tool_search_with_existing_explicit_tso_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r20_dual_idless_tso_with_explicit_tso",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r20-dual-tso-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let tool_one =
+        json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+    let tool_two =
+        json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": serde_json::to_string(&tool_two).unwrap(),
+                "routecodex_chat_extension": {
+                    "responses_tool_output_type": "tool_search_output",
+                    "responses_output_field": "tools",
+                    "responses_item_id": "tso_2",
+                    "responses_status": "completed",
+                    "responses_execution": "client"
+                }
+            }],
+            "input": [{
+                "type": "tool_search_output",
+                "call_id": "call_1",
+                "execution": "client",
+                "status": "completed",
+                "tools": tool_one
+            }]
+        }))
+        .send()
+        .await
+        .expect("ID-less tool_search_output with existing explicit tso_2 must succeed");
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history r20 tso capture timeout")
+        .expect("dual-history r20 tso capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        input.len(),
+        2,
+        "both tso_2 and ID-less tool_search_output must reach first provider: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[0],
+        json!({
+            "type": "tool_search_output",
+            "id": "tso_2",
+            "call_id": "call_1",
+            "execution": "client",
+            "status": "completed",
+            "tools": tool_two
+        })
+    );
+    assert!(
+        input[1].get("id").is_none(),
+        "new tool_search_output receipt must remain ID-less: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "tool_search_output",
+            "call_id": "call_1",
+            "execution": "client",
+            "status": "completed",
+            "tools": tool_one
+        })
+    );
 
     resp_handle.shutdown().await;
     let _ = resp_shutdown.send(());

@@ -566,6 +566,15 @@ fn merge_responses_chat_histories(
         let mut merged = Vec::with_capacity(sanitized_source.len());
         let mut all_matched = true;
         for (src, dec) in sanitized_source.iter().zip(decoded) {
+            let incompatible_receipt_item_id = (tool_output_name(src).is_some()
+                || tool_output_name(dec).is_some()
+                || is_tool_search_output(src)
+                || is_tool_search_output(dec))
+                && tool_output_item_id(src) != tool_output_item_id(dec);
+            if incompatible_receipt_item_id {
+                all_matched = false;
+                break;
+            }
             if let Some(value) = merge_equivalent_chat_value(src, dec) {
                 merged.push(value);
             } else {
@@ -622,13 +631,17 @@ fn merge_responses_chat_histories(
             };
             let matched_pos = if let Some(pos) = reserved_source_for_decoded[dec_idx] {
                 Some(pos)
-            } else if result_item_id.is_some() {
-                (0..original_source_len).find(|&idx| {
-                    is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
-                })
-            } else if tool_output_name(result).is_some() {
+            } else if result_item_id.is_some() && tool_output_name(result).is_none() {
                 (0..original_source_len).find(|&idx| {
                     is_unreserved_candidate(idx)
+                        && tool_output_item_id(&merged[idx]).is_none()
+                        && (!is_tool_search_output(result)
+                            || merge_equivalent_chat_value(&merged[idx], result).is_some())
+                })
+            } else if tool_output_name(result).is_some() || is_tool_search_output(result) {
+                (0..original_source_len).find(|&idx| {
+                    is_unreserved_candidate(idx)
+                        && result_item_id.is_none()
                         && tool_output_item_id(&merged[idx]).is_none()
                         && merge_equivalent_chat_value(&merged[idx], result).is_some()
                 })
@@ -905,6 +918,13 @@ fn tool_output_name(message: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn is_tool_search_output(message: &Value) -> bool {
+    message
+        .pointer("/routecodex_chat_extension/responses_tool_output_type")
+        .and_then(Value::as_str)
+        == Some("tool_search_output")
 }
 
 fn tool_output_namespace(message: &Value) -> Option<&str> {
@@ -2157,5 +2177,168 @@ mod tests {
         assert!(distinct_messages[1]["routecodex_chat_extension"]
             .get("responses_item_id")
             .is_none());
+
+        // Identical output text on fco_2 in `messages` and ID-less named receipt in `input`
+        // (and vice versa) must bypass equal-length merge and keep both receipts.
+        for (messages, input, first_id, second_id) in [
+            (
+                json!([{
+                    "role": "user",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_name": "send_message_to_thread",
+                        "responses_tool_output_namespace": "codex_tui",
+                        "responses_item_id": "fco_2"
+                    }
+                }]),
+                json!([{
+                    "type": "function_call_output",
+                    "name": "send_message_to_thread",
+                    "namespace": "codex_tui",
+                    "output": "second-output"
+                }]),
+                Some("fco_2"),
+                None,
+            ),
+            (
+                json!([{
+                    "role": "user",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_name": "send_message_to_thread",
+                        "responses_tool_output_namespace": "codex_tui"
+                    }
+                }]),
+                json!([{
+                    "type": "function_call_output",
+                    "id": "fco_2",
+                    "name": "send_message_to_thread",
+                    "namespace": "codex_tui",
+                    "output": "second-output"
+                }]),
+                None,
+                Some("fco_2"),
+            ),
+        ] {
+            let raw = raw_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": messages,
+                    "input": input
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+            let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+                .expect("equal-length named receipt with item_id mismatch must preserve both");
+            let merged_messages = normalized.previous.payload.0["messages"]
+                .as_array()
+                .expect("canonical Chat messages");
+            assert_eq!(merged_messages.len(), 2, "{merged_messages:#?}");
+            assert_eq!(merged_messages[0]["content"], json!("second-output"));
+            assert_eq!(
+                merged_messages[0]["routecodex_chat_extension"]
+                    .get("responses_item_id")
+                    .and_then(Value::as_str),
+                first_id
+            );
+            assert_eq!(merged_messages[1]["content"], json!("second-output"));
+            assert_eq!(
+                merged_messages[1]["routecodex_chat_extension"]
+                    .get("responses_item_id")
+                    .and_then(Value::as_str),
+                second_id
+            );
+        }
+    }
+
+    #[test]
+    fn dual_history_idless_tool_search_with_existing_explicit_tso_preserves_both_without_conflict()
+    {
+        let tool_one =
+            json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+        let tool_two =
+            json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+        for (input_tools, expected_second_tools) in [(&tool_one, &tool_one), (&tool_two, &tool_two)]
+        {
+            let raw = raw_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": [{
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": serde_json::to_string(&tool_two).unwrap(),
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_type": "tool_search_output",
+                            "responses_output_field": "tools",
+                            "responses_item_id": "tso_2",
+                            "responses_status": "completed",
+                            "responses_execution": "client"
+                        }
+                    }],
+                    "input": [{
+                        "type": "tool_search_output",
+                        "call_id": "call_1",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": input_tools
+                    }]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+
+            let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+                .expect(
+                    "ID-less tool_search_output with existing explicit tso_2 must preserve both",
+                );
+            let messages = normalized.previous.payload.0["messages"]
+                .as_array()
+                .expect("canonical Chat messages");
+            assert_eq!(messages.len(), 2, "{messages:#?}");
+            assert_eq!(
+                messages[0]["routecodex_chat_extension"]["responses_item_id"],
+                json!("tso_2")
+            );
+            assert_eq!(
+                messages[0]["content"],
+                json!(serde_json::to_string(&tool_two).unwrap())
+            );
+            assert!(messages[1]["routecodex_chat_extension"]
+                .get("responses_item_id")
+                .is_none());
+            assert_eq!(
+                messages[1]["content"],
+                json!(serde_json::to_string(expected_second_tools).unwrap())
+            );
+        }
+
+        // Non-tool-search call_id conflict must still fail.
+        let non_tso_conflict = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "legacy-output"
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "different-output"
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(non_tso_conflict)
+            .expect_err("non-tool-search conflicting outputs on same call_id must still fail");
+        assert!(
+            err.contains("conflicting tool output representations"),
+            "unexpected error: {err}"
+        );
     }
 }
