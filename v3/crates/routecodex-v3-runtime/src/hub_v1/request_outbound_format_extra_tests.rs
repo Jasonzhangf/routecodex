@@ -1834,6 +1834,59 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
         "expected drop record for removed hosted web_search tool_choice: {offline_search_drops:?}"
     );
 
+    let (offline_with_preexisting_wire, offline_with_preexisting_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "web_search_options": {"search_context_size": "high"},
+                "tools": [{"type": "web_search", "external_web_access": false}],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("external_web_access=false must remove preexisting web_search_options and unsatisfiable required choice");
+    assert!(
+        offline_with_preexisting_wire.get("web_search_options").is_none(),
+        "preexisting web_search_options must be removed alongside external_web_access=false: {offline_with_preexisting_wire}"
+    );
+    assert!(
+        offline_with_preexisting_wire.get("tool_choice").is_none(),
+        "unsatisfiable tool_choice='required' must be removed when hosted search was the only tool: {offline_with_preexisting_wire}"
+    );
+    assert!(
+        offline_with_preexisting_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.web_search_options"),
+        "expected drop record for removed preexisting web_search_options: {offline_with_preexisting_drops:?}"
+    );
+    assert!(
+        offline_with_preexisting_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "expected drop record for removed unsatisfiable required choice: {offline_with_preexisting_drops:?}"
+    );
+
+    let (offline_with_fn_required_wire, _) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "web_search", "external_web_access": false},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("tool_choice='required' remains valid when another callable function tool survives");
+    assert_eq!(offline_with_fn_required_wire["tool_choice"], "required");
+
     let (server_tool_search_wire, server_tool_search_drops) =
         build_v3_openai_chat_standard_request_from_chat_canonical_recording(
             &json!({

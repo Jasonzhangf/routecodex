@@ -401,9 +401,13 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             let mut outcome = outcome;
             return Ok(Box::pin(futures_util::stream::once(async move {
                 let projected = async {
-                    let value = super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
-                        provider_wire_protocol, provider,
-                    ).await.map_err(|error| error.to_string())?;
+                    let value = super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response_with_observation(
+                        provider_wire_protocol,
+                        provider,
+                        &outcome.response_control,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
                     let projection = project_json_response_with_source(
                         value, Some(&request_id), provider_wire_protocol, &Value::Null,
                         V3HubTransportIntent::Sse, &mut Vec::new(),

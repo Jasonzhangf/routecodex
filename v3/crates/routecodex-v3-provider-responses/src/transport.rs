@@ -1741,14 +1741,16 @@ async fn read_json_disguised_as_sse_or_stream(
             Err(V3ProviderError::ResponseBodyUnreadable { reason, .. })
                 if reason == "provider request budget exhausted while reading response body" =>
             {
-                return Err(V3ProviderError::Transport {
-                    request_id,
-                    provider_id,
-                    reason: format!(
+                return Err(response_body_read_error(
+                    status,
+                    &request_id,
+                    &provider_id,
+                    headers,
+                    format!(
                         "provider SSE stream did not produce a first frame within timeout ({}ms)",
                         sse_first_frame_budget.as_millis()
                     ),
-                });
+                ));
             }
             Err(err) => return Err(err),
         };

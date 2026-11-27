@@ -1285,6 +1285,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         resp01,
                         &input.request_id,
                         &response_hook_profile,
+                        &projection_drop_context,
                         trace.as_mut(),
                         // anthropic 整流缓冲：两种客户端传输都由这一份完整
                         // client_response 派生，因此 SSE 出口同样可以发布 round。

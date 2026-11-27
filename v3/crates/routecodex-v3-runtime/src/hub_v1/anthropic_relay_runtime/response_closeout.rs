@@ -4,6 +4,7 @@ pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     resp01: V3ProviderRespInbound01Raw,
     request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
+    projection_drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
     trace: &mut Vec<&'static str>,
     refill: Option<&mut crate::hub_v1::relay_runtime_core::V3RelayRefillCarrier>,
     project_client_response: F,
@@ -12,7 +13,14 @@ where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError> + Send + 'static,
 {
     trace.push("V3ProviderRespInbound01Raw");
-    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(resp01).await?;
+    let drop_observation = V3RuntimeStreamObservation::default()
+        .with_projection_drop_context(projection_drop_context.clone());
+    let compat =
+        build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse_with_observation(
+            resp01,
+            &drop_observation,
+        )
+        .await?;
     trace.push("ProviderRespCompat02ProviderCompat");
     let resp02 =
         build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(

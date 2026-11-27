@@ -786,34 +786,24 @@ impl V3ProviderHealthStore {
                             failure_threshold: override_policy.failure_threshold,
                             cooldown_ms: override_policy.cooldown_ms,
                         });
-                let matched_rule_policy_id = matched_rule.map(|rule| rule.policy_id);
-                let projection = self
-                    .record_provider_failure_action_with_matched_policy_for_interface(
+                let (projection, active_policy_streak) = self
+                    .record_provider_failure_action_impl(
                         provider_id,
                         interface_id,
                         alias,
                         model,
                         &action,
                         now_ms,
+                        false,
                         matched_rule,
                     )
-                    .map_err(V3ProviderHealthError::Poisoned)?;
-                let failure_count = matched_rule_policy_id
-                    .and_then(|policy_id| {
-                        let history_key = provider_cooldown_probe_key_for_interface(
-                            provider_id,
-                            interface_id,
-                            Some(alias),
-                            Some(model),
-                        );
-                        self.state.read().ok().and_then(|guard| {
-                            guard
-                                .adaptive_history
-                                .get(&history_key)
-                                .and_then(|history| history.policy_streaks.get(policy_id).copied())
-                        })
-                    })
-                    .unwrap_or(projection.failure_streak);
+                    .map_err(V3ProviderHealthError::Poisoned)?
+                    .ok_or_else(|| {
+                        V3ProviderHealthError::Poisoned(
+                            "unconditional provider failure observation was not applied".into(),
+                        )
+                    })?;
+                let failure_count = active_policy_streak.unwrap_or(projection.failure_streak);
                 return Ok(V3ProviderFailureRecord {
                     scope_label,
                     provider_key,
@@ -1676,6 +1666,7 @@ impl V3ProviderHealthStore {
             false,
             matched_policy,
         )?
+        .map(|(projection, _)| projection)
         .ok_or_else(|| "unconditional provider failure observation was not applied".into())
     }
 
@@ -1712,16 +1703,18 @@ impl V3ProviderHealthStore {
         now_ms: u64,
         matched_policy: Option<V3ProviderMatchedPolicyRule<'_>>,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
-        self.record_provider_failure_action_impl(
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-            action,
-            now_ms,
-            true,
-            matched_policy,
-        )
+        Ok(self
+            .record_provider_failure_action_impl(
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                action,
+                now_ms,
+                true,
+                matched_policy,
+            )?
+            .map(|(projection, _)| projection))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1735,7 +1728,7 @@ impl V3ProviderHealthStore {
         now_ms: u64,
         only_if_cooled: bool,
         matched_policy: Option<V3ProviderMatchedPolicyRule<'_>>,
-    ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
+    ) -> Result<Option<(V3ProviderKeyHealthProjection, Option<u32>)>, String> {
         let key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,
@@ -1751,7 +1744,7 @@ impl V3ProviderHealthStore {
         // circuit before the cooled-only check so an `if_cooled` caller cannot
         // route a health-disabled provider into the pre-cool probe path.
         if state.health_disabled.contains(provider_id) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            return Ok(Some((key_health_projection(&state, &key, now_ms), None)));
         }
         if only_if_cooled
             && !state
@@ -1770,10 +1763,10 @@ impl V3ProviderHealthStore {
             V3ProviderRecoveryKind::NotProviderHealth
                 | V3ProviderRecoveryKind::HealthNeutralTransient
         ) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            return Ok(Some((key_health_projection(&state, &key, now_ms), None)));
         }
         if state.health_disabled.contains(provider_id) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            return Ok(Some((key_health_projection(&state, &key, now_ms), None)));
         }
         let configured_max_probe_interval_ms = state
             .failure_policies
@@ -1928,7 +1921,7 @@ impl V3ProviderHealthStore {
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
         self.publish_availability_change();
-        Ok(Some(projection))
+        Ok(Some((projection, active_policy_streak)))
     }
 
     pub fn record_provider_key_success(

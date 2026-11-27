@@ -3563,7 +3563,7 @@ async fn map001_public_delayed_sse_on_json_intent_respects_combined_first_frame_
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let _guard = LOCK.lock().await;
-    let _home = Home::new("delayed-sse-budget");
+    let home = Home::new("delayed-sse-budget");
     std::env::set_var("ONTOLOGY_SSE_BUDGET_KEY", "sk-ontology-sse-budget");
 
     let primary_hits = Arc::new(AtomicUsize::new(0));
@@ -3626,8 +3626,10 @@ async fn map001_public_delayed_sse_on_json_intent_respects_combined_first_frame_
                             let _ = conn.write_all(chunk2.as_bytes()).await;
                         } else if idx == 5 {
                             // Case 6: Silent `200 text/event-stream` sending zero bytes forever with request_timeout_ms=5000
-                            // must time out primary at ~sse_first_frame_timeout_ms (250ms) and recover on backup.
-                            let _ = conn.write_all(head.as_bytes()).await;
+                            // must time out primary at ~sse_first_frame_timeout_ms (250ms), preserve HTTP 200/headers
+                            // in attempt evidence (without client HTTP projection), and recover on backup.
+                            let head_with_req_id = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: req-silent-sse-200\r\ntransfer-encoding: chunked\r\n\r\n";
+                            let _ = conn.write_all(head_with_req_id.as_bytes()).await;
                             tokio::time::sleep(Duration::from_secs(6)).await;
                         } else {
                             let _ = conn.write_all(head.as_bytes()).await;
@@ -3808,9 +3810,18 @@ targets = [
         relay_port,
         hub_v1_fixture::hub_v1_server_execution("relay_resp"),
     );
-    let manifest =
+    let mut manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    manifest.debug.codex_samples = true;
     let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let slow_samples_dir = home
+        .path
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join(slow_port.to_string());
+    let mut seen_slow_sample_dirs = std::collections::HashSet::<std::path::PathBuf>::new();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -3944,6 +3955,56 @@ targets = [
     );
     assert_eq!(primary_hits.load(Ordering::SeqCst), 6);
     assert_eq!(backup_hits.load(Ordering::SeqCst), 4);
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("slow_port sample persistence must flush");
+    // Wait up to 2 failed attempt samples under `slow_port` (Case 2 and Case 6) and
+    // verify Case 6 (`x-request-id: req-silent-sse-200`) preserves HTTP 200 & headers
+    // in `provider_response` alongside its first-frame timeout reason.
+    let _first =
+        read_next_failed_attempt_evidence(&slow_samples_dir, &mut seen_slow_sample_dirs).await;
+    let _second =
+        read_next_failed_attempt_evidence(&slow_samples_dir, &mut seen_slow_sample_dirs).await;
+    let samples = vec![_first, _second];
+    let silent_sample = samples
+        .iter()
+        .find(|candidate| {
+            candidate["attempts"][0]["failed_attempt_evidence"]["provider_response"]["status"]
+                == 200
+                && candidate["attempts"][0]["failed_attempt_evidence"]["provider_response"]
+                    ["headers"]
+                    .as_array()
+                    .is_some_and(|hdrs| {
+                        hdrs.iter().any(|h| {
+                            h["name"]
+                                .as_str()
+                                .is_some_and(|n| n.eq_ignore_ascii_case("x-request-id"))
+                                && h["value"] == "req-silent-sse-200"
+                        })
+                    })
+        })
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!("silent 200 text/event-stream timeout must preserve HTTP 200 and headers; samples={samples:?}")
+        });
+    assert_eq!(
+        silent_sample["attempts"][0]["failed_attempt_evidence"]["provider_response"]["kind"],
+        "external_http"
+    );
+    assert!(
+        silent_sample["attempts"][0]["failed_attempt_evidence"]["provider_response"]
+            ["body_read_failure"]
+            .as_str()
+            .unwrap_or("")
+            .contains("first frame"),
+        "expected first-frame timeout reason in primary failed attempt: {silent_sample}"
+    );
+    assert_eq!(
+        silent_sample["attempts"][0]["diagnostic_source"]["external_error"]["upstream_request_id"],
+        "req-silent-sse-200"
+    );
+    assert_eq!(silent_sample["attempts"][0]["status"], 502);
 
     drop(server);
     let _ = p_sd.send(());
@@ -4479,19 +4540,21 @@ targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.
         "answered without live web search"
     );
 
-    let wires = captured_wires.lock().unwrap();
-    assert_eq!(wires.len(), 1);
-    assert!(
-        wires[0].get("web_search_options").is_none(),
-        "external_web_access=false must omit web_search_options on openai_chat wire: {}",
-        wires[0]
-    );
-    assert!(
-        wires[0].get("tool_choice").is_none(),
-        "hosted web_search tool_choice must omit cleanly: {}",
-        wires[0]
-    );
-    assert_eq!(wires[0]["tools"].as_array().unwrap().len(), 1);
+    {
+        let wires = captured_wires.lock().unwrap();
+        assert_eq!(wires.len(), 1);
+        assert!(
+            wires[0].get("web_search_options").is_none(),
+            "external_web_access=false must omit web_search_options on openai_chat wire: {}",
+            wires[0]
+        );
+        assert!(
+            wires[0].get("tool_choice").is_none(),
+            "hosted web_search tool_choice must omit cleanly: {}",
+            wires[0]
+        );
+        assert_eq!(wires[0]["tools"].as_array().unwrap().len(), 1);
+    }
 
     let drops_raw = std::fs::read_to_string(&drop_log)
         .expect("projection-drops.jsonl must persist external_web_access=false drops");
@@ -4515,6 +4578,84 @@ targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.
             .any(|row| row["json_path"] == "$.tool_choice"),
         "expected $.tool_choice drop record: {drop_rows:?}"
     );
+
+    // Case 2: Preexisting `web_search_options` + hosted-only `external_web_access=false` + `tool_choice="required"`
+    // must remove BOTH `web_search_options` and the now-unsatisfiable `tool_choice="required"` cleanly.
+    let drop_before_len = drop_rows.len();
+    let resp2 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "web-search-cap",
+            "input": "answer offline without tools",
+            "web_search_options": {"search_context_size": "high"},
+            "tools": [{"type": "web_search", "external_web_access": false}],
+            "tool_choice": "required",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp2.status(), StatusCode::OK);
+    let wires = captured_wires.lock().unwrap();
+    assert_eq!(wires.len(), 2);
+    assert!(
+        wires[1].get("web_search_options").is_none(),
+        "preexisting web_search_options must be stripped on external_web_access=false: {}",
+        wires[1]
+    );
+    assert!(
+        wires[1].get("tool_choice").is_none(),
+        "unsatisfiable tool_choice='required' must be stripped when hosted search was the only tool: {}",
+        wires[1]
+    );
+    assert!(
+        wires[1].get("tools").is_none(),
+        "hosted-only omitted search must leave no tools array: {}",
+        wires[1]
+    );
+    drop(wires);
+    let drop_rows2: Vec<Value> = std::fs::read_to_string(&drop_log)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .skip(drop_before_len)
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    assert!(
+        drop_rows2
+            .iter()
+            .any(|row| row["json_path"] == "$.web_search_options"),
+        "expected preexisting $.web_search_options drop record: {drop_rows2:?}"
+    );
+    assert!(
+        drop_rows2
+            .iter()
+            .any(|row| row["json_path"] == "$.tool_choice"),
+        "expected $.tool_choice='required' drop record: {drop_rows2:?}"
+    );
+
+    // Case 3: `external_web_access=false` alongside a retained function tool preserves `tool_choice="required"`.
+    let resp3 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "web-search-cap",
+            "input": "call retained function",
+            "tools": [
+                {"type": "web_search", "external_web_access": false},
+                {"type": "function", "name": "read_file", "parameters": {"type": "object"}}
+            ],
+            "tool_choice": "required",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp3.status(), StatusCode::OK);
+    let wires = captured_wires.lock().unwrap();
+    assert_eq!(wires.len(), 3);
+    assert_eq!(wires[2]["tool_choice"], "required");
+    assert!(wires[2].get("web_search_options").is_none());
+    drop(wires);
 
     drop(server);
     let _ = sd.send(());
@@ -4620,7 +4761,7 @@ version = 3
 bind = "127.0.0.1"
 port = {}
 routing_group = "default"
-endpoints = ["responses"]
+endpoints = ["responses", "anthropic", "gemini"]
 {}
 
 [providers.resp_relay]
@@ -4673,16 +4814,103 @@ targets = [{{ kind = "provider_model", provider = "resp_relay", model = "respons
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect();
-    assert!(
-        drop_rows.iter().any(|row| {
+    let resp_req_id = drop_rows
+        .iter()
+        .find(|row| {
             row["stage"] == "response_target_protocol_projection"
                 && row["target_protocol"] == "responses"
                 && row["reason"] == "unregistered_output_item_ignored"
                 && row["entry_port"] == listen_port.to_string()
                 && !row["request_id"].as_str().unwrap_or("").is_empty()
                 && row["source_value"]["type"] == "future_telemetry_widget"
+        })
+        .and_then(|row| row["request_id"].as_str())
+        .map(ToOwned::to_owned)
+        .expect(&format!(
+            "expected scoped response_target_protocol_projection drop rows on Responses Relay: {drop_rows:?}"
+        ));
+
+    // Anthropic Messages (/v1/messages) Relay SSE closeout must likewise persist scoped drop rows.
+    let before_anth_len = drop_rows.len();
+    let anth_resp = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/messages"))
+        .header("x-api-key", "sk-client-test")
+        .header("anthropic-version", "2023-06-01")
+        .header("x-request-id", "req-anth-sse-drop-1")
+        .json(&json!({
+            "model": "resp-sse-drop-alias",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anth_resp.status(), StatusCode::OK);
+    let anth_body: Value = anth_resp.json().await.unwrap();
+    assert_eq!(
+        anth_body["content"][0]["text"],
+        "sse response after omitted unregistered item"
+    );
+    let all_rows_after_anth: Vec<Value> = std::fs::read_to_string(&drop_log)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    let anth_rows = &all_rows_after_anth[before_anth_len..];
+    assert!(
+        anth_rows.iter().any(|row| {
+            row["stage"] == "response_target_protocol_projection"
+                && row["target_protocol"] == "responses"
+                && row["reason"] == "unregistered_output_item_ignored"
+                && row["entry_port"] == listen_port.to_string()
+                && !row["request_id"].as_str().unwrap_or("").is_empty()
+                && row["request_id"] != resp_req_id
+                && row["source_value"]["type"] == "future_telemetry_widget"
         }),
-        "expected scoped response_target_protocol_projection drop rows for omitted future_telemetry_widget: {drop_rows:?}"
+        "expected Anthropic Relay SSE closeout scoped drop rows: {anth_rows:?}"
+    );
+    let anth_req_id = anth_rows[0]["request_id"].as_str().unwrap().to_string();
+
+    // Gemini (/v1beta/models/...:streamGenerateContent?alt=sse) Relay SSE must also persist scoped drop rows.
+    let before_gem_len = all_rows_after_anth.len();
+    let gem_resp = client
+        .post(format!(
+            "http://127.0.0.1:{listen_port}/v1beta/models/resp-sse-drop-alias:streamGenerateContent?alt=sse"
+        ))
+        .header("x-request-id", "req-gem-sse-drop-1")
+        .json(&json!({
+            "contents": [{"role": "user", "parts": [{"text": "hi"}]}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gem_resp.status(), StatusCode::OK);
+    let gem_text = gem_resp.text().await.unwrap();
+    assert!(
+        gem_text.contains("sse response after omitted unregistered item"),
+        "expected Gemini SSE stream to deliver assistant text cleanly: {gem_text}"
+    );
+    let all_rows_after_gem: Vec<Value> = std::fs::read_to_string(&drop_log)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    let gem_rows = &all_rows_after_gem[before_gem_len..];
+    assert!(
+        gem_rows.iter().any(|row| {
+            row["stage"] == "response_target_protocol_projection"
+                && row["target_protocol"] == "responses"
+                && row["reason"] == "unregistered_output_item_ignored"
+                && row["entry_port"] == listen_port.to_string()
+                && !row["request_id"].as_str().unwrap_or("").is_empty()
+                && row["request_id"] != resp_req_id
+                && row["request_id"] != anth_req_id
+                && row["source_value"]["type"] == "future_telemetry_widget"
+        }),
+        "expected Gemini Relay SSE scoped drop rows: {gem_rows:?}"
     );
 
     drop(server);

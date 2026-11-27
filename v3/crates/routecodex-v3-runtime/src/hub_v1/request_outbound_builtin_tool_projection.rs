@@ -47,6 +47,16 @@ fn is_hosted_web_search_choice(choice: &Value) -> bool {
     )
 }
 
+fn choice_requires_tool(choice: &Value) -> bool {
+    matches!(
+        choice
+            .get("type")
+            .and_then(Value::as_str)
+            .or_else(|| choice.as_str()),
+        Some("required")
+    )
+}
+
 pub(super) fn collect_tool_search_output_tools(payload: &Value) -> Result<Vec<Value>, String> {
     let mut discovered = Vec::new();
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
@@ -406,19 +416,34 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             return Err("ConflictingOutboundFields target_protocol=openai_chat paths=$.web_search_options,$.tools[].type".to_string());
         }
         root.insert("web_search_options".to_string(), projected);
-    } else if root
-        .get("tool_choice")
-        .is_some_and(is_hosted_web_search_choice)
-    {
-        if let Some(choice) = root.remove("tool_choice") {
-            if has_web_search_capability {
+    } else {
+        if forbids_live_web_search {
+            if let Some(existing_options) = root.remove("web_search_options") {
                 drops.push(V3ProjectionDropRecord::new(
                     "openai_chat",
-                    "$.tool_choice",
+                    "$.web_search_options",
                     "unmapped_target_protocol_field_unrepresentable",
-                    choice,
+                    existing_options,
                     "project_openai_chat_provider_tools_for_web_search_mode_recording",
                 ));
+            }
+        }
+        if root.get("tool_choice").is_some_and(|choice| {
+            is_hosted_web_search_choice(choice)
+                || ((forbids_live_web_search || !has_web_search_capability)
+                    && normalized_tools.is_empty()
+                    && choice_requires_tool(choice))
+        }) {
+            if let Some(choice) = root.remove("tool_choice") {
+                if has_web_search_capability || forbids_live_web_search {
+                    drops.push(V3ProjectionDropRecord::new(
+                        "openai_chat",
+                        "$.tool_choice",
+                        "unmapped_target_protocol_field_unrepresentable",
+                        choice,
+                        "project_openai_chat_provider_tools_for_web_search_mode_recording",
+                    ));
+                }
             }
         }
     }

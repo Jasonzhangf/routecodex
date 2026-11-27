@@ -1173,9 +1173,17 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             provider_id,
             reason,
             ..
-        }
-        | V3ProviderError::ResponseBodyUnreadable {
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Transport,
+            status: None,
+            code: Some("TRANSPORT_ERROR".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.clone()),
+        },
+        V3ProviderError::ResponseBodyUnreadable {
             provider_id,
+            headers,
             reason,
             ..
         } => V3ExternalErrorLink {
@@ -1183,7 +1191,7 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             status: None,
             code: Some("TRANSPORT_ERROR".to_string()),
             provider_id: Some(provider_id.clone()),
-            upstream_request_id: None,
+            upstream_request_id: upstream_request_id_from_headers(headers),
             message: Some(reason.clone()),
         },
         V3ProviderError::WebSocketProtocol {
