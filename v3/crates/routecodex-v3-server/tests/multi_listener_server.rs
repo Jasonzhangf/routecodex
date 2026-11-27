@@ -6262,31 +6262,45 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
     std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r3-fixture");
     let manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let addr = handle.listeners[0].addr;
+    let endpoint = format!("http://{addr}/v1/responses");
+    let client = reqwest::Client::new();
     for extension in [
         json!(false),
         json!({"responses_reasoning_items":false}),
         json!({"responses_reasoning_items":[false]}),
     ] {
-        let response = reqwest::Client::new()
+        let response = client
             .post(&endpoint)
             .json(&json!({"model":"client-test","input":[{
                 "type":"reasoning","summary":[{"type":"summary_text","text":"bad carrier"}],
                 "routecodex_chat_extension":extension
             }],"stream":false}))
             .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(
-            response.json::<Value>().await.unwrap()["error"]["code"],
-            "invalid_responses_request"
+            .await;
+        assert!(
+            response.is_err(),
+            "invalid carrier is a request-local error and must terminate transport without a proxy error response: {response:?}"
         );
         assert!(
             captures.try_recv().is_err(),
             "invalid carrier is request-local and must not dispatch"
         );
     }
+    let logs: Value = client
+        .get(format!("http://{addr}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let serialized_logs = serde_json::to_string(&logs).unwrap();
+    assert!(
+        serialized_logs.contains("V3Error06ClientProjected")
+            && serialized_logs.contains("invalid_responses_request"),
+        "invalid carrier must still be recorded in internal typed error logs: {serialized_logs}"
+    );
     let cases = [
         json!([
             {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
