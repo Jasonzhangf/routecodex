@@ -1925,15 +1925,27 @@ fn positive_zombie_row(pid: u32, bytes: &[u8]) -> bool {
 }
 
 fn original_generation_exited(cache: &V3ManagedPidCache) -> Result<bool, V3LifecycleError> {
+    original_generation_exited_with_query(cache, || {
+        Ok(Command::new("/bin/ps")
+            .args(["-p", &cache.pid.to_string(), "-o", "pid=", "-o", "state="])
+            .output()?)
+    })
+}
+
+fn original_generation_exited_with_query(
+    cache: &V3ManagedPidCache,
+    query: impl FnOnce() -> Result<std::process::Output, V3LifecycleError>,
+) -> Result<bool, V3LifecycleError> {
     if managed_generation_has_exited(cache)? {
         return Ok(true);
     }
     // PID reuse itself requires the witnessed original process to have exited.
     // The signal receipt establishes dispatch, not causation.
-    let output = Command::new("/bin/ps")
-        .args(["-p", &cache.pid.to_string(), "-o", "pid=", "-o", "state="])
-        .output()?;
-    Ok(output.status.success() && positive_zombie_row(cache.pid, &output.stdout))
+    let output = query()?;
+    if output.status.success() && positive_zombie_row(cache.pid, &output.stdout) {
+        return Ok(true);
+    }
+    managed_generation_has_exited(cache)
 }
 
 fn incomplete_stop_publication() -> V3LifecycleError {

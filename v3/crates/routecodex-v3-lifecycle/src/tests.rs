@@ -1504,6 +1504,111 @@ fn forced_exit_requires_positive_zombie_row() {
     }
 }
 
+#[cfg(unix)]
+struct ExitObservationChild(std::process::Child);
+
+#[cfg(unix)]
+impl ExitObservationChild {
+    fn new() -> Self {
+        Self(Command::new("/bin/sleep").arg("30").spawn().unwrap())
+    }
+
+    fn cache(&self) -> V3ManagedPidCache {
+        let token = process_start_token(self.0.id()).unwrap();
+        assert!(token.is_some(), "owned child must have a live generation");
+        V3ManagedPidCache {
+            retained_control: None,
+            schema_version: SCHEMA_VERSION,
+            instance_id: "v3-exit-observation".into(),
+            pid: self.0.id(),
+            start_nonce: "owned-child".into(),
+            started_at_epoch_ms: epoch_ms(),
+            process_start_token: token,
+        }
+    }
+
+    fn collect(&mut self) -> std::io::Result<()> {
+        if self.0.try_wait()?.is_some() {
+            return Ok(());
+        }
+        self.0.kill()?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while self.0.try_wait()?.is_none() {
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("owned child {} was not collected", self.0.id()),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ExitObservationChild {
+    fn drop(&mut self) {
+        if let Err(error) = self.collect() {
+            eprintln!("owned exit-observation child cleanup failed: {error}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn forced_exit_observes_collection_between_native_queries() {
+    let mut child = ExitObservationChild::new();
+    let cache = child.cache();
+    let mut observed = None;
+    let result = original_generation_exited_with_query(&cache, || {
+        child.collect()?;
+        let output = Command::new("/bin/ps")
+            .args(["-p", &cache.pid.to_string(), "-o", "pid=", "-o", "state="])
+            .output()?;
+        observed = Some((
+            output.status.success(),
+            output.stdout.clone(),
+            output.stderr.clone(),
+        ));
+        Ok(output)
+    });
+    let cleanup = child.collect();
+    assert!(cleanup.is_ok(), "{cleanup:?}");
+    assert_eq!(observed, Some((false, Vec::new(), Vec::new())));
+    assert!(managed_generation_has_exited(&cache).unwrap());
+    eprintln!(
+        "owned child {} collected after initial live observation; actual ps returned no row",
+        cache.pid
+    );
+    assert!(
+        result.unwrap(),
+        "the witnessed generation exited between observations"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn forced_exit_live_generation_and_query_error_stay_unproved() {
+    let mut child = ExitObservationChild::new();
+    let cache = child.cache();
+    let live = original_generation_exited_with_query(&cache, || {
+        Ok(Command::new("/bin/ps")
+            .args(["-p", &cache.pid.to_string(), "-o", "pid=", "-o", "state="])
+            .output()?)
+    });
+    let error = original_generation_exited_with_query(&cache, || {
+        Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "native query denied").into())
+    });
+    let remained_live = child.0.try_wait().unwrap().is_none();
+    let cleanup = child.collect();
+    assert!(cleanup.is_ok(), "{cleanup:?}");
+    assert!(remained_live && !live.unwrap());
+    assert!(
+        matches!(error, Err(V3LifecycleError::Io(ref error)) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    );
+}
+
 #[test]
 fn forced_stop_rejects_changed_witness() {
     let root = TempDir::new().unwrap();

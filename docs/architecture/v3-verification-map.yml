@@ -1673,6 +1673,8 @@ features:
     - tests::forced_stop_validates_plan_before_retiring_generation
     - tests::forced_signal_dispatch_reports_actual_outcomes
     - tests::forced_exit_requires_positive_zombie_row
+    - tests::forced_exit_observes_collection_between_native_queries
+    - tests::forced_exit_live_generation_and_query_error_stay_unproved
     - tests::forced_stop_rejects_changed_witness
     - tests::live_hooks_group_does_not_block_forced_stop
     - tests::bare_no_delivery_requires_verified_stopped_baseline
@@ -1699,7 +1701,7 @@ features:
     - tests::foreground_exec_failure_preserves_terminal_retry
     - tests::failed_outcome_preserves_primary_and_unverified_plan
     - active_key_control_release::exact_custody_forced_stop_recovers_controls
-    failure_mode: Actual authenticated managed ReleasePorts revokes accepted controls before success and preserves accepted business and siblings. Exact retained A remains retryable after a native A+B to B restart and external lock release. Formal restart recovers after Starting and Failed status writes both time out. A changed-directory predecessor control generation mismatch preserves all exact evidence. Genuine recovery permits a later formal restart to the original declaration with usable controls and Provider business. When a client times out with Provider work pending and ordinary Stop refuses the fixture lock, the same fixture must retain the live recorder through unwind and recover after its own lock is released.
+    failure_mode: Actual authenticated managed ReleasePorts revokes accepted controls before success and preserves accepted business and siblings. Exact retained A remains retryable after a native A+B to B restart and external lock release. Formal restart recovers after Starting and Failed status writes both time out. A changed-directory predecessor control generation mismatch preserves all exact evidence. Genuine recovery permits a later formal restart to the original declaration with usable controls and Provider business. When a client times out with Provider work pending and ordinary Stop refuses the fixture lock, the same fixture must retain the live recorder through unwind and recover after its own lock is released. An owned child collected between the initial generation observation and the native process-state query must be recognized by positive final absence evidence; a live generation or query error cannot authorize publication.
   active_key_rejected_native_exec:
     command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib tests::native_exec_failure_retains_aggregate_and_hooks_owner -- --exact --nocapture'
     failure_mode: A genuine native exec failure after borrowed active-control preparation preserves exact original endpoint bytes, actual status/release, listener and hooks ownership while cleaning only attempt artifacts.

@@ -4625,10 +4625,11 @@ process.stdin.once('end', () => { if (!acknowledged) process.exit(3); });
 process.once('SIGTERM', () => {
     process.kill(Number(owner), 'SIGKILL');
     killed = true;
+    console.log(JSON.stringify({ helper: process.pid, original: Number(owner) }));
 });
 listener.listen(Number(port), '127.0.0.1');
 "#;
-            let child = Command::new("node")
+            let mut child = Command::new("node")
                 .args(["-e", script])
                 .arg(ports[1].to_string())
                 .arg(old_pid.to_string())
@@ -4637,9 +4638,28 @@ listener.listen(Number(port), '127.0.0.1');
                 .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
-            let child = CapturedChild::new(child);
+            let mut stdout = BufReader::new(child.stdout.take().unwrap());
+            let mut stderr = child.stderr.take().unwrap();
+            let (sent, received) = std::sync::mpsc::channel();
+            let child = CapturedChild {
+                child: Some(child),
+                files: None,
+                stdout: Some(std::thread::spawn(move || {
+                    let mut line = String::new();
+                    let result = stdout.read_line(&mut line).map(|_| line.clone());
+                    let _ = sent.send(result);
+                    let mut bytes = line.into_bytes();
+                    stdout.read_to_end(&mut bytes).unwrap();
+                    bytes
+                })),
+                stderr: Some(std::thread::spawn(move || {
+                    let mut bytes = Vec::new();
+                    stderr.read_to_end(&mut bytes).unwrap();
+                    bytes
+                })),
+            };
             wait_port(ports[1], true);
-            Some(child)
+            Some((child, received))
         } else {
             None
         };
@@ -4657,7 +4677,7 @@ listener.listen(Number(port), '127.0.0.1');
             0
         );
         self.paused = Some(old_pid);
-        let forced = if let Some(mut listener) = replacement.take() {
+        let forced = if let Some((mut listener, killed)) = replacement.take() {
             let other_pid = listener.child.as_ref().unwrap().id();
             child_pids.push(u64::from(other_pid));
             // Lifecycle dispatches scoped PIDs in ascending order. The helper's
@@ -4668,6 +4688,7 @@ listener.listen(Number(port), '127.0.0.1');
             let plan_path = instance.join("restart.plan.json");
             let plan = fs::read(&plan_path).ok();
             let inode = fs::symlink_metadata(&socket).unwrap().ino();
+            let stop_started = Instant::now();
             let mut stop = CapturedChild::new(
                 isolated_lifetime_process(root, &state, config, "stop")
                     .stdout(Stdio::piped())
@@ -4679,6 +4700,32 @@ listener.listen(Number(port), '127.0.0.1');
             child_pids.push(u64::from(stop_pid));
             let helper = listener.child.as_mut().unwrap();
             let mut gate = helper.stdin.take().unwrap();
+            // Public Stop first performs control exchanges and native PID discovery.
+            // Start exit observation only after the helper actually sent SIGKILL.
+            let deadline = stop_started + Duration::from_secs(10);
+            let acknowledgement = loop {
+                assert!(
+                    Instant::now() < deadline,
+                    "helper SIGKILL acknowledgement timed out"
+                );
+                assert!(
+                    helper.try_wait().unwrap().is_none(),
+                    "helper exited before SIGKILL acknowledgement"
+                );
+                assert!(
+                    stop.child.as_mut().unwrap().try_wait().unwrap().is_none(),
+                    "public Stop exited before SIGKILL acknowledgement"
+                );
+                match killed.recv_timeout(Duration::from_millis(50)) {
+                    Ok(line) => break line.expect("helper acknowledgement read"),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(error) => panic!("helper SIGKILL acknowledgement: {error}"),
+                }
+            };
+            assert_eq!(
+                serde_json::from_str::<Value>(&acknowledgement).unwrap(),
+                serde_json::json!({"helper": other_pid, "original": old_pid})
+            );
             let owner = foreground.as_mut().unwrap();
             let signal = owner
                 .observe(Duration::from_secs(5))
@@ -4686,7 +4733,14 @@ listener.listen(Number(port), '127.0.0.1');
                 .and_then(|status| status.signal());
             let gone = signal == Some(libc::SIGKILL)
                 && wait_for_explicit_pid_exit(old_pid.into(), Duration::from_secs(4));
-            let bound = TcpStream::connect(("127.0.0.1", ports[1])).is_ok();
+            let bound = listener
+                .child
+                .as_mut()
+                .unwrap()
+                .try_wait()
+                .unwrap()
+                .is_none()
+                && TcpStream::connect(("127.0.0.1", ports[1])).is_ok();
             let running = stop.child.as_mut().unwrap().try_wait().unwrap().is_none();
             if !running {
                 let output = stop.finish();
@@ -4715,6 +4769,10 @@ listener.listen(Number(port), '127.0.0.1');
                 listener.child.as_mut().unwrap().kill().unwrap();
             }
             let output = listener.finish();
+            assert!(wait_for_child_exit(
+                stop.child.as_mut().unwrap(),
+                Duration::from_secs(5)
+            ));
             let refused = stop.finish();
             let reason = String::from_utf8_lossy(&refused.stderr);
             let preserved = fs::read(&path).unwrap() == bytes
