@@ -18,6 +18,20 @@ pub(super) fn project_default_text_attempt_images_with_policy(
     protocol: V3HubProviderWireProtocol,
     preserve_orphan_responses_json_strings: bool,
 ) {
+    project_default_text_attempt_images_with_tool_policy(
+        payload,
+        protocol,
+        preserve_orphan_responses_json_strings,
+        &[],
+    );
+}
+
+pub(super) fn project_default_text_attempt_images_with_tool_policy(
+    payload: &mut Value,
+    protocol: V3HubProviderWireProtocol,
+    preserve_orphan_responses_json_strings: bool,
+    openai_chat_orphan_tool_literals: &[bool],
+) {
     let (messages, content) = match protocol {
         V3HubProviderWireProtocol::Responses => ("input", "content"),
         V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Anthropic => {
@@ -30,6 +44,7 @@ pub(super) fn project_default_text_attempt_images_with_policy(
     };
     let mut seen_tool_call_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    let mut openai_chat_tool_index = 0usize;
     for message in messages {
         let text_type = match protocol {
             V3HubProviderWireProtocol::Responses if message["role"] == "assistant" => "output_text",
@@ -65,8 +80,13 @@ pub(super) fn project_default_text_attempt_images_with_policy(
             }
         }
         if protocol == V3HubProviderWireProtocol::OpenAiChat && message["role"] == "tool" {
+            let preserve_literal = openai_chat_orphan_tool_literals
+                .get(openai_chat_tool_index)
+                .copied()
+                .unwrap_or(false);
+            openai_chat_tool_index += 1;
             if let Some(output) = message.get_mut(content) {
-                project_tool_output(output, text_type, true);
+                project_tool_output(output, text_type, !preserve_literal);
             }
             continue;
         }
@@ -327,5 +347,27 @@ mod provider_req_compat_06_image_placeholder_tests {
             json!([{"type":"input_text","text":"[Image]"}]).to_string(),
             "paired output after matching call must project to [Image]"
         );
+    }
+
+    #[test]
+    fn openai_chat_orphan_tool_literal_policy_preserves_orphan_and_projects_paired() {
+        let mut payload = json!({
+            "messages": [
+                {"role": "tool", "tool_call_id": "call_orphan_bare", "content": "data:image/png;base64,AAAA"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "call_paired_bare", "type": "function", "function": {"name": "read_image", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "call_paired_bare", "content": "data:image/png;base64,BBBB"}
+            ]
+        });
+        project_default_text_attempt_images_with_tool_policy(
+            &mut payload,
+            V3HubProviderWireProtocol::OpenAiChat,
+            true,
+            &[true, false],
+        );
+        assert_eq!(
+            payload["messages"][0]["content"],
+            json!("data:image/png;base64,AAAA")
+        );
+        assert_eq!(payload["messages"][2]["content"], json!("[Image]"));
     }
 }

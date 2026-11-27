@@ -35,6 +35,8 @@ pub(crate) struct V3HubMessageHistoryProvenance {
     pub(crate) assistant_items: Vec<V3HubAssistantItemProvenance>,
     pub(crate) omit_tool_output_id: bool,
     pub(crate) preserve_native_tool_output_id: bool,
+    pub(crate) preserve_orphan_tool_output_literal: bool,
+    pub(crate) restore_responses_hosted_web_search: bool,
 }
 
 /// Decoder-owned request history provenance (`v3.operation_runner.explicit_history_pairing`).
@@ -105,6 +107,47 @@ impl V3HubExplicitHistoryProvenance {
             .get(message_index)
             .map(|entry| entry.assistant_items.as_slice())
             .filter(|items| !items.is_empty())
+    }
+
+    pub(crate) fn preserve_orphan_tool_output_literal(&self, message_index: usize) -> bool {
+        self.message_entries
+            .get(message_index)
+            .is_some_and(|entry| entry.preserve_orphan_tool_output_literal)
+    }
+
+    pub(crate) fn preserve_retained_for_refill(&self, retained: &Self) -> Self {
+        let mut message_entries = retained.message_entries.clone();
+        for (index, derived_entry) in self.message_entries.iter().enumerate() {
+            if let Some(retained_entry) = message_entries.get_mut(index) {
+                if derived_entry.tool_calls.len() > retained_entry.tool_calls.len() {
+                    retained_entry.tool_calls.extend(
+                        derived_entry.tool_calls[retained_entry.tool_calls.len()..]
+                            .iter()
+                            .cloned(),
+                    );
+                }
+                if derived_entry.reasoning_item_orders.len()
+                    > retained_entry.reasoning_item_orders.len()
+                {
+                    retained_entry.reasoning_item_orders.extend(
+                        derived_entry.reasoning_item_orders
+                            [retained_entry.reasoning_item_orders.len()..]
+                            .iter()
+                            .copied(),
+                    );
+                }
+                if derived_entry.assistant_items.len() > retained_entry.assistant_items.len() {
+                    retained_entry.assistant_items.extend(
+                        derived_entry.assistant_items[retained_entry.assistant_items.len()..]
+                            .iter()
+                            .cloned(),
+                    );
+                }
+            } else {
+                message_entries.push(derived_entry.clone());
+            }
+        }
+        Self { message_entries }
     }
 }
 
@@ -612,12 +655,20 @@ fn merge_equivalent_chat_value(
                         .get("content")
                         .is_none_or(|content| content.is_null() || content.as_str() == Some(""))
             };
+            let empty_assistant_reasoning = |object: &serde_json::Map<String, Value>| {
+                object.get("role").is_some_and(|role| role == "assistant")
+                    && object.get("reasoning_content").is_none_or(|reasoning| {
+                        reasoning.is_null() || reasoning.as_str() == Some("")
+                    })
+            };
             let semantic_keys = |object: &serde_json::Map<String, Value>| {
                 object
                     .keys()
                     .filter(|key| {
                         key.as_str() != "routecodex_chat_extension"
                             && !(key.as_str() == "content" && empty_assistant_content(object))
+                            && !(key.as_str() == "reasoning_content"
+                                && empty_assistant_reasoning(object))
                     })
                     .cloned()
                     .collect::<Vec<_>>()
@@ -655,6 +706,12 @@ fn merge_equivalent_chat_value(
                 {
                     // Chat assistant tool calls permit absent/null content; the
                     // Responses codec spells that same empty content as "".
+                } else if key == "reasoning_content"
+                    && empty_assistant_reasoning(source)
+                    && empty_assistant_reasoning(decoded)
+                {
+                    // Encrypted-only Responses reasoning omits reasoning_content,
+                    // while a Chat twin may carry empty/null reasoning_content.
                 } else if key == "content"
                     && (comparable_chat_content(&source[key]) == comparable_chat_content(value)
                         || (allow_orphan_tool_literal_content
@@ -750,15 +807,42 @@ fn responses_merged_chat_canonical(
         let decoded = canonical["messages"]
             .as_array()
             .expect("codec Chat messages");
-        let (merged_messages, merged_provenance) =
-            merge_responses_chat_histories(source, decoded, &provenance)?;
+        let has_synthetic_instructions_prefix = raw
+            .get("instructions")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+            && decoded
+                .first()
+                .and_then(|msg| msg.get("role"))
+                .and_then(Value::as_str)
+                == Some("system")
+            && source
+                .first()
+                .and_then(|msg| msg.get("role"))
+                .and_then(Value::as_str)
+                != Some("system");
+        let (merged_messages, merged_provenance) = if has_synthetic_instructions_prefix {
+            let tail_provenance = V3HubExplicitHistoryProvenance {
+                message_entries: provenance.message_entries[1..].to_vec(),
+            };
+            let (mut tail_messages, mut tail_prov) =
+                merge_responses_chat_histories(source, &decoded[1..], &tail_provenance)?;
+            tail_messages.insert(0, decoded[0].clone());
+            tail_prov
+                .message_entries
+                .insert(0, provenance.message_entries[0].clone());
+            (tail_messages, tail_prov)
+        } else {
+            merge_responses_chat_histories(source, decoded, &provenance)?
+        };
         canonical["messages"] = Value::Array(merged_messages);
         provenance = merged_provenance;
     }
     if let Some(messages) = canonical.get_mut("messages").and_then(Value::as_array_mut) {
         super::responses_openai_codec::resolve_orphan_responses_tool_output_media(
             messages,
-            &provenance,
+            &mut provenance,
         );
     }
     Ok((canonical, provenance))

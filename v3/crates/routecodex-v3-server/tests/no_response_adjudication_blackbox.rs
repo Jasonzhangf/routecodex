@@ -1831,6 +1831,131 @@ async fn refill_responses_dual_pending_assistant_history_survives_in_source_orde
     std::env::remove_var(KEY_ENV);
 }
 
+#[tokio::test]
+async fn refill_responses_native_input_only_preserves_provenance_and_order_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    for process in ["direct", "chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            source_summary_wire(false, "NATIVE_INPUT_ROUND_TWO"),
+            EntryOptions {
+                attempt_bodies: vec![refill_reasoning_round_wire()],
+                refill_max: None,
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let expected_prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "native input only task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "assistant msg 1"}]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_native_pending",
+                "call_id": "call_native_pending",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "assistant msg 2"}]
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_native_orphan",
+                "call_id": "call_native_orphan",
+                "output": encoded_image
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_native_pending",
+                "output": "matched result"
+            }
+        ]);
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "input": expected_prefix,
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "native input-only entry ({process}) must run exactly one refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "native input-only entry ({process}) must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("REASONING_ROUND_ONE")
+                && consumed.body.contains("NATIVE_INPUT_ROUND_TWO"),
+            "both rounds must reach the responses client ({process}): {consumed:?}"
+        );
+        for (round_idx, request_body) in captured.iter().enumerate() {
+            assert!(
+                request_body.get("messages").is_none(),
+                "provider request {round_idx} ({process}) must keep native input-only representation: {request_body}"
+            );
+            let input = request_body["input"].as_array().unwrap_or_else(|| {
+                panic!("provider request {round_idx} ({process}) must carry Responses input: {request_body}")
+            });
+            assert!(
+                input.len() >= 6,
+                "provider request {round_idx} ({process}) must retain all 6 history items: {request_body}"
+            );
+            assert_eq!(
+                json!(&input[0..6]),
+                expected_prefix,
+                "provider request {round_idx} ({process}) must preserve original client provenance (order, ids, absent id, orphan literal): {request_body}"
+            );
+        }
+        let second_input = captured[1]["input"].as_array().expect("second input array");
+        let appended = &second_input[6..];
+        let appended_rendered = Value::Array(appended.to_vec()).to_string();
+        assert!(
+            appended.iter().any(|item| item["type"] == "reasoning" && item["id"] == "rsn_provider_capture"),
+            "second provider request ({process}) must carry appended provider reasoning: {appended:?}"
+        );
+        assert!(
+            appended_rendered.contains("REASONING_ROUND_ONE"),
+            "second provider request ({process}) must replay round 1 assistant output: {appended:?}"
+        );
+        assert!(
+            appended_rendered.contains(REFILL_INSTRUCTION),
+            "second provider request ({process}) must carry the refill instruction: {appended:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: the `messages` twin of a dual Responses history can carry
 /// a business extension that `input` does not. The refill continuation must
 /// extend the merged history inbound accepted, so the association survives the

@@ -1243,10 +1243,13 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance(
             let omit_tool_output_id = msg_provenance.is_some_and(|p| p.omit_tool_output_id);
             let preserve_native_tool_output_id =
                 msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
+            let restore_responses_hosted_web_search =
+                msg_provenance.is_some_and(|p| p.restore_responses_hosted_web_search);
             if let Some(item) = chat_tool_result_to_responses_input_item_with_provenance(
                 row,
                 omit_tool_output_id,
                 preserve_native_tool_output_id,
+                restore_responses_hosted_web_search,
             )? {
                 output.push((message_order(msg_idx), item));
             }

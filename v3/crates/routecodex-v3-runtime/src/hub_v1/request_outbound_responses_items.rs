@@ -260,12 +260,20 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
     row: &Map<String, Value>,
     omit_tool_output_id: bool,
     preserve_native_tool_output_id: bool,
+    restore_responses_hosted_web_search: bool,
 ) -> Result<Option<Value>, String> {
-    let responses_tool_output_type = row
+    let raw_responses_tool_output_type = row
         .get("routecodex_chat_extension")
         .and_then(|extension| extension.get("responses_tool_output_type"))
         .and_then(Value::as_str)
         .unwrap_or("function_call_output");
+    let responses_tool_output_type = if raw_responses_tool_output_type == "web_search_call"
+        && !restore_responses_hosted_web_search
+    {
+        "function_call_output"
+    } else {
+        raw_responses_tool_output_type
+    };
     let call_id = row
         .get("tool_call_id")
         .or_else(|| row.get("call_id"))
@@ -289,9 +297,7 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
         })
         .unwrap_or_default();
     if responses_tool_output_type == "web_search_call" {
-        return serde_json::from_str(&output)
-            .map(Some)
-            .map_err(|error| format!("MalformedOutboundField web_search_call: {error}"));
+        return build_typed_responses_hosted_web_search_call_item(&output).map(Some);
     }
     if responses_tool_output_type == "tool_search_output" {
         let call_id = call_id.ok_or_else(|| {
@@ -406,6 +412,23 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
         }
     }
     Ok(Some(Value::Object(item)))
+}
+
+fn build_typed_responses_hosted_web_search_call_item(output: &str) -> Result<Value, String> {
+    let parsed: Value = serde_json::from_str(output).map_err(|error| {
+        format!("MalformedOutboundField target_protocol=responses path=$.input[].web_search_call: {error}")
+    })?;
+    let object = parsed.as_object().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call: expected object"
+            .to_string()
+    })?;
+    if object.get("type").and_then(Value::as_str) != Some("web_search_call") {
+        return Err(
+            "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.type"
+                .to_string(),
+        );
+    }
+    Ok(parsed)
 }
 
 fn project_responses_item_extension_fields(

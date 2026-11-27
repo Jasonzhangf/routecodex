@@ -409,7 +409,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
     }
     messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
     message_provenance.extend(std::mem::take(&mut pending_deferred_provenance));
-    let provenance = if native_responses {
+    let mut provenance = if native_responses {
         V3HubExplicitHistoryProvenance {
             message_entries: message_provenance,
         }
@@ -417,7 +417,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
         V3HubExplicitHistoryProvenance::empty()
     };
     if native_responses && resolve_orphan_media {
-        resolve_orphan_responses_tool_output_media(&mut messages, &provenance);
+        resolve_orphan_responses_tool_output_media(&mut messages, &mut provenance);
     }
     if messages.is_empty() {
         return Err("OpenAI Chat provider encoding produced no messages".to_string());
@@ -681,7 +681,7 @@ fn attach_v3_responses_reasoning_input_order(
 
 pub(super) fn resolve_orphan_responses_tool_output_media(
     messages: &mut [Value],
-    provenance: &V3HubExplicitHistoryProvenance,
+    provenance: &mut V3HubExplicitHistoryProvenance,
 ) {
     let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
         std::collections::HashMap::new();
@@ -714,6 +714,11 @@ pub(super) fn resolve_orphan_responses_tool_output_media(
                 {
                     // An orphan (call-ID or named output) has no declared tool media semantics.
                     message["content"] = Value::String(raw_output);
+                }
+                if message.get("content").is_some_and(Value::is_string) {
+                    if let Some(entry) = provenance.message_entries.get_mut(msg_idx) {
+                        entry.preserve_orphan_tool_output_literal = true;
+                    }
                 }
             }
         }
@@ -1698,6 +1703,8 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
     let result_prov = V3HubMessageHistoryProvenance {
         message_input_order: native_responses.then_some(input_index as u64),
         preserve_native_tool_output_id: native_responses,
+        restore_responses_hosted_web_search: native_responses
+            && matches!(kind, V3OpenAiChatHostedToolHistoryKind::WebSearch),
         ..Default::default()
     };
     append_v3_openai_chat_tool_call_message_with_provenance(
