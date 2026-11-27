@@ -244,6 +244,7 @@ features:
   - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
   - Omitted weights in one multi-member tier compile to equal weights.
   - A pool may declare `selection = { strategy = "sticky" }`; it parses, projects into the Manifest pool selection, and round-trips while the default priority selection stays omitted from serialized output.
+  - Optional route-pool active_keys compiles explicit provider/alias members, default retries=3 and hold disposition; an empty list stays empty and the simplified authoring round-trips the same typed policy.
   - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
   - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
   - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
@@ -251,6 +252,7 @@ features:
   - Explicit config.v3.toml remains on V3ConfigStore until the retirement phase.
   required_negative:
   - Unknown user fields, internal fields, malformed provider/model refs, empty pools or tiers, duplicate members, invalid weights, and unknown topology fail before Manifest publication.
+  - Active membership rejects unknown providers/aliases, duplicate members, unreachable pinned aliases, unsupported priority/weighted combinations, and active_queue without active_keys.
   - Runtime, Server, Virtual Router, Target, Provider, and Error crates do not read config.toml or call the user parser.
   - Parse failure never retries config.v3.toml and config.v3 failure never retries config.toml.
   - Lifecycle does not directly choose a parser or re-read config.toml through the legacy store.
@@ -1252,7 +1254,7 @@ features:
   - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a
     typed relay handoff side-channel carrying both the complete request-local failed-candidate exclusion set and the exact request-local capacity-busy candidate set, without inferring busy provenance from exclusions, so Relay cannot retry an already-failed Direct target
   - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
-  - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider
+  - Direct observation classifies actual completed text as stop and completed function/custom calls as tool_calls only without an explicit provider reason; outer-first explicit reasons retain their original string and override inference. Generic and Relay absence remains absent. This diagnostic classification does not mutate business bytes or attempt/refill control; stream requests may project valid provider
     JSON as client SSE without treating provider inbound transport as client protocol truth
   - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
   required_gates:
@@ -1282,7 +1284,8 @@ features:
   - npm run test:v3-responses-direct-unit
   - npm run test:v3-responses-direct-blackbox
   - npm run test:v3-direct-sse-compile
-  - npm run test:v3-direct-response-observability
+  - npm --prefix v3 run test:v3-direct-response-observability
+  - npm run test:v3-159361f-finish-reason-public
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -1513,12 +1516,227 @@ features:
     forbidden_claim: Do not claim P5 Router/Target selection, P6 Responses Provider request, P7 relay/protocol support, real ~/.rcc mutation, or global install from P3/P4 evidence.
 - feature_id: v3.virtual_router_target_interpreter
   status: p5_source_and_live_verified
+  active_key_selection_blackbox:
+    requirement: routecodex-active-key-queue v2
+    command: npm run test:v3-active-key-selection
+    test_design: docs/design/v3-active-key-selection.md
+    failure_mode: Sticky fourth-failure retry and reselection preserve each caller request's identity headers and the selected alias credential for Responses HTTP providers in Direct and Relay. The cross-protocol Chat case retains its header exclusion, queue order, fresh-session assignment and inactive-account boundary.
+    test_ids:
+    - active_queue_success_retains_head_and_excludes_inactive_alias
+    - fourth_recoverable_failure_reselects_and_next_request_keeps_b
+    - third_failure_then_success_does_not_dispose_active_head
+    - decode_and_empty_response_failures_reselect_without_unchanged_retry
+    - cross_protocol_fourth_failure_and_round_robin_retry_keep_actual_turns
+    - same_protocol_generic_direct_retries_then_holds_and_releases_the_key
+    - sticky_success_feedback_covers_chat_anthropic_and_gemini_entries
+    - confirmed_quota_switches_early_and_queue_release_does_not_clear_health
+    - final_only_account_errors_count_once_each_until_fourth_failure_hold
+    - held_key_survives_fixture_reconstruction_and_release_rejoins_tail
+    - corrupt_hold_state_fails_startup_without_releasing_or_leaking_listener
+    - cancellation_does_not_count_as_a_delivery_failure_or_hold_a_key
+    - accepted_refusal_and_content_filter_reset_the_failure_streak
+    - streaming_failure_recovery_commits_only_the_accepted_keys_business_frames
+    - review_regressions::legacy_failure_enters_active_default_with_target_witness
+    - review_regressions::held_active_default_is_not_a_health_successor
+    - review_regressions::overlapping_legacy_and_active_occurrences_keep_their_own_policy
+    - review_regressions::hold_store_failure_still_recovers_to_healthy_successor
+    - review_regressions::shared_identity_uses_the_supplying_active_pools_state
+    - review_regressions::concurrent_fourth_failure_holds_once_and_independent_requests_keep_b
+    - review_regressions::legacy_duplicate_identity_keeps_first_merged_row_rank
+    - review_regressions::legacy_duplicate_identity_keeps_scheduled_tier_table
+    - business_recovery::due_active_head_has_one_business_trial_while_other_requests_use_b
+    - business_recovery::held_active_member_cannot_acquire_trial_and_release_keeps_health
+    - business_recovery::failed_owned_trial_defers_without_spending_active_retry_budget
+    - business_recovery::cancelled_business_trial_releases_custody_without_holding_the_active_key
+    - final_boundaries::post_choice_hold_reselects_b_before_dispatch_planning_returns
+    - final_boundaries::fresh_choice_invalidated_during_validation_uses_b_in_each_dispatch_loop
+    - final_boundaries::fresh_unsent_hold_preserves_legacy_default_occurrence
+    - final_boundaries::fresh_unsent_hold_reaches_b
+    - final_boundaries::stale_failed_tail_retry_excludes_a_across_declarations_and_sends_b
+    - final_boundaries::contended_trial_is_health_neutral_in_each_dispatch_loop
+    - final_boundaries::relay_direct_handoff_preserves_actual_http
+    - final_boundaries::direct_relay_handoff_preserves_actual_http
+    - final_boundaries::later_actual_handoff_truncation_replaces_http
+    - final_boundaries::later_actual_handoff_truncation_breaks_the_client_transport
+    - final_boundaries::independent_local_failure_never_borrows_http
+    - final_boundaries::final_only_failed_direct_trial_ends_active_episode
+    - final_boundaries::final_only_failed_relay_trial_ends_active_episode
+    - final_boundaries::final_only_failed_trial_protocol_codecs
+    - final_boundaries::direct_skipped_retry_projects_exact_http_through_server
+    - round_robin_uses_only_active_aliases_and_retries_do_not_consume_turns
+    - sticky_sessions_spread_then_keep_their_successful_alias
+    - sticky_failed_attempt_does_not_create_a_successful_preference
+    - sticky_tail_fourth_failure_clears_old_binding_and_allows_later_fresh_a
+    - failure_streak_accumulates_across_requests_without_retry_budget_reset
+    - nonretryable_http_failures_accumulate_without_unchanged_same_key_retries
+    - exhausted_final_complete_http_error_preserves_actual_status_and_body
+    - actual_final_truncation_never_projects_an_earlier_http_error_or_cycles
+    - invalid_model_arguments_are_success_and_client_error_history_stays_paired
+  active_key_control_blackbox:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test active_key_control_address -- --test-threads=1 --nocapture
+    test_ids:
+    - real_admin_status_and_exact_release_follow_the_selected_listener_control
+    - control_publication_failure_keeps_business_and_preserves_the_foreign_record
+    - drop_and_exec_close_the_owned_companion_and_record
+    - drop_revokes_record_only_controls_on_retained_connection
+    - bracketed_ipv6_bind_keeps_legacy_business_and_real_admin_controls
+    - colliding_config_listener_components_keep_independent_real_admin_controls
+    - long_canonical_config_name_keeps_real_admin_status_release_and_cleanup
+    - shared_canonical_config_keeps_chunked_listener_owners_independent
+    - failed_chunked_publication_preserves_live_sibling_and_foreign_leaf
+    - case_distinct_listener_ids_keep_independent_real_admin_controls
+    - record_path_above_syscall_limit_keeps_real_admin_controls
+    address_coverage: IPv4 wildcard, IPv6 loopback and wildcard, and a currently assigned non-loopback IPv4 address. The companion exposes only selection controls and closes its record and sockets with its listener owner.
+  active_key_attempt_witness_blackbox:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test active_key_retry_witness -- --test-threads=1 --nocapture
+    test_ids:
+    - stale_failed_tail_retry_cannot_reopen_singleton
+    - direct_skipped_retry_preserves_final_actual_http
+    - responses_skipped_retry_preserves_final_actual_http_witness
+    - chat_skipped_retry_preserves_final_actual_http_witness
+    - gemini_skipped_retry_preserves_final_actual_http_witness
+    - anthropic_skipped_retry_preserves_final_actual_http_witness
+    - no_transition_qualifies_second_actual_http_error
+    - later_actual_transport_never_projects_earlier_http_error
+    - later_actual_truncation_never_projects_earlier_http_error
+  active_key_handoff_projection_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_handoff_projection:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_handoff_projection::relay_direct_held_successor_projects_exact_http_through_server
+    - tests::active_key_handoff_projection::direct_relay_held_successor_projects_exact_http_through_server
+    failure_mode: A real Server handoff selects B before its fourth-failure hold; opposite-mode dispatch must skip B and project only the retained actual A503 status, content-type and complete body. The per-aggregate observation exists only in cfg(test) builds.
+  active_key_control_storage_overlap_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_control_storage_race:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_control_storage_race::prepared_publication_survives_another_owners_prefix_prune
+    failure_mode: A prepared shorter listener publication overlaps a longer prefix owner's shutdown. An independently opened lock and a child process must observe the publisher's actual OS lock. The real Server/Admin consumer must retain business forwarding, control discovery, held-member status, exact release and complete resource cleanup.
+  active_key_control_contention_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_control_contention:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_control_contention::contended_admin_discovery_does_not_block_same_runtime_business
+    - tests::active_key_control_contention::startup_contention_serves_business_before_bounded_control_publication
+    - tests::active_key_control_contention::contended_drop_has_no_waiter_and_retains_exact_manual_cleanup
+    failure_mode: An actual Admin request must leave unrelated business progressing on the same current-thread consumer runtime while a separate handle holds its control namespace lock; lock acquisition must end explicitly and leave no latent waiter.
+  active_key_partial_release_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_partial_release:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_partial_release::releasing_one_listener_closes_its_control_and_preserves_its_peer
+    failure_mode: Port-scoped shutdown removes only the released listener's control owner and permits same-canonical-config replacement while the sibling serves real business and scoped control.
+  active_key_managed_release_blackbox:
+    command: 'npm run test:v3-managed-server-lifecycle'
+    test_ids:
+    - active_key_control_release::managed_release_reports_control_timeout_and_retries_only_the_selected_owner
+    - active_key_control_release::actual_managed_restart_replaces_active_control_records
+    - active_key_control_release::managed_active_controls_receive_declared_config_without_admin
+    - active_key_control_release::cancelled_managed_exec_retains_original_active_controls_and_business
+    - active_key_control_release::contended_successor_reports_unavailable_controls_and_retains_exact_recovery
+    - active_key_control_release::final_port_cleanup_failure_keeps_managed_retry_until_exact_cleanup_completes
+    - active_key_control_release::managed_release_revokes_accepted_record_only_controls
+    - active_key_control_release::fatal_exec_recovers_exact_controls
+    - active_key_control_release::contended_fatal_exec_recovers_exact_controls
+    - active_key_control_release::removed_port_retries_exact_retained_cleanup
+    - active_key_control_release::exited_verified_owner_resolves_foreign_replacement_and_starts_business
+    - active_key_control_release::exact_custody_terminal_contention_recovers_successor_and_preserves_foreign_leaf
+    - active_key_control_release::exact_custody_child_exits_with_sample_lock_and_failed_artifact_reduction
+    - active_key_control_release::exact_custody_interrupted_exec_recovers_from_predecessor_generation
+    - active_key_control_release::interrupted_exec_non_executable_successor_records_rejection_and_closes
+    - active_key_control_release::native_collection_refusal_retains_rejected_foreground
+    - active_key_control_release::native_prepublication_unwind_collects_adopted_child
+    - active_key_control_release::native_published_handoff_observation_failure_retains_collected_scope
+    - active_key_control_release::native_stop_refusal_retains_current_generation
+    - active_key_control_release::exact_post_adoption_unwind_retains_foreground
+    - active_key_control_release::exact_custody_published_declaration_recovers_predecessor_control
+    - active_key_control_release::exact_custody_public_restart_recovers_predecessor_control
+    - active_key_control_release::public_restart_staged_same_directory
+    - active_key_control_release::public_restart_staged_changed_directory
+    - active_key_control_release::public_restart_retired_control_starting
+    - active_key_control_release::public_restart_retired_control_running
+    - active_key_control_release::exact_custody_status_lock_failed_adoption_recovers_controls
+    - active_key_control_release::published_outcome_locked_provider_restore
+    - active_key_control_release::published_outcome_unlocked_provider_restore
+    - active_key_control_release::published_outcome_locked_readiness
+    - active_key_control_release::aggregate_absent_locked_constructor
+    - active_key_control_release::aggregate_absent_locked_changed_directory
+    - active_key_control_release::aggregate_absent_changed_directory_transfer_retry
+    - active_key_control_release::interrupted_predecessor_control_unlink
+    - previous_release_restart::interrupted_previous_transfer_unlink
+    - tests::exited_legacy_transfer_resolves_each_pre_normalization_location
+    - active_key_control_release::empty_custody_preparation_retains_live_owner
+    - active_key_control_release::empty_custody_recovery_retries_log_open
+    - active_key_control_release::empty_custody_recovery_retries_spawn
+    - active_key_control_release::stopped_child_exit_recovers_owned_generation
+    - active_key_control_release::foreground_exec_refusal_retries_through_formal_restart
+    - active_key_control_release::foreground_owner_survives_competing_public_start
+    - active_key_control_release::stopped_child_retries_control_unlink
+    - active_key_control_release::stopped_child_retries_cache_unlink
+    - active_key_control_release::failed_starting_retains_generation_through_unlink_fault
+    - active_key_control_release::failed_starting_retains_generation_through_socket_fault
+    - active_key_control_release::failed_starting_retains_generation_through_cache_fault
+    - active_key_control_release::rejected_restart_plan_settles_at_graceful_stop
+    - active_key_control_release::public_stop_observes_failed_terminal_publication
+    - active_key_control_release::fresh_child_rolls_back_incomplete_control_publication
+    - tests::forced_stop_validates_plan_before_retiring_generation
+    - tests::forced_signal_dispatch_reports_actual_outcomes
+    - tests::forced_exit_requires_positive_zombie_row
+    - tests::forced_exit_observes_collection_between_native_queries
+    - tests::forced_exit_live_generation_and_query_error_stay_unproved
+    - tests::forced_stop_rejects_changed_witness
+    - tests::live_hooks_group_does_not_block_forced_stop
+    - tests::bare_no_delivery_requires_verified_stopped_baseline
+    - active_key_control_release::replacement_listener_preserves_failed_stop
+    - active_key_control_release::exact_forced_stop_refuses_changed_control
+    - active_key_control_release::exact_cleanup_after_original_exit
+    - active_key_control_release::exact_cleanup_after_missing_fresh_cache
+    - active_key_control_release::exact_cleanup_after_original_metadata_error
+    - active_key_control_release::exact_cleanup_after_detached_original_peer_error
+    - active_key_control_release::exact_cleanup_after_stopped_original_spawn_error
+    - active_key_control_release::exact_cleanup_after_detached_fresh_peer_error
+    - active_key_control_release::exact_cleanup_after_first_peer_error_and_collection
+    - active_key_control_release::exact_cleanup_preserves_live_and_replaced_socket
+    - active_key_control_release::exact_cleanup_after_unresolved_prebusiness_fresh_reader
+    - active_key_control_release::exact_cleanup_joins_held_provider_work
+    - active_key_control_release::exact_cleanup_unwind_retains_pending_request_until_owned_lock_recovery
+    - issue36df127_start_replaces_unresponsive_aggregate_with_attached_admin
+    - start_force_kills_explicit_listener_pid_after_graceful_timeout
+    - issue36df127_stop_unresponsive_aggregate_with_attached_admin
+    - stop_force_kills_explicit_listener_pid_after_graceful_timeout
+    - f8c64a9_shutdown_slow_writer_remains_pending_until_exit
+    - managed_restart_recovers_owned_stale_running_child_after_unexpected_exit
+    - active_key_control_release::empty_custody_recovery_verifies_independent_proof
+    - tests::foreground_exec_failure_preserves_terminal_retry
+    - tests::failed_outcome_preserves_primary_and_unverified_plan
+    - active_key_control_release::exact_custody_forced_stop_recovers_controls
+    failure_mode: Actual authenticated managed ReleasePorts revokes accepted controls before success and preserves accepted business and siblings. Exact retained A remains retryable after a native A+B to B restart and external lock release. Formal restart recovers after Starting and Failed status writes both time out. A changed-directory predecessor control generation mismatch preserves all exact evidence. Genuine recovery permits a later formal restart to the original declaration with usable controls and Provider business. When a client times out with Provider work pending and ordinary Stop refuses the fixture lock, the same fixture must retain the live recorder through unwind and recover after its own lock is released. An owned child collected between the initial generation observation and the native process-state query must be recognized by positive final absence evidence; a live generation or query error cannot authorize publication.
+  active_key_rejected_native_exec:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib tests::native_exec_failure_retains_aggregate_and_hooks_owner -- --exact --nocapture'
+    failure_mode: A genuine native exec failure after borrowed active-control preparation preserves exact original endpoint bytes, actual status/release, listener and hooks ownership while cleaning only attempt artifacts.
+  active_key_lifecycle_custody:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib exact_custody_ -- --test-threads=1'
+    test_ids:
+    - tests::exact_custody_recovery_requires_independent_generation_evidence
+    - tests::codex_sample_persistence::exact_custody_failure_returns_before_stalled_sample_retention
+  active_key_exec_handoff_ownership:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib active_key_control::tests_active_key_exec:: -- --nocapture --test-threads=1'
+    test_ids:
+    - active_key_control::tests_active_key_exec::active_key_custody_retains_fully_written_leaf_after_failed_rollback
+    - active_key_control::tests_active_key_exec::active_key_exec_replaces_exact_or_missing_and_keeps_equal_record_owned
+    - active_key_control::tests_active_key_exec::active_key_exec_preserves_foreign_and_malformed_record
+    - active_key_control::tests_active_key_exec::active_key_exec_retires_removed_config_and_policy_without_touching_siblings
+    - active_key_control::tests_active_key_exec::active_key_exec_expiry_and_cancellation_retain_exact_cleanup_for_later_close
+    - active_key_control::tests_active_key_exec::active_key_exec_duplicate_scope_cannot_construct_a_cleanup_owner
+    - active_key_control::tests_active_key_exec::active_key_startup_cancellation_keeps_exact_publication_alternatives
+    - active_key_control::tests_active_key_exec::active_key_startup_needs_authority_and_durable_write_before_mutation
+    failure_mode: Verified exec handoff permits only full exact record replacement or retirement, including same-PID equal record-only ownership and removed config files; conflicts survive and expired/cancelled acquisition leaves explicit cleanup responsibility without late mutation.
+  active_key_recovery_dispatch_guard:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch -- --exact
+    failure_mode: A concurrent hold during recovery acquisition must reject the stale unsent selection and release only its matching trial without changing cadence or counting a dispatch.
   estimated_turn_filter_blackbox:
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server estimated_turn_filter
     test_ids: [responses_estimated_turn_filter_applies_per_request, estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_role]
   session_turn_limit_blackbox:
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server turn_limit
-    test_ids: [responses_session_turn_limit_skips_every_key_until_compact, responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider]
+    test_ids: [responses_session_turn_limit_skips_every_key_until_compact, responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider, responses_active_key_turn_limit_preserves_failure_and_compact_boundaries]
+    active_composition: Direct and Responses Relay exact-400 failures charge one actual active dispatch; same-key retries, sibling and inactive aliases remain excluded. A trial-owned rejecting Provider releases matching custody without changing cooldown or cadence, and a trial-ready successor actually dispatches and recovers. Repeated filtered requests preserve the fourth-failure threshold. Native compact resets its active streak and clears only conversation restrictions while another held member stays held. Manual release leaves conversation restrictions intact. Estimated-turn filtering preserves original active-key eligibility without delivery failures.
   admission_nonblocking_blackbox:
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e37891a_admission_nonblocking -- --nocapture --test-threads=1
     test_ids:
@@ -1606,6 +1824,8 @@ features:
   - A pool may declare selection strategy sticky: Target10 then keeps one primary and one standby provider per server+routingGroup+sessionId+pool binding, keyed by providerId+authAlias+modelId. The same session keeps its primary across attempts, uses the standby only when the primary is unusable, and rolls primary/standby only on a health or cooldown exclusion, never on a request-local provider failure; recovery is lazy and never pulls the session back. A fresh session takes the least-held primary in that pool so different sessions spread instead of stacking on the heaviest member, and a single-member pool keeps an empty standby. Sticky state is process-lifetime in-memory per pool with no cross-pool association, and a request without a client control session id creates no binding and keeps the previous selection behavior. Sticky only orders candidates the unchanged health/cooldown/availability/priority rules already admitted, inside the same eligible route tier.
   required_gates:
   - npm run test:v3-p5-router-target
+  - npm run test:v3-active-key-selection
+  - npm run verify:webui-smoke
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target sticky -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture
@@ -1932,6 +2152,7 @@ features:
     v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs.
   - Responses, Anthropic, and OpenAI Chat lifecycle-only/empty terminal frames
     cannot authorize Direct client commit.
+  - Direct Responses finish observation preserves exact explicit reasons across frames and infers only from actual completed text or client-executable calls; hosted/result/unfinished-only output cannot fabricate stop.
   - runtime and SSE transport do not parse business/control semantics.
   required_reverse:
   - A foreign-protocol event fails instead of being shape-reclassified.
@@ -1940,6 +2161,7 @@ features:
   - malformed provider event fails at provider codec, not transport/server.
   required_gates:
   - npm run verify:sse-architecture-boundary
+  - npm --prefix v3 run test:v3-direct-response-observability
   - npm run test:v3-responses-function-call-arguments-regression
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-openai-chat-relay-runtime-integration
@@ -2955,6 +3177,7 @@ features:
   required_negative:
   - Final observability does not reprint route/provider events already emitted by realtime sinks.
   - Console sinks do not mutate request/response payload, provider wire, Virtual Router selection, or provider error policy.
+  - Direct JSON and SSE closeout consume the same Direct classification; the Direct feature gate npm run test:v3-159361f-finish-reason-public runs the five fixed one-completion Direct Responses public fixtures (sse, sse-completed-tool-no-reason, sse-explicit-reason, json-completed-tool-no-reason, json-explicit-reason) plus the separate two-turn responses-to-responses-sse-dsml-harvest-no-reason fixture against a baseline binary from the same base and the candidate binary. It joins exactly one completion and reason per turn to the actual captured request_id from execution-mode evidence on both sides: candidate tool_calls then stop, baseline unreported then unreported. It compares complete client request/entity-body, provider wire bytes and captured provider turn, verifies the harvested call ID pairs with the follow-up function call and result within each run, and records only the process-generated (call|fc|msg)_dsml_<process>_<ordinal> ID normalization while every non-process byte matches. Provide the baseline binary with --baseline-binary or RCC_BASELINE_BINARY.
   integration:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_reselects_without_router_reentry --lib -- --nocapture
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server realtime_provider_failure_sink_prints_before_final_and_final_dedupes --lib -- --nocapture
@@ -2972,6 +3195,7 @@ features:
   - v3-console-realtime-04
   - v3-console-realtime-05
   - v3-console-realtime-06
+  - v3-console-realtime-07
   completion_rule:
     source: Focused Runtime and Server tests prove realtime sink emission and final dedupe.
     runtime: Installed V3 aggregate live replay proves realtime route/provider-error/provider-switch order before terminal.
@@ -4016,6 +4240,7 @@ features:
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - issuedd1de7e_responses_relay_provider_http_400_terminal_provenance and issuedd1de7e_responses_relay_provider_http_400_recovers_eligible_sibling prove public Responses Relay preserves a real provider HTTP 400 as the failed terminal's provider_status/error_category, never retries that identity, and still completes from an eligible healthy sibling without exposing provider error data to the client.
   - A provider failure followed by a switch writes exactly one provider_attempt_failed row; the provider_switched row does not repeat the failed attempt's provider_status, error_category, error_detail, or observed_error.
+  - issue88a3677_completion_ledger_metadata proves a provider HTTP 503 followed by a completed sibling keeps the failed row's evidence while the request.completed row and admin records projection carry the successful terminal's stop/clean error metadata and preserve the failure and switch counters.
   - Direct Responses shares the request observation context between live failure publication and closeout. With console logging enabled, JSON HTTP 503 and SSE response-header timeout recovery each produce one Started, one failure row and console line, one switch, and one successful terminal. Each observed upstream identity receives exactly one send.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
@@ -4034,6 +4259,7 @@ features:
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib protocol_plan_operator_fault_consumer_preserves_sources_without_error06 -- --nocapture --test-threads=1
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue88a3677_completion_ledger_metadata -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:architecture-mainline-call-map
   - git diff --check

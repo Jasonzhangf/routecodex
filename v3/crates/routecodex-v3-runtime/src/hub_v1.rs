@@ -107,6 +107,7 @@ pub use provider_resp_inbound_01_raw::*;
 mod provider_resp_compat_02_provider_compat;
 pub use provider_resp_compat_02_provider_compat::*;
 mod provider_sse_json_codec;
+pub use provider_sse_json_codec::v3_direct_responses_finish_reason;
 pub(crate) use provider_sse_json_codec::*;
 mod provider_attempt_business_content;
 pub(crate) use provider_attempt_business_content::*;

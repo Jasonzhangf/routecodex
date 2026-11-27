@@ -1167,12 +1167,10 @@ async fn close_exact_health_aggregate(
     )
     .await;
     match shutdown {
-        Ok(Ok(failures)) => {
-            errors.extend(
-                failures
-                    .into_iter()
-                    .map(|failure| format!("{context} aggregate shutdown failure: {failure:?}")),
-            );
+        Ok(Ok(report)) => {
+            if !report.is_empty() || report.pending_controls.is_some() {
+                errors.push(format!("{context} aggregate shutdown failure: {report:?}"));
+            }
         }
         Ok(Err(panic)) => errors.push(format!(
             "{context} aggregate shutdown panicked: {}",

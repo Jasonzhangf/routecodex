@@ -84,9 +84,11 @@ fn v3_direct_selected_available_for_send(
 }
 
 pub(crate) struct V3DirectProviderFailurePolicyResult {
+    business_trial_failed: bool,
     decision: V3Error05ExecutionDecision,
     retry_selected: Option<Box<routecodex_v3_target::V3Target10ConcreteProviderSelected>>,
     event: Option<V3RuntimeProviderFailureObservation>,
+    durability_diagnostic: Option<V3RuntimeProviderFailureObservation>,
     /// health-neutral 瞬态失败（SSE 流内/挂起）：重试与切换不经过任何
     /// provider action gate / recovery witness 等待，立即执行。
     retryable_transient: bool,
@@ -346,6 +348,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
             V3Error05ExecutionAction::Reselect
         ));
         V3DirectProviderFailurePolicyResult {
+            business_trial_failed: false,
             decision,
             retry_selected: None,
             event: Some(V3RuntimeProviderFailureObservation {
@@ -359,6 +362,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
                 wait_ms: Some(10),
                 ..Default::default()
             }),
+            durability_diagnostic: None,
             retryable_transient: false,
         }
     }
@@ -658,6 +662,14 @@ targets = [
             unavailable_candidates: Vec::new(),
             attempts: 1,
             default_floor_protected: false,
+            occurrence: expanded
+                .candidates
+                .iter()
+                .find(|candidate| candidate.provider_id == "a")
+                .unwrap()
+                .occurrences[0]
+                .clone(),
+            active_selection: None,
         };
         let provider_health = crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(
             &manifest,
@@ -749,6 +761,14 @@ targets = [
             unavailable_candidates: Vec::new(),
             attempts: 1,
             default_floor_protected: false,
+            occurrence: expanded
+                .candidates
+                .iter()
+                .find(|candidate| candidate.provider_id == "a")
+                .unwrap()
+                .occurrences[0]
+                .clone(),
+            active_selection: None,
         };
         let provider_health = crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(
             &manifest,
@@ -822,6 +842,103 @@ targets = [
     }
 }
 
+pub(crate) async fn run_v3_direct_provider_failure_policy_with_active_keys<
+    R: V3ProviderAvailabilityReader,
+>(
+    context: &V3DirectProviderFailurePolicyContext<'_, R>,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: V3Error01SourceRaised,
+    status: u16,
+    state: &mut V3DirectProviderFailurePolicyState<'_>,
+    active_keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    episode: Option<&mut V3ActiveKeyEpisode>,
+    witness: Option<&V3ExternalHttpWitness>,
+) -> Result<V3DirectProviderFailurePolicyResult, DirectPolicyFailure> {
+    let source = if episode.is_some() {
+        routecodex_v3_error::normalize_v3_active_key_failure_source(source, true)
+    } else {
+        source
+    };
+    let original_source = source.clone();
+    let mut result = run_v3_direct_provider_failure_policy_inner(
+        context,
+        selected,
+        source,
+        status,
+        state,
+        active_keys,
+        witness,
+    )
+    .await?;
+    if let Some(control) = context.recovery_control {
+        control.record_failure(
+            selected,
+            &result.decision.exhaustion.local_action.classified.source,
+            witness,
+            true,
+        );
+    }
+    let (Some(active_keys), Some(episode)) = (active_keys, episode) else {
+        return Ok(result);
+    };
+    use routecodex_v3_error::{
+        classify_v3_active_key_failure, plan_v3_active_key_recovery, V3ActiveKeyFailureClass,
+        V3ActiveKeyRecoveryAction,
+    };
+    let class = classify_v3_active_key_failure(&original_source, true);
+    if class == V3ActiveKeyFailureClass::Neutral {
+        episode.cancel();
+        return Ok(result);
+    }
+    let feedback = active_keys
+        .record_delivery_failure(episode)
+        .map_err(|error| {
+            direct_policy_failure(&original_source, "V3ActiveKeyDeliveryFailure", error)
+        })?;
+    result.durability_diagnostic =
+        crate::provider_failure_runtime_policy::active_key_durability_diagnostic(
+            selected,
+            feedback.durability_error,
+        );
+    let failed_key = candidate_key(&selected.candidate);
+    // The legacy policy has already applied health feedback. Its exclusion is
+    // provisional only for this explicit active episode.
+    state.failed_candidates.remove(&failed_key);
+    let now_epoch_ms = v3_direct_selection_now_ms(context.provider_health).map_err(|error| {
+        direct_policy_failure(&original_source, "V3Target10ConcreteProviderSelected", error)
+    })?;
+    let eligible = !result.business_trial_failed && !feedback.stale
+        && !feedback.transitioned
+        && !(selected.route.estimated_history_turns.is_some()
+            && context.provider_health.provider_blocked_until_compact(
+                context.failure_session_scope,
+                &selected.candidate.provider_id,
+            ))
+        && active_keys.selection_current(&episode.selection)
+        && V3TargetInterpreter::candidate_admitted(&selected.candidate, now_epoch_ms)
+        && v3_direct_selected_available_for_send(
+            selected,
+            context.expanded,
+            context.availability,
+            context.provider_health,
+            state.failed_candidates,
+            now_epoch_ms,
+        );
+    let action = plan_v3_active_key_recovery(class, episode.can_retry(eligible));
+    if action == V3ActiveKeyRecoveryAction::RetrySelectedActiveKey {
+        result.decision.action = V3Error05ExecutionAction::Reselect;
+        result.retry_selected = Some(Box::new(selected.clone()));
+        return Ok(result);
+    }
+    active_keys.close_failure(episode).map_err(|error| {
+        direct_policy_failure(&original_source, "V3ActiveKeyEpisodeClosed", error)
+    })?;
+    state.failed_candidates.insert(failed_key);
+    // Target must make the next active selection with its typed context.
+    result.retry_selected = None;
+    Ok(result)
+}
+
 fn direct_compaction_completed(
     body: &V3ClientBody,
     purpose: crate::nodes::V3RequestPurpose,
@@ -886,6 +1003,19 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     state: &mut V3DirectProviderFailurePolicyState<'_>,
     witness: Option<&V3ExternalHttpWitness>,
 ) -> Result<V3DirectProviderFailurePolicyResult, DirectPolicyFailure> {
+    run_v3_direct_provider_failure_policy_inner(context, selected, source, status, state, None, witness)
+        .await
+}
+
+async fn run_v3_direct_provider_failure_policy_inner<R: V3ProviderAvailabilityReader>(
+    context: &V3DirectProviderFailurePolicyContext<'_, R>,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: V3Error01SourceRaised,
+    status: u16,
+    state: &mut V3DirectProviderFailurePolicyState<'_>,
+    active_keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    witness: Option<&V3ExternalHttpWitness>,
+) -> Result<V3DirectProviderFailurePolicyResult, DirectPolicyFailure> {
     if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect) {
         let decision = run_v3_direct_policy_error_02_to_05_decision(
             &source,
@@ -899,9 +1029,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             false,
         )?;
         return Ok(V3DirectProviderFailurePolicyResult {
+            business_trial_failed: false,
             decision,
             retry_selected: None,
             event: None,
+            durability_diagnostic: None,
             retryable_transient: false,
         });
     }
@@ -929,6 +1061,16 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             context.failure_session_scope,
             &selected.candidate.provider_id,
         );
+        if let Some(control) = context.recovery_control {
+            control.cancel_business_recovery_trial(
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                &selected.candidate.auth_alias,
+                &selected.candidate.model_id,
+            ).map_err(|error| direct_policy_failure(
+                &source, "V3ProviderHealthStateMutated", error,
+            ))?;
+        }
     }
     let is_health_neutral_failure = session_turn_limit_rejected || is_response_processing_failure
         || (provider_http_status != Some(403)
@@ -1035,7 +1177,21 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             }
         }
     }
-    let rate_limit_alternative = if rate_limited {
+    let occurrence_observation = context
+        .expanded
+        .filter(|expanded| !expanded.active_pools.is_empty())
+        .map(|expanded| {
+            crate::provider_failure_runtime_policy::observe_v3_target_successors(
+                expanded,
+                context.availability,
+                context.provider_health,
+                &failed_with_current,
+                context.failure_session_scope,
+                active_keys,
+                failure_now_ms,
+            )
+        });
+    let rate_limit_alternative = if rate_limited && occurrence_observation.is_none() {
         context.expanded.and_then(|expanded| {
             crate::provider_failure_runtime_policy::select_v3_target_with_session_then_global(
                 &routecodex_v3_target::V3TargetInterpreter::default(),
@@ -1046,13 +1202,25 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 &failed_with_current,
                 failure_now_ms,
                 0,
+                None,
             )
             .ok()
         })
     } else {
         None
     };
-    if rate_limited {
+    if let Some(observed) = occurrence_observation {
+        let identities = observed
+            .iter()
+            .flat_map(|entry| entry.identities.iter())
+            .collect::<BTreeSet<_>>();
+        remaining = identities.len();
+        next_provider_key = identities.first().map(|identity| {
+            crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key_parts_for_interface(
+                &identity.provider_id, &identity.interface_id, Some(&identity.auth_alias), Some(&identity.model_id),
+            )
+        });
+    } else if rate_limited {
         remaining = usize::from(rate_limit_alternative.is_some());
         next_provider_key = rate_limit_alternative
             .as_ref()
@@ -1167,9 +1335,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             Some(0),
         ));
         return Ok(V3DirectProviderFailurePolicyResult {
+            business_trial_failed: trial_failed,
             decision,
             retry_selected: rate_limit_alternative.map(Box::new),
             event,
+            durability_diagnostic: None,
             // Candidate-scoped request/provider compatibility failures are
             // health-neutral and must reselect immediately without entering
             // the provider action gate.
@@ -1207,9 +1377,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         Some(0),
     ));
     Ok(V3DirectProviderFailurePolicyResult {
+        business_trial_failed: trial_failed,
         decision,
         retry_selected: None,
         event,
+        durability_diagnostic: None,
         retryable_transient: false,
     })
 }

@@ -3870,6 +3870,442 @@ fn sticky_pool_rolls_to_standby_when_primary_cools_and_does_not_pull_back() {
 }
 
 #[test]
+fn sticky_does_not_bind_a_candidate_before_business_success() {
+    let mut manifest = sticky_pool_manifest();
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .active_keys = Some(routecodex_v3_config::V3ActiveKeyPolicy {
+        members: vec![
+            routecodex_v3_config::V3ActiveKeyMember {
+                provider: "a".into(),
+                alias: "ka".into(),
+            },
+            routecodex_v3_config::V3ActiveKeyMember {
+                provider: "b".into(),
+                alias: "kb".into(),
+            },
+        ],
+        retries: 3,
+        on_failure: routecodex_v3_config::V3ActiveKeyFailureAction::Hold,
+    });
+    let target = V3TargetInterpreter::default();
+    let state = V3ActiveKeySelectionState::default();
+    let excluded = BTreeSet::new();
+    let scope = V3ActiveKeySelectionContext {
+        listener_id: "successful-binding-srv",
+        session_id: Some("successful-binding"),
+        state: &state,
+        excluded: &excluded,
+    };
+    let healthy = AlwaysHealthy;
+
+    struct ARequestLocalFailure;
+    impl V3ProviderSchedulingReader for ARequestLocalFailure {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    "default",
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
+            if provider_id == "a" {
+                projection.available = false;
+                projection.blocked_scopes = vec!["request_local_provider_failure".to_string()];
+            }
+            projection
+        }
+    }
+
+    let first = target
+        .select_available_with_health_active(
+            expanded_with(&manifest, &target, 0),
+            &healthy,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(first.candidate.provider_id, "a");
+
+    let replacement = target
+        .select_available_with_health_active(
+            expanded_with(&manifest, &target, 0),
+            &ARequestLocalFailure,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(replacement.candidate.provider_id, "b");
+    let mut episode = V3ActiveKeyEpisode::new(replacement.active_selection.unwrap());
+    episode.begin_attempt().unwrap();
+    assert!(state.accepted_success(&mut episode).unwrap());
+    let after_success = target
+        .select_available_with_health_active(
+            expanded_with(&manifest, &target, 0),
+            &healthy,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(
+        after_success.candidate.provider_id, "b",
+        "a successful replacement must become the sticky choice"
+    );
+}
+
+#[test]
+fn active_membership_intersects_declared_targets_and_empty_means_none() {
+    let mut manifest = sticky_pool_manifest();
+    let policy = routecodex_v3_config::V3ActiveKeyPolicy {
+        members: vec![routecodex_v3_config::V3ActiveKeyMember {
+            provider: "b".into(),
+            alias: "kb".into(),
+        }],
+        retries: 3,
+        on_failure: routecodex_v3_config::V3ActiveKeyFailureAction::Hold,
+    };
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .active_keys = Some(policy);
+    let target = V3TargetInterpreter::default();
+    for sample in 0..8 {
+        let expanded = expanded_with(&manifest, &target, sample);
+        assert_eq!(expanded.candidates.len(), 1);
+        assert_eq!(expanded.candidates[0].provider_id, "b");
+    }
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .active_keys
+        .as_mut()
+        .unwrap()
+        .members
+        .clear();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request(&manifest, "s", "/v1/responses")
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(
+        target.expand_candidates(&manifest, target.classify_kind(hit), 0),
+        Err(V3TargetError::CandidateSetEmpty)
+    );
+}
+
+#[test]
+fn active_selection_returns_its_supplying_occurrence_and_observation_is_read_only() {
+    let mut manifest = sticky_pool_manifest();
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .active_keys = Some(routecodex_v3_config::V3ActiveKeyPolicy {
+        members: vec![
+            routecodex_v3_config::V3ActiveKeyMember {
+                provider: "a".into(),
+                alias: "ka".into(),
+            },
+            routecodex_v3_config::V3ActiveKeyMember {
+                provider: "b".into(),
+                alias: "kb".into(),
+            },
+        ],
+        retries: 3,
+        on_failure: routecodex_v3_config::V3ActiveKeyFailureAction::Hold,
+    });
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    let state = V3ActiveKeySelectionState::default();
+    let excluded = BTreeSet::new();
+    let context = V3ActiveKeySelectionContext {
+        listener_id: "s",
+        session_id: Some("obs"),
+        state: &state,
+        excluded: &excluded,
+    };
+    let selected = target
+        .select_available_with_health_active(expanded.clone(), &AlwaysHealthy, 0, 0, &context)
+        .unwrap();
+    assert_eq!(selected.occurrence.pool_id, "default");
+    assert_eq!(
+        selected.active_selection.as_ref().unwrap().scope.pool_id,
+        selected.occurrence.pool_id
+    );
+    let before = target
+        .select_available_with_health_active(expanded.clone(), &AlwaysHealthy, 0, 0, &context)
+        .unwrap()
+        .candidate
+        .auth_alias;
+    let control_state = V3ActiveKeySelectionState::default();
+    let control_context = V3ActiveKeySelectionContext {
+        listener_id: "s",
+        session_id: Some("obs"),
+        state: &control_state,
+        excluded: &excluded,
+    };
+    for _ in 0..2 {
+        target
+            .select_available_with_health_active(
+                expanded.clone(),
+                &AlwaysHealthy,
+                0,
+                0,
+                &control_context,
+            )
+            .unwrap();
+    }
+    for _ in 0..5 {
+        let _ = target.observe_eligible_occurrences(
+            &expanded,
+            &AlwaysHealthy,
+            0,
+            &excluded,
+            "s",
+            Some(&context),
+        );
+    }
+    let expected = target
+        .select_available_with_health_active(
+            expanded.clone(),
+            &AlwaysHealthy,
+            0,
+            0,
+            &control_context,
+        )
+        .unwrap()
+        .candidate
+        .auth_alias;
+    let after = target
+        .select_available_with_health_active(expanded, &AlwaysHealthy, 0, 0, &context)
+        .unwrap()
+        .candidate
+        .auth_alias;
+    assert_ne!(before, expected, "fresh unbound sticky selections rotate; a consecutive choice is not an observation baseline");
+    assert_eq!(
+        expected, after,
+        "observation must not consume queue turns or bind affinity"
+    );
+}
+
+#[test]
+fn active_choice_race_exhausts_instead_of_weighted_legacy_fallback() {
+    assert_active_choice_race(false);
+}
+
+#[test]
+fn active_choice_race_keeps_the_declared_lower_bucket() {
+    assert_active_choice_race(true);
+}
+
+fn assert_active_choice_race(has_successor: bool) {
+    let mut manifest = sticky_pool_manifest();
+    let pool = manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap();
+    let mut members = vec![routecodex_v3_config::V3ActiveKeyMember {
+        provider: "a".into(),
+        alias: "ka".into(),
+    }];
+    if has_successor {
+        members.push(routecodex_v3_config::V3ActiveKeyMember {
+            provider: "b".into(),
+            alias: "kb".into(),
+        });
+        pool.targets[1].priority = Some(0);
+    }
+    pool.active_keys = Some(routecodex_v3_config::V3ActiveKeyPolicy {
+        members,
+        retries: 3,
+        on_failure: routecodex_v3_config::V3ActiveKeyFailureAction::Hold,
+    });
+    pool.selection.strategy = V3SelectionStrategy::ActiveQueue;
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    let state = V3ActiveKeySelectionState::default();
+    let scope = V3ActiveKeyScope {
+        listener_id: "s".into(),
+        routing_group_id: "g".into(),
+        pool_id: "default".into(),
+    };
+    let pool = expanded.active_pools.get("default").unwrap();
+    state
+        .configure(
+            scope.clone(),
+            pool.policy.clone(),
+            pool.strategy.clone(),
+            &pool.universe,
+        )
+        .unwrap();
+    let identity = expanded.candidates[0].active_key_identity();
+    let mut episode = V3ActiveKeyEpisode::new(
+        state
+            .choose(
+                &scope,
+                &BTreeSet::from([identity.clone()]),
+                &BTreeSet::new(),
+                None,
+            )
+            .unwrap()
+            .unwrap(),
+    );
+    for _ in 0..3 {
+        episode.begin_attempt().unwrap();
+        state.record_delivery_failure(&mut episode).unwrap();
+    }
+    assert!(state.selectable(&scope, &identity));
+    struct HoldDuringProjection<'a> {
+        state: &'a V3ActiveKeySelectionState,
+        episode: std::cell::RefCell<Option<V3ActiveKeyEpisode>>,
+        fired: std::cell::Cell<bool>,
+    }
+    impl V3ProviderSchedulingReader for HoldDuringProjection<'_> {
+        fn scheduling_projection(
+            &self,
+            provider: &str,
+            alias: &str,
+            model: &str,
+            priority: i32,
+            weight: u32,
+            now: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            if let Some(mut episode) = self.episode.borrow_mut().take() {
+                episode.begin_attempt().unwrap();
+                assert!(
+                    self.state
+                        .record_delivery_failure(&mut episode)
+                        .unwrap()
+                        .transitioned
+                );
+                self.fired.set(true);
+            }
+            AlwaysHealthy.scheduling_projection(provider, alias, model, priority, weight, now)
+        }
+    }
+    let scheduling = HoldDuringProjection {
+        state: &state,
+        episode: std::cell::RefCell::new(Some(episode)),
+        fired: std::cell::Cell::new(false),
+    };
+    let excluded = BTreeSet::new();
+    let context = V3ActiveKeySelectionContext {
+        listener_id: "s",
+        session_id: Some("race"),
+        state: &state,
+        excluded: &excluded,
+    };
+    let selected =
+        target.select_available_with_health_active(expanded, &scheduling, 0, 0, &context);
+    assert!(
+        scheduling.fired.get(),
+        "fourth failure must occur inside observation, not before selection"
+    );
+    if has_successor {
+        let selected =
+            selected.expect("a lost active bucket must continue to the declared lower bucket");
+        assert_eq!(selected.candidate.provider_id, "b");
+        assert_eq!(selected.active_selection.unwrap().identity.provider_id, "b");
+    } else {
+        assert!(
+            selected.is_err(),
+            "a now-held bucket must not fall through to an unwitnessed legacy pick: {selected:?}"
+        );
+    }
+}
+
+#[test]
+fn active_listener_custody_preserves_a_different_pools_legacy_sticky_behavior() {
+    let mut manifest = sticky_pool_manifest();
+    let tools = manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("tools")
+        .unwrap();
+    tools.selection.strategy = V3SelectionStrategy::ActiveQueue;
+    tools.active_keys = Some(routecodex_v3_config::V3ActiveKeyPolicy {
+        members: vec![routecodex_v3_config::V3ActiveKeyMember {
+            provider: "a".into(),
+            alias: "ka".into(),
+        }],
+        retries: 3,
+        on_failure: routecodex_v3_config::V3ActiveKeyFailureAction::Hold,
+    });
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    assert!(
+        expanded.active_pools.is_empty(),
+        "the selected default pool has no active policy"
+    );
+    let scope = V3StickySelectionScope::new("s", "g", "mixed-pool-legacy-session");
+    let expected = target
+        .select_available_with_health_sticky(expanded.clone(), &AlwaysHealthy, 0, 0, &scope)
+        .unwrap();
+    let state = V3ActiveKeySelectionState::default();
+    let excluded = BTreeSet::new();
+    let active = V3ActiveKeySelectionContext {
+        listener_id: "s",
+        session_id: Some("mixed-pool-legacy-session"),
+        state: &state,
+        excluded: &excluded,
+    };
+    for sample in 0..8 {
+        let actual = target
+            .select_available_with_health_active(
+                expanded.clone(),
+                &AlwaysHealthy,
+                0,
+                sample,
+                &active,
+            )
+            .unwrap();
+        assert_eq!(
+            actual.candidate.provider_id, expected.candidate.provider_id,
+            "activating the tools pool must not disable default-pool legacy affinity"
+        );
+        assert!(actual.active_selection.is_none());
+    }
+}
+
+#[test]
 fn sticky_binding_survives_request_scoped_candidate_shrink() {
     // A client model filter can shrink one request's candidate set to a subset
     // of the pool. The sticky universe is the pool's declared members, so the

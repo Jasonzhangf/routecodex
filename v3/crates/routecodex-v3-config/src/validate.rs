@@ -1010,6 +1010,9 @@ fn compile_forwarders(
         .into_iter()
         .map(|(id, forwarder)| {
             require_id("forwarder", &id)?;
+            if forwarder.selection.strategy == V3SelectionStrategy::ActiveQueue {
+                return Err(validation("active_queue is supported only by route pools with active_keys"));
+            }
             require_id("forwarder model", &forwarder.model)?;
             if forwarder.targets.is_empty() {
                 return Err(validation(format!("forwarder {id} has no targets")));
@@ -1239,6 +1242,7 @@ fn compile_route_groups(
                         V3RoutePoolManifest {
                             id: pool_id,
                             selection: pool.selection,
+                            active_keys: pool.active_keys,
                             route_object: pool.route_object,
                             match_rule,
                             targets,
@@ -1247,6 +1251,9 @@ fn compile_route_groups(
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>, V3ConfigError>>()?;
+            for pool in pools.values() {
+                validate_active_keys(pool, providers, forwarders)?;
+            }
             Ok((
                 group_id.clone(),
                 V3RouteGroupManifest {
@@ -1259,6 +1266,96 @@ fn compile_route_groups(
             ))
         })
         .collect()
+}
+
+fn validate_active_keys(
+    pool: &V3RoutePoolManifest,
+    providers: &BTreeMap<String, V3ProviderManifest>,
+    forwarders: &BTreeMap<String, V3ForwarderManifest>,
+) -> Result<(), V3ConfigError> {
+    let Some(policy) = &pool.active_keys else {
+        if pool.selection.strategy == V3SelectionStrategy::ActiveQueue {
+            return Err(validation("active_queue requires active_keys"));
+        }
+        return Ok(());
+    };
+    if !matches!(
+        pool.selection.strategy,
+        V3SelectionStrategy::ActiveQueue
+            | V3SelectionStrategy::RoundRobin
+            | V3SelectionStrategy::Sticky
+    ) {
+        return Err(validation(
+            "active_keys supports active_queue, round_robin, or sticky selection only",
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    for member in &policy.members {
+        if !unique.insert(member) {
+            return Err(validation(format!(
+                "active_keys repeats provider/alias {}/{}",
+                member.provider, member.alias
+            )));
+        }
+        if !providers.contains_key(&member.provider) {
+            return Err(validation(format!(
+                "active_keys references unknown provider {}",
+                member.provider
+            )));
+        }
+        validate_auth_alias_ref(
+            "active_keys",
+            &member.provider,
+            Some(&member.alias),
+            providers,
+        )?;
+        if !pool
+            .targets
+            .iter()
+            .any(|target| active_member_reachable(target, member, forwarders))
+        {
+            return Err(validation(format!(
+                "active_keys member {}/{} is outside declared pool targets",
+                member.provider, member.alias
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn active_member_reachable(
+    target: &V3RoutePoolTargetManifest,
+    member: &V3ActiveKeyMember,
+    forwarders: &BTreeMap<String, V3ForwarderManifest>,
+) -> bool {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            target.provider.as_ref() == Some(&member.provider)
+                && target.key.as_ref().is_none_or(|key| key == &member.alias)
+        }
+        V3RouteTargetKind::Forwarder => target
+            .id
+            .as_ref()
+            .and_then(|id| forwarders.get(id))
+            .is_some_and(|forwarder| {
+                forwarder.targets.iter().any(|nested| {
+                    active_member_reachable(
+                        &V3RoutePoolTargetManifest {
+                            kind: nested.kind.clone(),
+                            id: nested.id.clone(),
+                            provider: nested.provider.clone(),
+                            model: nested.model.clone(),
+                            key: nested.key.clone(),
+                            interface: nested.interface.clone(),
+                            priority: nested.priority,
+                            weight: nested.weight,
+                        },
+                        member,
+                        forwarders,
+                    )
+                })
+            }),
+    }
 }
 
 fn compile_route_policies(

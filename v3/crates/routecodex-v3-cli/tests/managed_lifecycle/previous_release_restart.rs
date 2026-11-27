@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) struct PreviousReleaseRuntime {
-    child: Child,
+    pub(super) child: Child,
 }
 
 impl Drop for PreviousReleaseRuntime {
@@ -236,6 +236,12 @@ fn f8c64a9_live_previous_transfer_refuses_start_without_disturbing_owner() {
 #[test]
 fn previous_release_one_step_content_change() {
     assert_previous_release_one_step(false);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn interrupted_previous_transfer_unlink() {
+    super::active_key_control_release::interrupted_unlink(true);
 }
 
 #[test]

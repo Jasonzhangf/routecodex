@@ -124,6 +124,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         "default".into(),
                         V3RoutePoolManifest {
                             id: "default".into(),
+                            active_keys: None,
                             selection: V3SelectionPolicy::default(),
                             match_rule: None,
                             route_object: None,
@@ -135,6 +136,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         "compact".into(),
                         V3RoutePoolManifest {
                             id: "compact".into(),
+                            active_keys: None,
                             selection: V3SelectionPolicy::default(),
                             match_rule: Some(V3RoutePoolMatchManifest {
                                 precedence: 0,

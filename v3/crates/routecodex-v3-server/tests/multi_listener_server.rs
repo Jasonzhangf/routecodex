@@ -741,12 +741,369 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
 }
 
 #[tokio::test]
+async fn responses_active_key_turn_limit_preserves_failure_and_compact_boundaries() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    #[derive(Debug)]
+    struct Clock(AtomicU64);
+    impl routecodex_v3_runtime::V3ProviderHealthObservationClock for Clock {
+        fn now_epoch_ms(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("active-session-turn-limit");
+    std::env::set_var("V3_P6_TEST_KEY", "active-turn-primary");
+    std::env::set_var("V3_TURN_SIBLING_KEY", "active-turn-sibling");
+    std::env::set_var("V3_TURN_INACTIVE_KEY", "active-turn-inactive");
+    for relay in [false, true] {
+        let (primary_url, mut primary, primary_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                br#"{"error":{"code":"session_turn_limit_exceeded"}}"#.to_vec(),
+            )
+            .await;
+        let (fallback_url, mut fallback, fallback_shutdown) =
+            start_controlled_responses_relay_upstream().await;
+        let (compact_url, mut compact_upstream, compact_shutdown) =
+            start_controlled_terminal_upstream_with_body_when(
+                StatusCode::OK, "application/json",
+                br#"{"id":"cmp_active","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"active-summary"}]}"#.to_vec(),
+                |body| body.to_string().contains("compact-success"),
+            ).await;
+        let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+            free_port(),
+            free_port(),
+            &primary_url,
+            "responses",
+            Some(&fallback_url),
+            "exclude_at_estimated_turns = 99",
+            relay,
+        );
+        enable_turn_limit_active_keys(&mut manifest);
+        let health = manifest
+            .providers
+            .get_mut("test")
+            .unwrap()
+            .health
+            .as_mut()
+            .unwrap();
+        health.enabled = true;
+        let health = health.clone();
+        manifest.providers.get_mut("fallback").unwrap().health = Some(health);
+        let mut compact_provider = manifest.providers["fallback"].clone();
+        compact_provider.id = "compact_fixture".into();
+        compact_provider.base_url = compact_url.clone();
+        compact_provider
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .base_url = compact_url;
+        manifest
+            .providers
+            .insert(compact_provider.id.clone(), compact_provider);
+        let group = manifest.route_groups.get_mut("default").unwrap();
+        let mut compact_pool = group.pools["client_test"].clone();
+        compact_pool.id = "compact".into();
+        compact_pool.route_object = Some("active-compact".into());
+        let mut compact_target = compact_pool.targets.last().unwrap().clone();
+        compact_target.provider = Some("compact_fixture".into());
+        compact_pool.targets = vec![compact_target];
+        compact_pool.active_keys.as_mut().unwrap().members =
+            vec![routecodex_v3_config::V3ActiveKeyMember {
+                provider: "compact_fixture".into(),
+                alias: "key".into(),
+            }];
+        group.compact_route_object = compact_pool.route_object.clone();
+        group.pools.insert(compact_pool.id.clone(), compact_pool);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let clock = Arc::new(Clock(AtomicU64::new(now)));
+        let server = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+            manifest,
+            clock.clone(),
+        )
+        .await
+        .unwrap();
+        let base = format!("http://{}", server.listeners[0].addr);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        for provider in ["test", "fallback"] {
+            client
+                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+                .json(
+                    &json!({"provider_id":provider,"interface_id":"default","auth_alias":"key",
+                    "model_id":"test","kind":"probe","duration_ms":3600000}),
+                )
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        let health_status = || client.get(format!("{base}/_routecodex/health/cooldown-pool"));
+        let health: Value = health_status().send().await.unwrap().json().await.unwrap();
+        let due = health["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["until_ms"].as_u64().unwrap())
+            .max()
+            .unwrap();
+        clock.0.store(due, Ordering::SeqCst);
+        let health: Value = health_status().send().await.unwrap().json().await.unwrap();
+        let primary_health = health["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["provider_id"] == "test")
+            .unwrap()
+            .clone();
+        let ordinary = |session: String| {
+            client.post(format!("{base}/v1/responses"))
+            .header("x-session-id", session)
+            .json(&json!({"model":"client-test","input":"ordinary active request","stream":false}))
+        };
+        let compact = |marker: &str| {
+            client
+                .post(format!("{base}/v1/responses/compact"))
+                .header("x-session-id", "active-limit-0")
+                .json(&json!({"model":"client-test","input":marker,"stream":false}))
+        };
+        // Four distinct actual failures, interleaved with filtered requests.
+        // A duplicate charge or same-key retry would hold A before the fourth.
+        for index in 0..4 {
+            let response = ordinary(format!("active-limit-{index}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "relay={relay}");
+            response.bytes().await.unwrap();
+            let sent = primary.try_recv().expect("one real primary failure");
+            assert_eq!(
+                sent.authorization.as_deref(),
+                Some("Bearer active-turn-primary")
+            );
+            assert!(
+                primary.try_recv().is_err(),
+                "same key, sibling or inactive key retried"
+            );
+            assert!(fallback.try_recv().is_ok());
+            let health: Value = health_status().send().await.unwrap().json().await.unwrap();
+            let entries = health["entries"].as_array().unwrap();
+            let retained = entries
+                .iter()
+                .find(|entry| entry["provider_id"] == "test")
+                .unwrap();
+            for field in [
+                "until_ms",
+                "failure_count",
+                "probe_failure_count",
+                "next_probe_at_ms",
+                "state",
+                "kind",
+                "reason",
+            ] {
+                assert_eq!(
+                    retained[field], primary_health[field],
+                    "exact400 changed health {field}: {health}"
+                );
+            }
+            assert!(
+                !entries
+                    .iter()
+                    .any(|entry| entry["provider_id"] == "fallback"),
+                "successor must complete its own business trial: {health}"
+            );
+            for _ in 0..4 {
+                let response = ordinary("active-limit-0".into()).send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                response.bytes().await.unwrap();
+                assert!(
+                    primary.try_recv().is_err(),
+                    "restricted Provider dispatched"
+                );
+                assert!(fallback.try_recv().is_ok());
+            }
+            let status: Value = client
+                .get(format!("{base}/_routecodex/selection/active-keys"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let pool = status["pools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|pool| pool["pool_id"] == "default")
+                .unwrap();
+            assert_eq!(
+                pool["held"].as_array().unwrap().len(),
+                usize::from(index == 3),
+                "{status}"
+            );
+            if index == 3 {
+                assert_eq!(pool["held"][0]["auth_alias"], "key");
+            }
+        }
+        // Compact failures each charge its own episode; a genuine compact
+        // success must reset that streak without releasing the ordinary hold.
+        for _ in 0..3 {
+            assert_eq!(
+                compact("compact-failure").send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(compact_upstream.try_recv().is_ok());
+            assert!(compact_upstream.try_recv().is_err());
+        }
+        let completed: Value = compact("compact-success")
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            completed["output"][0]["encrypted_content"],
+            "active-summary"
+        );
+        let sent = compact_upstream.try_recv().unwrap();
+        assert_eq!(sent.request_path.as_deref(), Some("/v1/responses/compact"));
+        let response = ordinary("active-limit-0".into()).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.bytes().await.unwrap();
+        let sent = primary
+            .try_recv()
+            .expect("compact restored Provider eligibility");
+        assert_eq!(
+            sent.authorization.as_deref(),
+            Some("Bearer active-turn-sibling"),
+            "compact released the held key"
+        );
+        assert!(primary.try_recv().is_err());
+        assert!(fallback.try_recv().is_ok());
+        let released: Value = client
+            .post(format!("{base}/_routecodex/selection/active-keys/release"))
+            .json(
+                &json!({"routing_group_id":"default","pool_id":"default","provider_id":"test",
+                "interface_id":"default","model_id":"test","auth_alias":"key"}),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(released["released"], true);
+        let response = ordinary("active-limit-0".into()).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.bytes().await.unwrap();
+        assert!(
+            primary.try_recv().is_err(),
+            "release cleared the conversation restriction"
+        );
+        assert!(fallback.try_recv().is_ok());
+        for _ in 0..3 {
+            assert_eq!(
+                compact("compact-failure").send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(compact_upstream.try_recv().is_ok());
+            assert!(compact_upstream.try_recv().is_err());
+        }
+        let status: Value = client
+            .get(format!("{base}/_routecodex/selection/active-keys"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let compact_pool = status["pools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pool| pool["pool_id"] == "compact")
+            .unwrap();
+        assert_eq!(
+            compact_pool["held"],
+            json!([]),
+            "compact success did not reset active failure feedback"
+        );
+        server.shutdown().await;
+        let _ = primary_shutdown.send(());
+        let _ = fallback_shutdown.send(());
+        let _ = compact_shutdown.send(());
+    }
+}
+
+fn enable_turn_limit_active_keys(manifest: &mut routecodex_v3_config::V3Config05ManifestPublished) {
+    use routecodex_v3_config::{
+        V3ActiveKeyFailureAction, V3ActiveKeyMember, V3ActiveKeyPolicy, V3SelectionStrategy,
+    };
+    let auth = &mut manifest.providers.get_mut("test").unwrap().auth;
+    for (alias, env) in [
+        ("sibling", "V3_TURN_SIBLING_KEY"),
+        ("inactive", "V3_TURN_INACTIVE_KEY"),
+    ] {
+        let mut entry = auth.entries[0].clone();
+        entry.alias = alias.into();
+        entry.env = Some(env.into());
+        auth.entries.push(entry);
+    }
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        let primary = pool.targets[0].clone();
+        for alias in ["sibling", "inactive"] {
+            let mut target = primary.clone();
+            target.key = Some(alias.into());
+            pool.targets.insert(1, target);
+        }
+        pool.selection.strategy = V3SelectionStrategy::ActiveQueue;
+        pool.active_keys = Some(V3ActiveKeyPolicy {
+            members: [("test", "key"), ("test", "sibling"), ("fallback", "key")]
+                .into_iter()
+                .map(|(provider, alias)| V3ActiveKeyMember {
+                    provider: provider.into(),
+                    alias: alias.into(),
+                })
+                .collect(),
+            retries: 3,
+            on_failure: V3ActiveKeyFailureAction::Hold,
+        });
+    }
+}
+
+#[tokio::test]
 async fn responses_estimated_turn_filter_applies_per_request() {
     let _guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("estimated-turn-filter");
     std::env::set_var("V3_P6_TEST_KEY", "estimated-turn-filter-fixture");
+    std::env::set_var("V3_TURN_SIBLING_KEY", "estimated-turn-sibling");
+    std::env::set_var("V3_TURN_INACTIVE_KEY", "estimated-turn-inactive");
     for relay in [false, true] {
-        assert_estimated_turn_filter_through_responses(relay).await;
+        for active in [false, true] {
+            assert_estimated_turn_filter_through_responses(relay, active).await;
+        }
         assert_estimated_turn_filter_on_real_tool_followup(relay).await;
     }
 }
@@ -861,7 +1218,7 @@ fn execute_turn_limit_fixture_tool(name: &str, args: &Value) -> String {
     }
 }
 
-async fn assert_estimated_turn_filter_through_responses(relay: bool) {
+async fn assert_estimated_turn_filter_through_responses(relay: bool, active: bool) {
     let (primary_url, mut primary, primary_shutdown) =
         start_controlled_responses_relay_upstream().await;
     let (fallback_url, mut fallback, fallback_shutdown) =
@@ -876,11 +1233,19 @@ async fn assert_estimated_turn_filter_through_responses(relay: bool) {
         relay,
     );
     manifest.debug.snapshots = false;
+    if active {
+        enable_turn_limit_active_keys(&mut manifest);
+    }
     let group = manifest.route_groups.get_mut("default").unwrap();
     let mut compact_pool = group.pools["client_test"].clone();
     compact_pool.id = "compact".into();
     compact_pool.route_object = Some("estimated-turn-compact".into());
     compact_pool.targets.truncate(1);
+    if let Some(policy) = &mut compact_pool.active_keys {
+        policy
+            .members
+            .retain(|member| member.provider == "test" && member.alias == "key");
+    }
     group.compact_route_object = compact_pool.route_object.clone();
     group.pools.insert(compact_pool.id.clone(), compact_pool);
     let server = spawn_v3_server_aggregate(manifest).await.unwrap();
@@ -899,7 +1264,7 @@ async fn assert_estimated_turn_filter_through_responses(relay: bool) {
         input.push(json!({"role":"user","content":"fixture current user input"}));
         input
     };
-    for count in [98, 99, 98] {
+    for count in [98, 99, 99, 99, 99, 98] {
         let input = history(count);
         let response = client
             .post(&endpoint)
@@ -925,6 +1290,13 @@ async fn assert_estimated_turn_filter_through_responses(relay: bool) {
             .expect("expected provider was not called")
             .unwrap();
         let wire = capture.body.to_string();
+        if active && count == 98 {
+            assert_eq!(
+                capture.authorization.as_deref(),
+                Some("Bearer estimated-turn-filter-fixture"),
+                "pre-send filtering changed active-key failure state"
+            );
+        }
         assert!(wire.contains("fixture history 0"));
         assert!(wire.contains(&format!("fixture history {}", count - 1)));
         assert!(wire.contains("fixture current user input"));
@@ -944,7 +1316,10 @@ async fn assert_estimated_turn_filter_through_responses(relay: bool) {
     );
     assert!(primary.try_recv().is_err());
     assert!(fallback.try_recv().is_err());
-    let compact: Value = client
+    // Dry-run has no live active selection state. The active compact consumer
+    // above uses the real native compact endpoint and accepted result.
+    if !active {
+        let compact: Value = client
         .post(format!(
             "http://{}/_routecodex/diagnostics/virtual-router/dry-run",
             server.listeners[0].addr
@@ -959,14 +1334,15 @@ async fn assert_estimated_turn_filter_through_responses(relay: bool) {
         .json()
         .await
         .unwrap();
-    assert_eq!(
-        compact["diagnostics"]["decision"]["selectedProviderKey"], "test:default:key:test",
-        "the long history must retain access to the compact model: {compact}"
-    );
-    assert!(
-        primary.try_recv().is_err(),
-        "dry-run contacted the provider"
-    );
+        assert_eq!(
+            compact["diagnostics"]["decision"]["selectedProviderKey"], "test:default:key:test",
+            "the long history must retain access to the compact model: {compact}"
+        );
+        assert!(
+            primary.try_recv().is_err(),
+            "dry-run contacted the provider"
+        );
+    }
     if relay {
         let mut request = format!("ws://{}/v1/responses", server.listeners[0].addr)
             .into_client_request()
@@ -13065,11 +13441,11 @@ async fn run_target_origin_aggregate_phase(
     )
     .await;
     match closeout {
-        Ok(Ok(failures)) => closeout_errors.extend(
-            failures
-                .into_iter()
-                .map(|failure| format!("{context} aggregate shutdown failure: {failure:?}")),
-        ),
+        Ok(Ok(report)) => {
+            if !report.is_empty() || report.pending_controls.is_some() {
+                closeout_errors.push(format!("{context} aggregate shutdown failure: {report:?}"));
+            }
+        }
         Ok(Err(panic)) => closeout_errors.push(format!(
             "{context} aggregate shutdown panicked while preserving later assertion ownership: {}",
             panic
@@ -15891,13 +16267,16 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
     let persist_failures = handle.shutdown().await;
     assert!(
         persist_failures
+            .codex_sample_persist_failures
             .iter()
             .any(|failure| failure.file_name == "request.json"),
         "aggregate shutdown must return the residual request sample failure"
     );
     assert!(persist_failures
+        .codex_sample_persist_failures
         .iter()
         .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    assert!(persist_failures.control_cleanup_failures.is_empty());
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
