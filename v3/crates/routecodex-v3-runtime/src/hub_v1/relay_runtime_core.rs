@@ -953,7 +953,7 @@ where
                 }
             });
         let namespace_registry = req_compat.namespace_registry.clone();
-        let (req08, _) = match build_v3_provider_req_outbound_08_wire_from_compat_06(
+        let (mut req08, _) = match build_v3_provider_req_outbound_08_wire_from_compat_06(
             req_compat,
             request_id,
             target,
@@ -966,6 +966,12 @@ where
                 error
             ),
         };
+        if let Some(wire) = req08.provider_wire_mut() {
+            routecodex_v3_provider_responses::wire::apply_v3_request_cipher_policy(
+                wire.body_mut(),
+                retain_response_cipher,
+            );
+        }
         trace.push("V3ProviderReqOutbound08WirePayload");
         let transport_request = match build_v3_provider_req_outbound_09_transport_from_wire(
             req08,
