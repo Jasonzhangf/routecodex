@@ -394,7 +394,7 @@ resources:
     owner_node: V3Server03HttpRequestRaw
     identity: [requestId, serverId, endpoint, method]
     semantic_contract:
-      client_identity_headers: the actual user-agent and originator values are request-local protocol fields carried to the selected Provider; absent values remain absent and no client credentials enter the carrier
+      client_identity_headers: the actual user-agent, originator, x-client-request-id, session-id, thread-id, x-codex-window-id, x-codex-parent-thread-id and x-openai-subagent values are request-local protocol fields carried to the selected Responses Provider; absent values remain absent, Connection-nominated names are excluded, forwarded identity requests follow redirects only within the selected origin, and no client credentials, cookies, attestation, turn metadata, installation IDs, routing hints, transport negotiation or workspace-bearing metadata enter the carrier
     allowed_writers: [V3Server03HttpRequestRaw]
     allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Transport13ResponsesHttpRequest, V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-provider-responses]
@@ -587,8 +587,9 @@ resources:
     identity: [requestId, providerId, interfaceId, providerType, upstreamUrl]
     semantic_contract:
       configured_headers: selected Target headers are carried on the typed transport request and applied by the generic HTTP send owner; the resolved auth handle alone supplies Authorization
-      client_identity_headers: actual client identity headers are carried per request through Direct, Relay, and reselection; selected Target configuration takes precedence on duplicate names
+      client_identity_headers: the shared case-insensitive Responses allowlist is user-agent, originator, x-client-request-id, session-id, thread-id, x-codex-window-id, x-codex-parent-thread-id and x-openai-subagent; values are carried per request through Direct, Relay and reselection, while configured names remain authoritative on case-insensitive duplicates
       projection: configured header names may be projected for diagnosis, but configured header values are redacted from dry-run/debug artifacts
+      carrier_scope: the allowlist carries identity, correlation and subagent attribution only; credentials, cookies, attestation, turn metadata, installation IDs, routing hints, transport negotiation and workspace-bearing metadata remain outside the carrier
       scope: provider transport consumes the already selected Target and never reads configuration or branches on deployment provider ID
     allowed_writers: [V3Transport13ResponsesHttpRequest, build_v3_openai_chat_transport_request_from_v3_provider_08]
     allowed_readers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
