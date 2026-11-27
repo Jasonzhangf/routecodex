@@ -1266,6 +1266,8 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
     ProviderResponseEventCodec(String),
+    #[error("V3 Responses Relay provider response projection failed: {0}")]
+    ProviderResponseProjection(String),
     #[error("V3 Responses Relay provider response body is empty for provider {provider_id}")]
     ProviderResponseEmpty { provider_id: String },
     #[error("V3 Responses Relay Runtime timing failed: {0}")]

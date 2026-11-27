@@ -1089,3 +1089,63 @@ async fn discover_models_rejects_unknown_provider_type_without_network_call() {
     .expect_err("unknown provider type must fail explicitly");
     assert!(error.to_string().contains("carrier_pigeon"), "got {error}");
 }
+
+#[tokio::test]
+async fn json_intent_decodes_json_body_when_provider_labels_content_type_as_sse() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    for (payload, expect_json) in [
+        (
+            r#"{"id":"resp_mislabeled","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#,
+            true,
+        ),
+        (
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[]}}\n\n",
+            false,
+        ),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body_text = payload.to_string();
+        let server = tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut req_buf = [0_u8; 4096];
+            assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body_text.len()
+            );
+            conn.write_all(head.as_bytes()).await.unwrap();
+            conn.write_all(body_text.as_bytes()).await.unwrap();
+        });
+        let request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+            "req-mislabeled-ct",
+            "xingchiapi-test",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key10".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-mislabeled".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-6.1-sol","input":"Reply with only: ok","stream":false}),
+            vec![],
+            Some(Duration::from_secs(5)),
+        )
+        .unwrap();
+        let raw = ProviderResponsesTransport::default()
+            .send(request)
+            .await
+            .expect("response should succeed");
+        server.abort();
+        match raw.into_body() {
+            crate::V3ProviderResponseBody::Json(bytes) => {
+                assert!(expect_json, "expected SSE body, got JSON");
+                let parsed: Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(parsed["id"], "resp_mislabeled");
+            }
+            crate::V3ProviderResponseBody::Sse(_) => {
+                assert!(!expect_json, "expected JSON body, got SSE");
+            }
+        }
+    }
+}

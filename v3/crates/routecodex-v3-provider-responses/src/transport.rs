@@ -26,11 +26,13 @@ use crate::{
     V3ProviderResponseHeader,
 };
 use async_trait::async_trait;
-use futures_util::{stream, SinkExt, StreamExt};
+use bytes::Bytes;
+use futures_util::{stream, SinkExt, Stream, StreamExt};
 use routecodex_v3_config::V3ResponsesTransportKind;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -941,7 +943,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 cancellation,
                 compatibility_profile,
             } => {
-                self.send_http(
+                Box::pin(self.send_http(
                     client,
                     request_id,
                     provider_id,
@@ -956,7 +958,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     attempt_control.as_ref(),
                     cancellation,
                     compatibility_profile,
-                )
+                ))
                 .await
             }
             V3Transport13ResponsesRequestKind::WebSocketV2 {
@@ -971,7 +973,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 cancellation,
                 compatibility_profile,
             } => {
-                self.send_websocket_v2(
+                Box::pin(self.send_websocket_v2(
                     request_id,
                     provider_id,
                     canonical_model_id,
@@ -983,7 +985,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     attempt_control.as_ref(),
                     cancellation,
                     compatibility_profile,
-                )
+                ))
                 .await
             }
         };
@@ -1306,6 +1308,20 @@ impl ProviderResponsesTransport {
             .as_deref()
             .is_some_and(|value| value.starts_with("text/event-stream"))
         {
+            if stream_intent == V3ResponsesStreamIntent::Json {
+                return Box::pin(read_json_disguised_as_sse_or_stream(
+                    response,
+                    request_id,
+                    provider_id,
+                    status,
+                    headers,
+                    cancellation,
+                    deadline,
+                    compatibility_profile,
+                    sse_first_frame_timeout_ms,
+                ))
+                .await;
+            }
             let stream = validated_sse_stream(
                 response.bytes_stream(),
                 request_id.clone(),
@@ -1594,29 +1610,166 @@ async fn read_response_body_bytes(
         }
         None => read.await,
     }
-    .map_err(|reason| {
-        if status >= 400 {
-            V3ProviderError::HttpStatus {
-                response: Box::new(V3ProviderHttpFailure {
-                    request_id: request_id.to_string(),
-                    provider_id: provider_id.to_string(),
-                    status,
-                    headers,
-                    body: Vec::new(),
-                    body_read_failure: Some(reason),
-                }),
-            }
-        } else {
-            V3ProviderError::ResponseBodyUnreadable {
+    .map_err(|reason| response_body_read_error(status, request_id, provider_id, headers, reason))?;
+    Ok(bytes.to_vec())
+}
+
+fn response_body_read_error(
+    status: u16,
+    request_id: &str,
+    provider_id: &str,
+    headers: Vec<V3ProviderResponseHeader>,
+    reason: String,
+) -> V3ProviderError {
+    if status >= 400 {
+        V3ProviderError::HttpStatus {
+            response: Box::new(V3ProviderHttpFailure {
                 request_id: request_id.to_string(),
                 provider_id: provider_id.to_string(),
                 status,
                 headers,
-                reason,
+                body: Vec::new(),
+                body_read_failure: Some(reason),
+            }),
+        }
+    } else {
+        V3ProviderError::ResponseBodyUnreadable {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            status,
+            headers,
+            reason,
+        }
+    }
+}
+
+async fn next_stream_chunk_with_budget<S>(
+    byte_stream: &mut Pin<Box<S>>,
+    request_id: &str,
+    provider_id: &str,
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    cancellation: Option<&V3ProviderCancellation>,
+    deadline: Option<Instant>,
+) -> Result<Option<Bytes>, V3ProviderError>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Send,
+{
+    let read = async {
+        let next = match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline.into(), byte_stream.next())
+                .await
+                .map_err(|_| {
+                    "provider request budget exhausted while reading response body".to_string()
+                })?,
+            None => byte_stream.next().await,
+        };
+        match next {
+            Some(Ok(chunk)) => Ok(Some(chunk)),
+            Some(Err(error)) => Err(crate::shared::format_v3_provider_transport_error(&error)),
+            None => Ok(None),
+        }
+    };
+    let chunk_result = match cancellation {
+        Some(cancellation) => tokio::select! {
+            _ = cancellation.cancelled() => {
+                return Err(V3ProviderError::ClientDisconnect {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                });
+            }
+            result = read => result,
+        },
+        None => read.await,
+    };
+    chunk_result.map_err(|reason| {
+        response_body_read_error(status, request_id, provider_id, headers.to_vec(), reason)
+    })
+}
+
+/// Non-streaming JSON requests may receive a complete JSON document labeled
+/// `Content-Type: text/event-stream` from compat gateways (e.g. xingchiapi).
+/// Peek until the first non-whitespace byte: JSON objects/arrays (`{`/`[`)
+/// resolve as a JSON body instead of feeding into the SSE decoder and falsely
+/// failing as `provider_response_sse_empty`.
+#[allow(clippy::too_many_arguments)]
+async fn read_json_disguised_as_sse_or_stream(
+    response: reqwest::Response,
+    request_id: String,
+    provider_id: String,
+    status: u16,
+    headers: Vec<V3ProviderResponseHeader>,
+    cancellation: Option<V3ProviderCancellation>,
+    deadline: Option<Instant>,
+    compatibility_profile: Option<String>,
+    sse_first_frame_timeout_ms: Option<u64>,
+) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+    let mut byte_stream = Box::pin(response.bytes_stream());
+    let mut prefetched = Vec::<Bytes>::new();
+    let mut first_non_ws: Option<u8> = None;
+
+    while let Some(chunk) = next_stream_chunk_with_budget(
+        &mut byte_stream,
+        &request_id,
+        &provider_id,
+        status,
+        &headers,
+        cancellation.as_ref(),
+        deadline,
+    )
+    .await?
+    {
+        if !chunk.is_empty() {
+            if let Some(byte) = chunk
+                .iter()
+                .copied()
+                .find(|byte| !byte.is_ascii_whitespace())
+            {
+                first_non_ws = Some(byte);
+                prefetched.push(chunk);
+                break;
             }
         }
-    })?;
-    Ok(bytes.to_vec())
+        prefetched.push(chunk);
+    }
+
+    if matches!(first_non_ws, Some(b'{') | Some(b'[')) {
+        let mut body = Vec::new();
+        for chunk in prefetched {
+            body.extend_from_slice(&chunk);
+        }
+        while let Some(chunk) = next_stream_chunk_with_budget(
+            &mut byte_stream,
+            &request_id,
+            &provider_id,
+            status,
+            &headers,
+            cancellation.as_ref(),
+            deadline,
+        )
+        .await?
+        {
+            body.extend_from_slice(&chunk);
+        }
+        return Ok(
+            V3ProviderResp14Raw::from_json(request_id, provider_id, status, headers, body)
+                .with_compatibility_profile(compatibility_profile)
+                .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms),
+        );
+    }
+
+    let replayed = stream::iter(prefetched.into_iter().map(Ok)).chain(byte_stream);
+    let stream = validated_sse_stream(
+        replayed,
+        request_id.clone(),
+        provider_id.clone(),
+        cancellation,
+    );
+    Ok(
+        V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
+            .with_compatibility_profile(compatibility_profile)
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms),
+    )
 }
 /// 上游模型发现（WebUI onboarding）使用的合成 request id；只出现在错误变体里。
 pub(crate) const DISCOVERY_REQUEST_ID: &str = "admin-discover";

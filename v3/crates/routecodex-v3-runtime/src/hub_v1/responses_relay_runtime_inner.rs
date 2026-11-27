@@ -1000,20 +1000,15 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ) {
                             Ok(value) => value,
                             Err(error) => {
-                                let mut failure = handle_error_before_resp03!(
+                                let failure = handle_error_before_resp03!(
                                     provider_response_stream_relay_failure(
-                                        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                        V3ResponsesRelayRuntimeError::ProviderResponseProjection(
                                             error.to_string(),
                                         ),
                                         &input.request_id,
                                         &selected_target_provider_id,
                                         Some(selected_observability.clone()),
                                     )
-                                );
-                                failure.provider_status = Some(provider_status);
-                                failure.source_stage = "V3ProviderResp14Raw";
-                                failure.response_processing_code = Some(
-                                    routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
                                 );
                                 let terminal_failure = handle_error_before_resp03!(
                                     handle_v3_responses_relay_provider_failure(

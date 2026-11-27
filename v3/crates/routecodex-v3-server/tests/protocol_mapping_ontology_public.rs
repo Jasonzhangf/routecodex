@@ -104,17 +104,21 @@ async fn anthropic_upstream(
             "event: vendor_progress\n",
             "data: {\"type\":\"vendor_progress\",\"step\":\"routing\"}\n\n",
             "event: content_block_start\n",
-            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"container_upload\",\"id\":\"cu_sse_1\",\"name\":\"upload_tool\",\"input\":{\"path\":\"/tmp/a.txt\"},\"file_id\":\"file_sse_unknown\"}}\n\n",
             "event: content_block_stop\n",
             "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
             "event: content_block_start\n",
-            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
-            "event: content_block_delta\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"citations_unknown_delta\",\"payload\":1}}\n\n",
-            "event: content_block_delta\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"tolerant sse response\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
             "event: content_block_stop\n",
             "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"citations_unknown_delta\",\"payload\":1}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"text_delta\",\"text\":\"tolerant sse response\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
             "event: message_delta\n",
             "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"extra_omitted\"}}\n\n",
             "event: message_stop\n",
@@ -385,6 +389,10 @@ targets = [
         sse_text.contains("response.completed"),
         "expected completed SSE terminal: {sse_text}"
     );
+    assert!(
+        !sse_text.contains("container_upload") && !sse_text.contains("file_sse_unknown"),
+        "omitted SSE extension block must not leak into client SSE stream: {sse_text}"
+    );
 
     // 3) MAP-001 Inbound /v1/messages preserves multi-key metadata losslessly without trimming user_id
     // or dropping additional metadata keys before Chat Process (verified via responses_echo wire).
@@ -497,6 +505,26 @@ targets = [
             && row["json_path"] == "$.content[2]"
             && row["source_value"]["type"] == "bash_code_execution_tool_result"),
         "expected same-request response-side bash_code_execution_tool_result drop record: {drops_raw}"
+    );
+    let req2_id = drop_rows
+        .iter()
+        .find(|row| {
+            row["json_path"] == "$.prompt_cache_key" && row["canonical_value"] == "cache-k2"
+        })
+        .and_then(|row| row["request_id"].as_str())
+        .expect("expected request-side prompt_cache_key drop for cache-k2")
+        .to_string();
+    assert!(
+        drop_rows.iter().any(|row| row["request_id"] == req2_id
+            && row["stage"] == "response_target_protocol_projection"
+            && row["json_path"] == "$.content[0]"
+            && row["source_value"]["type"] == "container_upload"
+            && row["source_value"]["id"] == "cu_sse_1"
+            && row["source_value"]["name"] == "upload_tool"
+            && row["source_value"]["input"]["path"] == "/tmp/a.txt"
+            && row["source_value"]["file_id"] == "file_sse_unknown"
+            && row["source_value"].get("text").is_none()),
+        "expected SSE response-side container_upload drop preserving full source fields without synthetic text: {drops_raw}"
     );
     let json_text_dump = json_body.to_string();
     assert!(
@@ -2815,6 +2843,63 @@ async fn web_search_primary_anthropic(
     let prompt = body["messages"][0]["content"][0]["text"]
         .as_str()
         .unwrap_or("");
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        let sse = match prompt {
+            "paired_ws" => concat!(
+                "event: message_start\n",
+                "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_ws_sse_primary\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"anthropic-wire\",\"content\":[],\"stop_reason\":null}}\n\n",
+                "event: content_block_start\n",
+                "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srvtoolu_1\",\"name\":\"web_search\",\"input\":{}}}\n\n",
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"MAP-002\\\"}\"}}\n\n",
+                "event: content_block_stop\n",
+                "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+                "event: content_block_start\n",
+                "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"srvtoolu_1\",\"content\":[{\"title\":\"Doc\",\"url\":\"https://example.test\",\"text\":\"matched sse result\"}]}}\n\n",
+                "event: content_block_stop\n",
+                "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+                "event: content_block_start\n",
+                "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"text_delta\",\"text\":\"paired sse ok\"}}\n\n",
+                "event: content_block_stop\n",
+                "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+                "event: message_delta\n",
+                "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+                "event: message_stop\n",
+                "data: {\"type\":\"message_stop\"}\n\n",
+            ),
+            "unpaired_ws" => concat!(
+                "event: message_start\n",
+                "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_ws_sse_unpaired\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"anthropic-wire\",\"content\":[],\"stop_reason\":null}}\n\n",
+                "event: content_block_start\n",
+                "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"srvtoolu_orphan\",\"content\":[{\"title\":\"Orphan\",\"url\":\"https://example.test\",\"text\":\"orphan\"}]}}\n\n",
+                "event: content_block_stop\n",
+                "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+                "event: content_block_start\n",
+                "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"companion prose\"}}\n\n",
+                "event: content_block_stop\n",
+                "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+                "event: message_delta\n",
+                "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+                "event: message_stop\n",
+                "data: {\"type\":\"message_stop\"}\n\n",
+            ),
+            other => {
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from(format!("unexpected sse prompt: {other}")))
+                    .unwrap();
+            }
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(sse))
+            .unwrap();
+    }
     let content = match prompt {
         "paired_ws" => json!([
             {
@@ -2865,8 +2950,30 @@ async fn web_search_primary_anthropic(
 
 async fn web_search_backup_anthropic(
     State(state): State<Arc<WebSearchPairingUpstreamState>>,
+    Json(body): Json<Value>,
 ) -> Response<Body> {
     state.backup_hits.fetch_add(1, Ordering::SeqCst);
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_ws_sse_backup\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"anthropic-backup-wire\",\"content\":[],\"stop_reason\":null}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"backup sse ok\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(sse))
+            .unwrap();
+    }
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/json")
@@ -3142,6 +3249,307 @@ targets = [
         exhausted_evidence["terminal_source"]["source_stage"], "V3ProviderResp14Raw",
         "{exhausted_evidence}"
     );
+
+    // 4) SSE paired server_tool_use + input_json_delta + web_search_tool_result -> succeeds on attempt 1.
+    let paired_sse = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ws-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "paired_ws"}]}],
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(paired_sse.status(), StatusCode::OK);
+    let paired_sse_text = paired_sse.text().await.unwrap();
+    assert!(
+        paired_sse_text.contains("web_search_call")
+            && paired_sse_text.contains("function_call_output")
+            && paired_sse_text.contains("srvtoolu_1")
+            && paired_sse_text.contains("MAP-002")
+            && paired_sse_text.contains("paired sse ok")
+            && paired_sse_text.contains("response.completed"),
+        "expected paired SSE web_search delivery on first attempt: {paired_sse_text}"
+    );
+    assert_eq!(state.primary_hits.load(Ordering::SeqCst), 4);
+    assert_eq!(state.backup_hits.load(Ordering::SeqCst), 1);
+
+    // 5) SSE unpaired web_search_tool_result -> recovers to backup and records provider_status=200 + runtime_failure.
+    let unpaired_sse = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ws-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "unpaired_ws"}]}],
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unpaired_sse.status(), StatusCode::OK);
+    let unpaired_sse_text = unpaired_sse.text().await.unwrap();
+    assert!(
+        unpaired_sse_text.contains("backup sse ok")
+            && unpaired_sse_text.contains("response.completed")
+            && !unpaired_sse_text.contains("companion prose"),
+        "expected backup SSE delivery without primary leakage: {unpaired_sse_text}"
+    );
+    assert_eq!(state.primary_hits.load(Ordering::SeqCst), 5);
+    assert_eq!(state.backup_hits.load(Ordering::SeqCst), 2);
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("recovered SSE unpaired ws attempt sample must persist");
+    let sse_recovery_evidence =
+        read_next_failed_attempt_evidence(&recovery_samples, &mut seen_recovery_dirs).await;
+    assert_eq!(sse_recovery_evidence["attempts"][0]["provider_status"], 200);
+    assert_eq!(sse_recovery_evidence["attempts"][0]["status"], 502);
+    assert_eq!(
+        sse_recovery_evidence["attempts"][0]["action"],
+        "switch_provider"
+    );
+    assert_eq!(
+        sse_recovery_evidence["attempts"][0]["diagnostic_source"]["source_kind"],
+        "runtime_failure"
+    );
+    assert_eq!(
+        sse_recovery_evidence["attempts"][0]["diagnostic_source"]["source_stage"],
+        "V3ProviderResp14Raw"
+    );
+
+    // 6) SSE exhausted single candidate with unpaired web_search_tool_result -> detectable transport abort with runtime_failure + provider_status=200.
+    let exhausted_sse = client
+        .post(format!("http://127.0.0.1:{exhausted_port}/v1/responses"))
+        .json(&json!({
+            "model": "ws-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "unpaired_ws"}]}],
+            "stream": true
+        }))
+        .send()
+        .await;
+    assert_hard_sse_failure(
+        "unpaired_ws_sse_exhausted",
+        exhausted_sse,
+        &[
+            "UnpairedWebSearchToolResult",
+            "srvtoolu_orphan",
+            "companion prose",
+        ],
+    )
+    .await;
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("exhausted SSE unpaired ws failure sample must persist");
+    let sse_exhausted_evidence =
+        read_next_failed_attempt_evidence(&exhausted_samples, &mut seen_exhausted_dirs).await;
+    assert_eq!(
+        sse_exhausted_evidence["attempts"][0]["provider_status"],
+        200
+    );
+    assert_eq!(sse_exhausted_evidence["attempts"][0]["status"], 502);
+    assert_eq!(
+        sse_exhausted_evidence["terminal_source"]["source_kind"],
+        "runtime_failure"
+    );
+    assert_eq!(
+        sse_exhausted_evidence["terminal_source"]["source_stage"],
+        "V3ProviderResp14Raw"
+    );
+
+    drop(server);
+    let _ = p_sd.send(());
+    let _ = b_sd.send(());
+    let _ = p_task.await;
+    let _ = b_task.await;
+}
+
+#[derive(Default)]
+struct MislabeledSseContentTypeState {
+    primary_hits: AtomicUsize,
+    backup_hits: AtomicUsize,
+}
+
+#[tokio::test]
+async fn map001_public_direct_json_body_with_sse_content_type_succeeds_first_attempt() {
+    let _lock = LOCK.lock().await;
+    hub_v1_fixture::pin_test_process_refill_off();
+    let _home = Home::new("map001-mislabeled-sse-json");
+    std::env::set_var("ONTOLOGY_SSE_JSON_KEY", "sse-json-secret");
+
+    let primary_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let primary_addr = primary_listener.local_addr().unwrap();
+    let backup_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backup_addr = backup_listener.local_addr().unwrap();
+    let state = Arc::new(MislabeledSseContentTypeState::default());
+
+    let (p_sd, p_stop) = oneshot::channel();
+    let p_state = state.clone();
+    let p_task = tokio::spawn(async move {
+        let app = Router::new()
+            .route(
+                "/v1/responses",
+                post(|State(s): State<Arc<MislabeledSseContentTypeState>>| async move {
+                    s.primary_hits.fetch_add(1, Ordering::SeqCst);
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "text/event-stream")
+                        .body(Body::from(
+                            json!({
+                                "id": "resp_mislabeled_ct",
+                                "object": "response",
+                                "status": "completed",
+                                "model": "direct-wire",
+                                "output": [{
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": "mislabeled sse ct ok"}]
+                                }],
+                                "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap()
+                }),
+            )
+            .with_state(p_state);
+        axum::serve(primary_listener, app)
+            .with_graceful_shutdown(async {
+                let _ = p_stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let (b_sd, b_stop) = oneshot::channel();
+    let b_state = state.clone();
+    let b_task = tokio::spawn(async move {
+        let app = Router::new()
+            .route(
+                "/v1/responses",
+                post(
+                    |State(s): State<Arc<MislabeledSseContentTypeState>>| async move {
+                        s.backup_hits.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "application/json")
+                            .body(Body::from(
+                                json!({
+                                    "id": "resp_backup_should_not_run",
+                                    "object": "response",
+                                    "status": "completed",
+                                    "output": [{
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [{"type": "output_text", "text": "backup"}]
+                                    }]
+                                })
+                                .to_string(),
+                            ))
+                            .unwrap()
+                    },
+                ),
+            )
+            .with_state(b_state);
+        axum::serve(backup_listener, app)
+            .with_graceful_shutdown(async {
+                let _ = b_stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let listen_port = test_ports::free_port();
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.a]
+bind = "127.0.0.1"
+port = {}
+routing_group = "default"
+endpoints = ["responses"]
+
+{}
+
+[providers.direct_primary]
+type = "responses"
+base_url = "http://{primary_addr}/v1"
+default_model = "direct-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_SSE_JSON_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.direct_primary.models."direct-wire"]
+wire_name = "direct-wire"
+aliases = ["mislabeled-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.direct_backup]
+type = "responses"
+base_url = "http://{backup_addr}/v1"
+default_model = "backup-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_SSE_JSON_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.direct_backup.models."backup-wire"]
+wire_name = "backup-wire"
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "direct_primary", model = "direct-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "direct_backup", model = "backup-wire", key = "key", priority = 1 }}
+]
+"#,
+        hub_v1_fixture::hub_v1_test_declaration(),
+        listen_port,
+        hub_v1_fixture::hub_v1_server_execution("a"),
+    );
+
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    let resp = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "mislabeled-alias",
+            "input": "Reply with only: ok",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        ct.starts_with("application/json"),
+        "expected application/json header for non-streaming response, got {ct}"
+    );
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "mislabeled sse ct ok"
+    );
+    assert_eq!(state.primary_hits.load(Ordering::SeqCst), 1);
+    assert_eq!(state.backup_hits.load(Ordering::SeqCst), 0);
 
     drop(server);
     let _ = p_sd.send(());

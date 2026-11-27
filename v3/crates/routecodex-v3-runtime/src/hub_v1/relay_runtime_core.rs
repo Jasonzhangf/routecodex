@@ -2042,7 +2042,7 @@ where
     };
     loop {
         carrier.round = None;
-        let output = execute_v3_relay_runtime_core::<C, T>(
+        let output = Box::pin(execute_v3_relay_runtime_core::<C, T>(
             manifest,
             server_id,
             failure_session_scope.clone(),
@@ -2058,7 +2058,7 @@ where
             initial_handoff.take(),
             &mut failure_events,
             &mut carrier,
-        )
+        ))
         .await
         .map_err(|error| (error, failure_events.clone()))?;
         let Some(round) = carrier.round.take() else {

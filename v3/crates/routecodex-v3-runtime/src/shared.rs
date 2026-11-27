@@ -407,116 +407,88 @@ async fn project_provider_raw_to_client_payload_inner(
             )
         })?;
     let provider_body = raw.into_body();
-    let (body, stream_observation) = if content_type.starts_with("text/event-stream") {
-        match provider_body {
-            V3ProviderResponseBody::Sse(stream) => {
-                let (stream, stream_observation) = process_direct_sse_stream(
-                    &provider_id,
-                    &request_id,
-                    stream,
-                    sse_first_frame_timeout_ms,
-                    thinking_tags,
-                    deepseek_console_go,
-                    provider_response_compat,
-                    compat_plan.custom_tool_function_binding.clone(),
-                    compat_plan.provider_protocol,
-                )
-                .await?;
-                (V3ProviderAttemptBody::Sse(stream), stream_observation)
-            }
-            V3ProviderResponseBody::Json(body_bytes) => {
-                (V3ProviderAttemptBody::Bytes(body_bytes), None)
-            }
-        }
-    } else if content_type.starts_with("application/json") {
-        let V3ProviderResponseBody::Json(body_bytes) = provider_body else {
-            return Err(direct_external_error(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_body_kind_mismatch",
-                "application/json provider response arrived as SSE stream body",
-                V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: Some(status),
-                    code: Some("PROVIDER_RESPONSE_BODY_KIND_MISMATCH".to_string()),
-                    provider_id: Some(provider_id.clone()),
-                    upstream_request_id: None,
-                    message: Some(
-                        "application/json provider response arrived as SSE stream body".to_string(),
-                    ),
-                },
-            ));
-        };
-        let mut parsed: serde_json::Value =
-            serde_json::from_slice(&body_bytes).map_err(|error| {
-                direct_external_error(
+    let (body, stream_observation, response_content_type) = match provider_body {
+        V3ProviderResponseBody::Sse(stream) => {
+            if !content_type.starts_with("text/event-stream") {
+                return Err(direct_external_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
-                    "provider_response_json_invalid",
-                    format!("provider response JSON parse failed: {error}"),
+                    "provider_response_body_kind_mismatch",
+                    format!("{content_type} provider response arrived as SSE stream body"),
                     V3ExternalErrorLink {
                         kind: V3ExternalErrorKind::Provider,
                         status: Some(status),
-                        code: Some("PROVIDER_RESPONSE_JSON_INVALID".to_string()),
+                        code: Some("PROVIDER_RESPONSE_BODY_KIND_MISMATCH".to_string()),
                         provider_id: Some(provider_id.clone()),
                         upstream_request_id: None,
-                        message: Some(format!("provider response JSON parse failed: {error}")),
+                        message: Some(format!(
+                            "{content_type} provider response arrived as SSE stream body"
+                        )),
                     },
-                )
-            })?;
-        if thinking_tags {
-            parsed = provider_compat_core::apply_cc_sol_response_compat(parsed);
-        }
-        if deepseek_console_go {
-            parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
-        }
-        if let Some(profile) = provider_response_compat.as_deref() {
-            parsed = match apply_direct_provider_response_compat(
-                parsed,
-                profile,
-                compat_plan.provider_protocol,
-                &request_id,
-                compat_plan.custom_tool_function_binding.as_ref(),
-            ) {
-                Ok(parsed) => parsed,
-                Err(failure) => return Err(failure),
-            };
-        }
-        // Complete-attempt success acceptance for the buffered JSON body: a
-        // provider response with no deliverable business content is an internal
-        // 502 for the Error chain, never a normal empty completion. The
-        // judgment is shared with the Relay/SSE boundaries.
-        if !complete_response_hook_pending {
-            enforce_v3_provider_json_attempt_admission(
-                compat_plan.provider_protocol,
-                &parsed,
+                ));
+            }
+            let (stream, stream_observation) = Box::pin(process_direct_sse_stream_with_status(
                 &provider_id,
-                status,
-            )?;
+                &request_id,
+                Some(status),
+                stream,
+                sse_first_frame_timeout_ms,
+                thinking_tags,
+                deepseek_console_go,
+                provider_response_compat,
+                compat_plan.custom_tool_function_binding.clone(),
+                compat_plan.provider_protocol,
+            ))
+            .await?;
+            (
+                V3ProviderAttemptBody::Sse(stream),
+                stream_observation,
+                content_type,
+            )
         }
-        (V3ProviderAttemptBody::Json(parsed), None)
-    } else {
-        return Err(direct_external_error(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_content_type_unsupported",
-            format!("unsupported provider response content-type {content_type}"),
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: Some(status),
-                code: Some("PROVIDER_CONTENT_TYPE_UNSUPPORTED".to_string()),
-                provider_id: Some(provider_id),
-                upstream_request_id: None,
-                message: Some(format!(
-                    "unsupported provider response content-type {content_type}"
-                )),
-            },
-        ));
+        V3ProviderResponseBody::Json(body_bytes) => {
+            if !content_type.starts_with("application/json")
+                && !content_type.starts_with("text/event-stream")
+            {
+                return Err(direct_external_error(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_content_type_unsupported",
+                    format!("unsupported provider response content-type {content_type}"),
+                    V3ExternalErrorLink {
+                        kind: V3ExternalErrorKind::Provider,
+                        status: Some(status),
+                        code: Some("PROVIDER_CONTENT_TYPE_UNSUPPORTED".to_string()),
+                        provider_id: Some(provider_id),
+                        upstream_request_id: None,
+                        message: Some(format!(
+                            "unsupported provider response content-type {content_type}"
+                        )),
+                    },
+                ));
+            }
+            let parsed = project_direct_json_provider_body(
+                &body_bytes,
+                &provider_id,
+                &request_id,
+                status,
+                thinking_tags,
+                deepseek_console_go,
+                provider_response_compat,
+                compat_plan,
+                complete_response_hook_pending,
+            )?;
+            (
+                V3ProviderAttemptBody::Json(parsed),
+                None,
+                "application/json".to_string(),
+            )
+        }
     };
     Ok(V3ProviderResponseProjection {
         attempt_payload: V3ProviderAttemptPayload {
             status,
-            headers: BTreeMap::from([("content-type".to_string(), content_type)]),
+            headers: BTreeMap::from([("content-type".to_string(), response_content_type)]),
             body,
         },
         stream_observation,
@@ -524,12 +496,72 @@ async fn project_provider_raw_to_client_payload_inner(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn project_direct_json_provider_body(
+    body_bytes: &[u8],
+    provider_id: &str,
+    request_id: &str,
+    status: u16,
+    thinking_tags: bool,
+    deepseek_console_go: bool,
+    provider_response_compat: Option<&str>,
+    compat_plan: &V3DirectResponseCompatPlan,
+    complete_response_hook_pending: bool,
+) -> Result<serde_json::Value, V3DirectSourceError> {
+    let mut parsed: serde_json::Value = serde_json::from_slice(body_bytes).map_err(|error| {
+        direct_external_error(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_json_invalid",
+            format!("provider response JSON parse failed: {error}"),
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some("PROVIDER_RESPONSE_JSON_INVALID".to_string()),
+                provider_id: Some(provider_id.to_string()),
+                upstream_request_id: None,
+                message: Some(format!("provider response JSON parse failed: {error}")),
+            },
+        )
+    })?;
+    if thinking_tags {
+        parsed = provider_compat_core::apply_cc_sol_response_compat(parsed);
+    }
+    if deepseek_console_go {
+        parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
+    }
+    if let Some(profile) = provider_response_compat {
+        parsed = apply_direct_provider_response_compat(
+            parsed,
+            profile,
+            compat_plan.provider_protocol,
+            request_id,
+            compat_plan.custom_tool_function_binding.as_ref(),
+        )?;
+    }
+    // Complete-attempt success acceptance for the buffered JSON body: a
+    // provider response with no deliverable business content is an internal
+    // 502 for the Error chain, never a normal empty completion. The
+    // judgment is shared with the Relay/SSE boundaries.
+    if !complete_response_hook_pending {
+        enforce_v3_provider_json_attempt_admission(
+            compat_plan.provider_protocol,
+            &parsed,
+            provider_id,
+            status,
+        )?;
+    }
+    Ok(parsed)
+}
+
 /// Sole direct-provider SSE entry. Every direct SSE response must pass through
 /// this lifecycle: initial guard, client projection, frame observation,
 /// provider-error classification, and compatibility mapping.
-async fn process_direct_sse_stream(
+#[allow(clippy::too_many_arguments)]
+async fn process_direct_sse_stream_with_status(
     provider_id: &str,
     request_id: &str,
+    provider_status: Option<u16>,
     stream: V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
     thinking_tags: bool,
@@ -551,10 +583,14 @@ async fn process_direct_sse_stream(
             provider_response_compat
                 .filter(|profile| *profile == provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE)
         });
-    let stream = guard_initial_direct_sse_provider_failure(
+    let first_event_timeout = sse_first_frame_timeout_ms
+        .map(std::time::Duration::from_millis)
+        .unwrap_or_else(v3_direct_sse_default_timeout);
+    let stream = guard_initial_direct_sse_provider_failure_with_timeout_and_status(
         provider_id,
+        provider_status,
         stream,
-        sse_first_frame_timeout_ms,
+        first_event_timeout,
         compatibility_profile,
         provider_protocol,
     )
@@ -573,18 +609,17 @@ async fn process_direct_sse_stream(
     Ok((client_stream, Some(usage_observation)))
 }
 
-async fn guard_initial_direct_sse_provider_failure(
+#[cfg(test)]
+async fn guard_initial_direct_sse_provider_failure_with_timeout(
     provider_id: &str,
     stream: V3ProviderSseStream,
-    sse_first_frame_timeout_ms: Option<u64>,
+    first_event_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3DirectSourceResult<V3ProviderSseStream> {
-    let first_event_timeout = sse_first_frame_timeout_ms
-        .map(std::time::Duration::from_millis)
-        .unwrap_or_else(v3_direct_sse_default_timeout);
-    guard_initial_direct_sse_provider_failure_with_timeout(
+    guard_initial_direct_sse_provider_failure_with_timeout_and_status(
         provider_id,
+        None,
         stream,
         first_event_timeout,
         compatibility_profile,
@@ -593,8 +628,9 @@ async fn guard_initial_direct_sse_provider_failure(
     .await
 }
 
-async fn guard_initial_direct_sse_provider_failure_with_timeout(
+async fn guard_initial_direct_sse_provider_failure_with_timeout_and_status(
     provider_id: &str,
+    provider_status: Option<u16>,
     mut stream: V3ProviderSseStream,
     first_event_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
@@ -622,7 +658,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                     "provider response SSE stream did not produce a first semantic event within timeout",
                     V3ExternalErrorLink {
                         kind: V3ExternalErrorKind::Provider,
-                        status: None,
+                        status: provider_status,
                         code: Some("PROVIDER_RESPONSE_SSE_FIRST_EVENT_TIMEOUT".to_string()),
                         provider_id: Some(provider_id.to_string()),
                         upstream_request_id: None,
@@ -644,7 +680,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                 "provider response SSE stream ended before first semantic event",
                 V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
-                    status: None,
+                    status: provider_status,
                     code: Some("PROVIDER_RESPONSE_SSE_EMPTY".to_string()),
                     provider_id: Some(provider_id.to_string()),
                     upstream_request_id: None,
@@ -2338,5 +2374,32 @@ mod tests {
         let text = String::from_utf8(projected).expect("utf8 SSE chunk");
         assert!(!text.contains("<thinking>"));
         assert!(text.contains("\"reasoning_content\":\"plan\""));
+    }
+
+    #[tokio::test]
+    async fn direct_json_body_labeled_text_event_stream_projects_as_json() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req-mislabeled-json".to_string(),
+            "xingchiapi".to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            br#"{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+        );
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        assert_eq!(
+            projection
+                .attempt_payload
+                .headers
+                .get("content-type")
+                .map(String::as_str),
+            Some("application/json")
+        );
+        let V3ProviderAttemptBody::Json(body) = projection.attempt_payload.body else {
+            panic!("expected JSON provider-attempt body");
+        };
+        assert_eq!(body["id"], "resp_1");
     }
 }

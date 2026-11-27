@@ -228,6 +228,9 @@ pub(crate) fn provider_response_stream_relay_failure(
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) => {
             provider_response_codec_relay_failure(reason, provider_id, observability)
         }
+        V3ResponsesRelayRuntimeError::ProviderResponseProjection(reason) => {
+            provider_response_projection_relay_failure(reason, provider_id, observability)
+        }
         other => provider_runtime_failure(
             provider_response_stream_failure(other, request_id, provider_id)?,
             provider_id,
@@ -241,24 +244,60 @@ fn provider_response_codec_relay_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
+    // Internal response codec failure: the 502 is the client projection, not
+    // an upstream HTTP status.
+    provider_response_codec_or_projection_failure(
+        reason,
+        provider_id,
+        observability,
+        None,
+        "V3ProviderRespInbound01Raw",
+        None,
+    )
+}
+
+fn provider_response_projection_relay_failure(
+    reason: String,
+    provider_id: &str,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayProviderFailure {
+    let provider_status = observability
+        .as_ref()
+        .and_then(|value| value.provider_status);
+    provider_response_codec_or_projection_failure(
+        reason,
+        provider_id,
+        observability,
+        provider_status,
+        "V3ProviderResp14Raw",
+        Some(routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw),
+    )
+}
+
+fn provider_response_codec_or_projection_failure(
+    reason: String,
+    provider_id: &str,
+    observability: Option<V3RuntimeObservability>,
+    provider_status: Option<u16>,
+    source_stage: &'static str,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+) -> V3ResponsesRelayProviderFailure {
     V3ResponsesRelayProviderFailure {
         attempt_source: None,
         status: 502,
-        // Internal response codec failure: the 502 is the client projection, not
-        // an upstream HTTP status.
-        provider_status: None,
+        provider_status,
         provider_body_read_failure: None,
         policy_error_type: "provider_response_event_codec_failure".to_string(),
         policy_error_message: format!("provider response event codec failed: {reason}"),
         provider_id: provider_id.to_string(),
-        source_stage: "V3ProviderRespInbound01Raw",
+        source_stage,
         observability,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
         failed_attempt_evidence: None,
         matched_policy: None,
-        response_processing_code: None,
+        response_processing_code,
     }
 }
 
@@ -502,7 +541,8 @@ pub(crate) fn provider_response_stream_failure(
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
             provider_response_codec_error(reason.to_string(), request_id, provider_id)
         }
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) => {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason)
+        | V3ResponsesRelayRuntimeError::ProviderResponseProjection(reason) => {
             provider_response_codec_error(reason, request_id, provider_id)
         }
         other => return Err(other),
@@ -530,6 +570,7 @@ pub(crate) fn is_v3_responses_provider_response_failure(
             | V3ResponsesRelayRuntimeError::ProviderJson(_)
             | V3ResponsesRelayRuntimeError::ProviderSseTransport(_)
             | V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(_)
+            | V3ResponsesRelayRuntimeError::ProviderResponseProjection(_)
             | V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. }
             | V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure { .. }
             | V3ResponsesRelayRuntimeError::Response(

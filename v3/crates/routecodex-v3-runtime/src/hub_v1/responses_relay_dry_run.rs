@@ -212,7 +212,8 @@ pub fn project_v3_responses_relay_runtime_failure(
                     400,
                     None,
                 ),
-                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => (
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+                | V3ResponsesRelayRuntimeError::ProviderResponseProjection(message) => (
                     crate::shared::direct_internal_error(
                         V3ErrorSourceKind::RuntimeFailure,
                         "V3ProviderResp14Raw",

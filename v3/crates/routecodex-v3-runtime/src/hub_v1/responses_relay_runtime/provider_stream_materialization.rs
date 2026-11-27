@@ -416,7 +416,7 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         &anthropic_message,
         anthropic_context,
     )
-    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseProjection(error.to_string()))?;
     observation
         .record_provider_event_json(&response)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
