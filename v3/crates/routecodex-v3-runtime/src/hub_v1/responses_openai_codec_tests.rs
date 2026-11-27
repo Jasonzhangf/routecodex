@@ -1094,3 +1094,37 @@ fn responses_system_message_between_pending_tool_call_and_result_defers_to_prese
         json!([{"type": "text", "text": "system after pending tool call"}])
     );
 }
+
+#[test]
+fn responses_non_string_encrypted_content_remains_explicit() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "summary": [],
+                "encrypted_content": {"opaque": true},
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {"type": "redacted_thinking"}
+                }
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            }
+        ]
+    }))
+    .expect("malformed registered ciphertext must reach the owner that reports it");
+
+    let error = crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+        canonical,
+    )
+    .expect_err("non-string ciphertext must remain an explicit malformed-field error");
+    assert!(
+        error
+            .to_string()
+            .contains("anthropic_reasoning_blocks.encrypted_content"),
+        "unexpected error: {error}"
+    );
+}

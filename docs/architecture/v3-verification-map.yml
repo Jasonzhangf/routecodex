@@ -2471,7 +2471,7 @@ features:
   - routecodex-v3-provider-responses::wire::tests::wire_wraps_deepseek_v41_malformed_function_arguments_for_openai_chat_profile
   - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening
     block-local cache semantics.
-  - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before response governance.
+  - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before response governance. Responses reasoning replay treats null or empty encrypted_content as absent when selecting an Anthropic block type; it never fabricates a data-less redacted_thinking block, preserves plaintext reasoning as thinking, carries block-level extensions such as cache_control, and leaves a non-string encrypted_content as an explicit malformed-field error.
   - Responses response ciphertext policy removes encrypted_content from every non-tool business item when the client must not retain provider cipher, while preserving plain reasoning content and the complete function_call_output business subtree.
   - Anthropic signature preservation is driven only by the typed sourceProviderProtocol witness from the actual provider wire; ciphertext text shape never establishes provider provenance.
   - A legal Responses function_call_output output item in provider JSON or SSE remains business data and does not become a malformed provider event or candidate-switch trigger.
@@ -2507,6 +2507,7 @@ features:
   - anthropic_custom_invalid_input_preserves_declared_identity_and_paired_correction
   - anthropic_custom_unrecognized_reason_wrapper_preserves_complete_roundtrip
   - responses_client_reaches_gemini_and_anthropic_namespace_targets
+  - responses_client_anthropic_null_or_empty_encrypted_content_preserves_representable_reasoning_extensions
   - responses_client_anthropic_redacted_reasoning_association_survives_two_turn_tool_roundtrip
   - responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_paired_tool_result
   - gemini_association_empty_text_json_public

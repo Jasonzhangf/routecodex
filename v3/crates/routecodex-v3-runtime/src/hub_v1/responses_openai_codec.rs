@@ -930,17 +930,18 @@ fn retain_anthropic_reasoning_block_association(
         return;
     }
     let mut block = Map::new();
+    let has_encrypted_content = item
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty());
     let native_type = anthropic_reasoning
         .and_then(|extension| extension.get("type"))
         .and_then(Value::as_str)
+        .filter(|native_type| *native_type != "redacted_thinking" || has_encrypted_content)
         .unwrap_or_else(|| {
             // `encrypted_content: null` is a present key without ciphertext.
             // Only non-empty ciphertext can form a legal `redacted_thinking`
             // block; key presence alone would fabricate a data-less block.
-            let has_encrypted_content = item
-                .get("encrypted_content")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty());
             if reasoning_content.trim().is_empty() && has_encrypted_content {
                 "redacted_thinking"
             } else {

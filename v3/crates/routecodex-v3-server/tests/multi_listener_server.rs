@@ -6732,6 +6732,53 @@ fn anthropic_sse_final_fixture() -> Vec<u8> {
     ])
 }
 
+const REASONING_LOOKUP_CONTROL: &str = "null-empty-ciphertext-reasoning-control";
+const REASONING_LOOKUP_TOOL: &str = "mcp__codex_apps__codex_security_cloud__lookup";
+const REASONING_LOOKUP_CALL_ID: &str = "toolu_p0_reasoning";
+
+fn execute_reasoning_lookup_tool(call: &Value) -> String {
+    assert_eq!(call["name"], REASONING_LOOKUP_TOOL);
+    let input: Value = serde_json::from_str(call["arguments"].as_str().expect("arguments"))
+        .expect("decoded tool arguments");
+    assert_eq!(input, json!({"query":"p0 reasoning","limit":3}));
+    let limit = input["limit"].as_u64().expect("limit");
+    (limit * 14).to_string()
+}
+
+fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
+    let messages = body["messages"]
+        .as_array()
+        .ok_or_else(|| format!("missing provider messages: {body}"))?;
+    let blocks = messages
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten());
+    let mut tool_uses = blocks.clone().filter(|block| block["type"] == "tool_use");
+    let tool_use = tool_uses
+        .next()
+        .ok_or_else(|| format!("missing paired tool_use: {body}"))?;
+    if tool_uses.next().is_some() {
+        return Err(format!("unexpected duplicate tool_use: {body}"));
+    }
+    if tool_use["id"] != REASONING_LOOKUP_CALL_ID
+        || tool_use["name"] != REASONING_LOOKUP_TOOL
+        || tool_use["input"] != json!({"query":"p0 reasoning","limit":3})
+    {
+        return Err(format!("tool_use identity or input changed: {body}"));
+    }
+
+    let mut tool_results = blocks.filter(|block| block["type"] == "tool_result");
+    let tool_result = tool_results
+        .next()
+        .ok_or_else(|| format!("missing paired tool_result: {body}"))?;
+    if tool_results.next().is_some() {
+        return Err(format!("unexpected duplicate tool_result: {body}"));
+    }
+    if tool_result["tool_use_id"] != REASONING_LOOKUP_CALL_ID || tool_result["content"] != "42" {
+        return Err(format!("tool_result identity or content changed: {body}"));
+    }
+    Ok(())
+}
+
 // Controlled provider fixture: a reasoning block that omits its native
 // `thinking` payload. This is a real malformed business response, not a
 // provider HTTP error, so the proxy must keep it in the internal typed Error
@@ -6809,7 +6856,18 @@ async fn controlled_anthropic_reasoning_upstream(
     let redacted_reasoning_association = control("redacted-reasoning-association");
     let mixed_reasoning_order = control("mixed-reasoning-order");
     let empty_signed_reasoning = control("empty-signed-reasoning-control");
-    let bytes = if empty_signed_reasoning && provider_stream {
+    let null_empty_ciphertext_reasoning = control(REASONING_LOOKUP_CONTROL);
+    let bytes = if null_empty_ciphertext_reasoning && followup {
+        if let Err(error) = validate_reasoning_lookup_followup(&body) {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(error))
+                .unwrap();
+        }
+        anthropic_sse_final_fixture()
+    } else if null_empty_ciphertext_reasoning {
+        anthropic_sse_reasoning_tool_call_fixture()
+    } else if empty_signed_reasoning && provider_stream {
         anthropic_sse_empty_signed_reasoning_fixture()
     } else if empty_signed_reasoning {
         anthropic_json_empty_signed_reasoning_fixture()
@@ -6901,7 +6959,7 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
     // and a native tool call.
     let first = client
         .post(format!("{base}/v1/responses"))
-        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .json(&json!({"model":"client-test","input":REASONING_LOOKUP_CONTROL,"stream":true,"tools":tools}))
         .send()
         .await
         .unwrap();
@@ -7073,7 +7131,8 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
 }
 
 #[tokio::test]
-async fn responses_client_anthropic_null_encrypted_content_reasoning_history_completes_two_turns() {
+async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_representable_reasoning_extensions(
+) {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
@@ -7113,66 +7172,152 @@ async fn responses_client_anthropic_null_encrypted_content_reasoning_history_com
         .find(|item| item["type"] == "function_call")
         .expect("function_call")
         .clone();
+    assert_eq!(call["name"], declared_tool, "{first_body}");
     let call_id = call["call_id"].as_str().expect("call_id").to_string();
-    let _first_capture = timeout(Duration::from_secs(5), captures.recv())
+    assert_eq!(call_id, REASONING_LOOKUP_CALL_ID);
+    let tool_output = execute_reasoning_lookup_tool(&call);
+    assert_eq!(tool_output, "42");
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
         .await
         .unwrap()
         .unwrap();
-
-    for (label, reasoning) in [
-        (
-            "key-null",
-            json!({"type":"reasoning","summary":[],"encrypted_content":null}),
-        ),
-        ("key-absent", json!({"type":"reasoning","summary":[]})),
-    ] {
-        let second = client
-            .post(format!("{base}/v1/responses"))
-            .json(
-                &json!({"model":"client-test","stream":true,"tools":tools,"input":[
-                    {"role":"user","content":"look up p0 reasoning"},
-                    reasoning,
-                    assistant_text.clone(),
-                    call.clone(),
-                    {"type":"function_call_output","call_id":call_id,"output":"42"}
-                ]}),
-            )
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(second.status(), StatusCode::OK, "{label}");
-        let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
-        assert_eq!(second_body["status"], "completed", "{label}: {second_body}");
-
-        let capture = timeout(Duration::from_secs(5), captures.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        let history = capture.body["messages"]
+    assert!(
+        first_capture.body["tools"]
             .as_array()
-            .unwrap_or_else(|| panic!("{label}: missing provider messages: {}", capture.body));
-        assert!(
-            !history.iter().any(|message| {
-                message["content"].as_array().is_some_and(|content| {
-                    content
-                        .iter()
-                        .any(|block| block["type"] == "redacted_thinking")
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == declared_tool)),
+        "declared tool name must reach the first provider attempt: {}",
+        first_capture.body
+    );
+
+    for (summary_label, summary) in [
+        (
+            "plaintext",
+            json!([{"type":"summary_text","text":"plan the bounded lookup"}]),
+        ),
+        ("empty", json!([])),
+    ] {
+        for (cipher_label, encrypted_content) in [
+            ("key-null", Some(Value::Null)),
+            ("key-empty", Some(Value::String(String::new()))),
+            ("key-absent", None),
+        ] {
+            let label = format!("{summary_label}-{cipher_label}");
+            let mut reasoning = json!({
+                "type":"reasoning",
+                "summary":summary,
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"redacted_thinking",
+                        "cache_control":{"type":"ephemeral"}
+                    }
+                }
+            });
+            if let Some(value) = encrypted_content {
+                reasoning["encrypted_content"] = value;
+            }
+            let second = client
+                .post(format!("{base}/v1/responses"))
+                .json(
+                    &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                        {"role":"user","content":REASONING_LOOKUP_CONTROL},
+                        reasoning,
+                        assistant_text.clone(),
+                        call.clone(),
+                        {"type":"function_call_output","call_id":call_id,"output":tool_output}
+                    ]}),
+                )
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(second.status(), StatusCode::OK, "{label}");
+            let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+            assert_eq!(second_body["status"], "completed", "{label}: {second_body}");
+            let final_text = second_body["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|item| {
+                    item["content"]
+                        .as_array()
+                        .and_then(|content| content.iter().find_map(|part| part["text"].as_str()))
                 })
-            }),
-            "{label}: data-less ciphertext must not become a redacted_thinking block on provider wire: {}",
-            capture.body
-        );
-        assert!(
-            history.iter().any(|message| {
-                message["content"].as_array().is_some_and(|content| {
-                    content
-                        .iter()
-                        .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
-                })
-            }),
-            "{label}: paired tool call must reach provider wire: {}",
-            capture.body
-        );
+                .unwrap_or_else(|| panic!("{label}: missing final text: {second_body}"));
+            assert_eq!(final_text, "lookup complete: 42", "{label}: {second_body}");
+
+            let capture = timeout(Duration::from_secs(5), captures.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let history = capture.body["messages"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{label}: missing provider messages: {}", capture.body));
+            let blocks = history
+                .iter()
+                .flat_map(|message| message["content"].as_array().into_iter().flatten());
+            let blocks = blocks.collect::<Vec<_>>();
+            assert!(
+                !blocks
+                    .iter()
+                    .any(|block| block["type"] == "redacted_thinking"),
+                "{label}: data-less ciphertext must not become a redacted_thinking block on provider wire: {}",
+                capture.body
+            );
+            let replayed_reasoning = blocks.iter().find(|block| {
+                block["type"] == "thinking" && block["thinking"] == "plan the bounded lookup"
+            });
+            if summary_label == "plaintext" {
+                let replayed_reasoning = replayed_reasoning.unwrap_or_else(|| {
+                    panic!(
+                        "{label}: representable reasoning must survive without ciphertext: {}",
+                        capture.body
+                    )
+                });
+                assert_eq!(
+                    replayed_reasoning["cache_control"],
+                    json!({"type":"ephemeral"}),
+                    "{label}: cache_control must survive alongside plaintext reasoning: {}",
+                    capture.body
+                );
+            } else {
+                assert!(
+                    replayed_reasoning.is_none(),
+                    "{label}: data-less reasoning must not fabricate a thinking block: {}",
+                    capture.body
+                );
+            }
+            let tool_use = blocks
+                .iter()
+                .find(|block| block["type"] == "tool_use")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{label}: paired tool call must reach provider wire: {}",
+                        capture.body
+                    )
+                });
+            assert_eq!(tool_use["name"], declared_tool, "{label}: {}", capture.body);
+            assert_eq!(tool_use["id"], call_id, "{label}: {}", capture.body);
+            assert_eq!(
+                tool_use["input"],
+                json!({"query":"p0 reasoning","limit":3}),
+                "{label}: {}",
+                capture.body
+            );
+            let tool_result = blocks
+                .iter()
+                .find(|block| block["type"] == "tool_result")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{label}: paired tool result must reach provider wire: {}",
+                        capture.body
+                    )
+                });
+            assert_eq!(
+                tool_result["tool_use_id"], call_id,
+                "{label}: {}",
+                capture.body
+            );
+            assert_eq!(tool_result["content"], "42", "{label}: {}", capture.body);
+        }
     }
 
     handle.shutdown().await;
