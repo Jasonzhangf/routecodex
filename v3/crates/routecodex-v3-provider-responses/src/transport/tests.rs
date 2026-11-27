@@ -1700,4 +1700,78 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         }
         other => panic!("expected ResponseBodyUnreadable on late ready JSON body, got {other:?}"),
     }
+
+    // 11. Single direct call to `next_stream_chunk_with_budget` where `poll_next`
+    // enters BEFORE deadline and crosses the deadline while returning Poll::Ready
+    // (both a data chunk and an EOF None). Proves the post-read deadline guard rejects
+    // late Ready completions with ResponseBodyUnreadable preserving HTTP 200 head & x-request-id.
+    struct CrossingDeadlineSinglePollStream {
+        polls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        item: Option<&'static [u8]>,
+        sleep_ms: u64,
+    }
+    impl futures_util::Stream for CrossingDeadlineSinglePollStream {
+        type Item = Result<bytes::Bytes, reqwest::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            self.polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(self.sleep_ms));
+            std::task::Poll::Ready(self.item.take().map(|b| Ok(bytes::Bytes::from_static(b))))
+        }
+    }
+    for (req_id, up_req_id, payload) in [
+        (
+            "req-single-poll-chunk",
+            "up-single-poll-chunk-200",
+            Some(b"{" as &[u8]),
+        ),
+        ("req-single-poll-eof", "up-single-poll-eof-200", None),
+    ] {
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut pinned = Box::pin(CrossingDeadlineSinglePollStream {
+            polls: polls.clone(),
+            item: payload,
+            sleep_ms: 15,
+        });
+        let err = super::next_stream_chunk_with_budget(
+            &mut pinned,
+            req_id,
+            "single-poll-provider",
+            200,
+            &[
+                V3ProviderResponseHeader {
+                    name: "content-type".into(),
+                    value: b"text/event-stream".to_vec(),
+                },
+                V3ProviderResponseHeader {
+                    name: "x-request-id".into(),
+                    value: up_req_id.as_bytes().to_vec(),
+                },
+            ],
+            None,
+            Some(std::time::Instant::now() + Duration::from_millis(5)),
+        )
+        .await
+        .expect_err("single poll crossing deadline must fail via post-read guard");
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        match err {
+            V3ProviderError::ResponseBodyUnreadable {
+                status,
+                headers,
+                reason,
+                ..
+            } => {
+                assert_eq!(status, 200);
+                assert!(headers.iter().any(|h| {
+                    h.name.eq_ignore_ascii_case("x-request-id") && h.value == up_req_id.as_bytes()
+                }));
+                assert!(reason.contains("budget exhausted"), "{reason}");
+            }
+            other => panic!(
+                "expected ResponseBodyUnreadable on single-poll deadline cross, got {other:?}"
+            ),
+        }
+    }
 }
