@@ -6749,15 +6749,32 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     let messages = body["messages"]
         .as_array()
         .ok_or_else(|| format!("missing provider messages: {body}"))?;
-    let blocks = messages
-        .iter()
-        .flat_map(|message| message["content"].as_array().into_iter().flatten());
-    let mut tool_uses = blocks.clone().filter(|block| block["type"] == "tool_use");
-    let tool_use = tool_uses
-        .next()
-        .ok_or_else(|| format!("missing paired tool_use: {body}"))?;
-    if tool_uses.next().is_some() {
-        return Err(format!("unexpected duplicate tool_use: {body}"));
+    let mut tool_use_at = None;
+    let mut tool_result_at = None;
+    for (message_index, message) in messages.iter().enumerate() {
+        let role = message["role"].as_str().unwrap_or_default();
+        for block in message["content"].as_array().into_iter().flatten() {
+            match block["type"].as_str() {
+                Some("tool_use") if tool_use_at.is_none() => {
+                    tool_use_at = Some((message_index, role, block));
+                }
+                Some("tool_use") => {
+                    return Err(format!("unexpected duplicate tool_use: {body}"));
+                }
+                Some("tool_result") if tool_result_at.is_none() => {
+                    tool_result_at = Some((message_index, role, block));
+                }
+                Some("tool_result") => {
+                    return Err(format!("unexpected duplicate tool_result: {body}"));
+                }
+                _ => {}
+            }
+        }
+    }
+    let (tool_use_message, tool_use_role, tool_use) =
+        tool_use_at.ok_or_else(|| format!("missing paired tool_use: {body}"))?;
+    if tool_use_role != "assistant" {
+        return Err(format!("tool_use must be in an assistant message: {body}"));
     }
     if tool_use["id"] != REASONING_LOOKUP_CALL_ID
         || tool_use["name"] != REASONING_LOOKUP_TOOL
@@ -6766,17 +6783,46 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
         return Err(format!("tool_use identity or input changed: {body}"));
     }
 
-    let mut tool_results = blocks.filter(|block| block["type"] == "tool_result");
-    let tool_result = tool_results
-        .next()
-        .ok_or_else(|| format!("missing paired tool_result: {body}"))?;
-    if tool_results.next().is_some() {
-        return Err(format!("unexpected duplicate tool_result: {body}"));
+    let (tool_result_message, tool_result_role, tool_result) =
+        tool_result_at.ok_or_else(|| format!("missing paired tool_result: {body}"))?;
+    if tool_result_role != "user" {
+        return Err(format!("tool_result must be in a user message: {body}"));
+    }
+    if tool_result_message <= tool_use_message {
+        return Err(format!("tool_result must follow its tool_use: {body}"));
     }
     if tool_result["tool_use_id"] != REASONING_LOOKUP_CALL_ID || tool_result["content"] != "42" {
         return Err(format!("tool_result identity or content changed: {body}"));
     }
     Ok(())
+}
+
+#[test]
+fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
+    let tool_use = json!({"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}});
+    let tool_result =
+        json!({"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"});
+    let valid = json!({"messages":[
+        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"user","content":[tool_result.clone()]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&valid).is_ok());
+
+    let reversed = json!({"messages":[
+        {"role":"user","content":[tool_result.clone()]},
+        {"role":"assistant","content":[tool_use.clone()]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&reversed)
+        .unwrap_err()
+        .contains("must follow"));
+
+    let wrong_roles = json!({"messages":[
+        {"role":"user","content":[tool_use]},
+        {"role":"assistant","content":[tool_result]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&wrong_roles)
+        .unwrap_err()
+        .contains("assistant message"));
 }
 
 // Controlled provider fixture: a reasoning block that omits its native
@@ -7280,7 +7326,7 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 );
             } else {
                 assert!(
-                    replayed_reasoning.is_none(),
+                    !blocks.iter().any(|block| block["type"] == "thinking"),
                     "{label}: data-less reasoning must not fabricate a thinking block: {}",
                     capture.body
                 );
