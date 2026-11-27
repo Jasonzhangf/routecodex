@@ -14,15 +14,16 @@ const REGISTERED_CLIENT_LOCAL_METADATA_KEYS: &[&str] = &[
     "x-openai-subagent",
 ];
 
+pub(super) fn is_supported_client_metadata_key(key: &str) -> bool {
+    key == "user_id" || REGISTERED_CLIENT_LOCAL_METADATA_KEYS.contains(&key)
+}
+
 pub(super) fn unsupported_client_metadata_paths(
     client_metadata: &Map<String, serde_json::Value>,
 ) -> Vec<String> {
     client_metadata
         .keys()
-        .filter(|key| {
-            key.as_str() != "user_id"
-                && !REGISTERED_CLIENT_LOCAL_METADATA_KEYS.contains(&key.as_str())
-        })
+        .filter(|key| !is_supported_client_metadata_key(key))
         .map(|key| format!("$.request.client_metadata.{key}"))
         .collect()
 }
@@ -61,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_client_metadata_keys_still_fail_fast() {
+    fn unknown_client_metadata_keys_are_classified_as_unsupported() {
         let metadata = json!({
             "some_future_opaque_key": {"a": 1}
         });

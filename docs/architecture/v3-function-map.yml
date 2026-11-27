@@ -3014,6 +3014,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/namespace_signature_targets_public.rs
   - v3/crates/routecodex-v3-server/tests/namespace_native_discovery_public.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
+  - v3/crates/routecodex-v3-server/tests/unknown_client_metadata_public.rs
   - package.json
   - v3/package.json
   - v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs
