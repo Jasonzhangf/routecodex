@@ -326,10 +326,10 @@ impl V3ProviderUsagePersistenceStore {
             generation.abnormal_generation_count =
                 generation.abnormal_generation_count.saturating_add(1);
         }
+        let replay = read_provider_usage_facts_path(&facts_path, limits)?;
         let fact_tail_repaired =
             truncate_incomplete_jsonl_tail(&facts_path, limits.physical_fact_log_bytes)?;
         let detail_tail_repaired = truncate_incomplete_jsonl_tail(observability_path, u64::MAX)?;
-        let replay = read_provider_usage_facts_path(&facts_path, limits)?;
         let facts = replay.facts;
         let encoded_fact_bytes = facts
             .iter()
@@ -1491,6 +1491,7 @@ fn read_provider_usage_facts_path(
         let line_bytes = match line_result {
             Ok(Some(line)) => line,
             Ok(None) => {
+                validate_provider_usage_replay_facts(&latest, limits.complete_fact_bytes)?;
                 return Ok(ProviderUsageFactsReplay {
                     facts: latest,
                     fact_tail_incomplete: false,
@@ -1524,6 +1525,7 @@ fn read_provider_usage_facts_path(
             });
         }
         if !had_newline {
+            validate_provider_usage_replay_facts(&latest, limits.complete_fact_bytes)?;
             return Ok(ProviderUsageFactsReplay {
                 facts: latest,
                 fact_tail_incomplete: !line_bytes.trim_ascii().is_empty(),
@@ -1556,15 +1558,25 @@ fn read_provider_usage_facts_path(
             });
         }
         let line = provider_usage_fact_line(&fact)?;
-        if line.len() as u64 > limits.complete_fact_bytes {
-            return Err(V3WebuiObservabilityStoreError::ProviderUsageCapacity {
-                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
-            });
-        }
         let encoded_bytes = encoded_provider_usage_fact_line_len(&line);
         latest_encoded_bytes = latest_encoded_bytes.saturating_add(encoded_bytes);
         latest.insert(identity, fact);
     }
+}
+
+fn validate_provider_usage_replay_facts(
+    facts: &BTreeMap<String, V3ProviderUsageFact>,
+    complete_fact_bytes: u64,
+) -> Result<(), V3WebuiObservabilityStoreError> {
+    for fact in facts.values() {
+        let line = provider_usage_fact_line(fact)?;
+        if line.len() as u64 > complete_fact_bytes {
+            return Err(V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn read_bounded_jsonl_line<R: BufRead>(
@@ -3735,6 +3747,140 @@ mod tests {
             Ok(_) => panic!("a merged fact over the complete-fact cap must fail public read"),
             Err(error) => error,
         };
+        assert!(matches!(
+            error,
+            V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+            }
+        ));
+        assert_eq!(fs::read(&facts_path).unwrap(), before);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_replay_accepts_final_merge_after_bounded_intermediate_exceeds_cap() {
+        let dir = temp_dir("usage-merged-complete-cap-recovers");
+        let path = dir.join("records.jsonl");
+        let facts_path = v3_provider_usage_facts_path(&path);
+        let gap_a = "a".repeat(256);
+        let gap_b = "b".repeat(256);
+        let long_provider = format!("p-long-{}", "x".repeat(512));
+        let first = usage_fact(
+            "4444:r-merged-recovers",
+            10,
+            V3ProviderUsageFactResult::Unknown,
+            Some(&long_provider),
+            vec![gap_a.as_str()],
+        );
+        let second = usage_fact(
+            "4444:r-merged-recovers",
+            11,
+            V3ProviderUsageFactResult::Unknown,
+            None,
+            vec![gap_b.as_str()],
+        );
+        let third = usage_fact(
+            "4444:r-merged-recovers",
+            12,
+            V3ProviderUsageFactResult::Success,
+            Some("p-short"),
+            Vec::new(),
+        );
+        let first_line = provider_usage_fact_line(&first).unwrap();
+        let second_line = provider_usage_fact_line(&second).unwrap();
+        let third_line = provider_usage_fact_line(&third).unwrap();
+        let complete_fact_bytes = first_line
+            .len()
+            .max(second_line.len())
+            .max(third_line.len()) as u64;
+
+        let mut intermediate = second.clone();
+        merge_provider_usage_fact(&first, &mut intermediate);
+        assert!(
+            provider_usage_fact_line(&intermediate).unwrap().len() as u64 > complete_fact_bytes,
+            "the intermediate merged revision must exceed the record cap"
+        );
+        let mut final_fact = third.clone();
+        merge_provider_usage_fact(&intermediate, &mut final_fact);
+        assert!(
+            provider_usage_fact_line(&final_fact).unwrap().len() as u64 <= complete_fact_bytes,
+            "the final stable revision must fit the record cap"
+        );
+
+        let mut journal = first_line;
+        journal.push(b'\n');
+        journal.extend_from_slice(&second_line);
+        journal.push(b'\n');
+        journal.extend_from_slice(&third_line);
+        journal.push(b'\n');
+        fs::write(&facts_path, &journal).unwrap();
+        let limits = bounded_limits(65_536, 64, journal.len() as u64, complete_fact_bytes);
+        let store = V3ProviderUsagePersistenceStore::open_with_limits(&path, limits).unwrap();
+        assert_eq!(store.facts.len(), 1);
+        assert_eq!(store.facts.values().next().unwrap(), &final_fact);
+        drop(store);
+
+        let store = V3ProviderUsagePersistenceStore::open_with_limits(&path, limits).unwrap();
+        assert_eq!(store.facts.values().next().unwrap(), &final_fact);
+        drop(store);
+        let read = v3_webui_observability_read_provider_usage_with_limits(&path, limits).unwrap();
+        assert_eq!(read.facts, vec![final_fact]);
+        assert_eq!(fs::read(&facts_path).unwrap(), journal);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_replay_rejection_preserves_incomplete_tail() {
+        let dir = temp_dir("usage-merged-complete-cap-incomplete-tail");
+        let path = dir.join("records.jsonl");
+        let facts_path = v3_provider_usage_facts_path(&path);
+        let gap_a = "a".repeat(256);
+        let gap_b = "b".repeat(256);
+        let first = usage_fact(
+            "4444:r-merged-tail",
+            10,
+            V3ProviderUsageFactResult::Unknown,
+            None,
+            vec![gap_a.as_str()],
+        );
+        let second = usage_fact(
+            "4444:r-merged-tail",
+            11,
+            V3ProviderUsageFactResult::Unknown,
+            None,
+            vec![gap_b.as_str()],
+        );
+        let first_line = provider_usage_fact_line(&first).unwrap();
+        let second_line = provider_usage_fact_line(&second).unwrap();
+        let complete_fact_bytes = first_line.len().max(second_line.len()) as u64;
+        let mut merged = second.clone();
+        merge_provider_usage_fact(&first, &mut merged);
+        assert!(
+            provider_usage_fact_line(&merged).unwrap().len() as u64 > complete_fact_bytes,
+            "the final stable revision must exceed the record cap"
+        );
+
+        let mut journal = first_line;
+        journal.push(b'\n');
+        journal.extend_from_slice(&second_line);
+        journal.push(b'\n');
+        journal.extend_from_slice(b"{\"schema\":");
+        fs::write(&facts_path, &journal).unwrap();
+        let before = fs::read(&facts_path).unwrap();
+        let limits = bounded_limits(65_536, 64, journal.len() as u64, complete_fact_bytes);
+        let error = match V3ProviderUsagePersistenceStore::open_with_limits(&path, limits) {
+            Ok(_) => panic!("a merged fact over the complete-fact cap must fail store open"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+            }
+        ));
+        assert_eq!(fs::read(&facts_path).unwrap(), before);
+        let error =
+            v3_webui_observability_read_provider_usage_with_limits(&path, limits).unwrap_err();
         assert!(matches!(
             error,
             V3WebuiObservabilityStoreError::ProviderUsageCapacity {
