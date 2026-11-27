@@ -748,16 +748,20 @@ async fn assert_hard_json_failure(
     }
 }
 
-async fn assert_hard_sse_failure(
+async fn check_hard_sse_failure(
     label: &str,
     result: Result<reqwest::Response, reqwest::Error>,
     leaked_markers: &[&str],
-) {
+) -> Result<(), String> {
     match result {
-        Err(err) => assert!(
-            !err.is_timeout(),
-            "{label}: expected SSE transport abort, got timeout: {err}"
-        ),
+        Err(err) => {
+            if err.is_timeout() {
+                return Err(format!(
+                    "{label}: expected SSE transport abort, got timeout: {err}"
+                ));
+            }
+            Ok(())
+        }
         Ok(mut resp) => {
             let status = resp.status();
             let mut bytes = Vec::new();
@@ -773,29 +777,51 @@ async fn assert_hard_sse_failure(
                 }
             }
             let body = String::from_utf8_lossy(&bytes);
-            let stream_aborted = stream_err.as_ref().is_some_and(|err| !err.is_timeout());
-            assert!(
-                stream_aborted,
-                "{label}: SSE stream returned headers (status={status}) and ended with clean EOF instead of transport abort: body={body}"
-            );
-            assert!(
-                body.lines()
-                    .all(|line| line.is_empty() || line.starts_with(':')),
-                "{label}: aborted SSE stream leaked non-keepalive payload before abort: status={status} body={body}"
-            );
-            assert!(
-                !body.contains("response.completed")
-                    && !body.contains("finish_reason")
-                    && !body.contains("[DONE]"),
-                "{label}: uncommitted SSE leaked completion terminal: status={status} body={body}"
-            );
-            for marker in leaked_markers {
-                assert!(
-                    !body.contains(marker),
-                    "{label}: uncommitted SSE leaked '{marker}': status={status} body={body}"
-                );
+            if status != StatusCode::OK {
+                return Err(format!(
+                    "{label}: expected 200 SSE handshake before abort (never synthetic error status), got status={status} stream_err={stream_err:?} body={body}"
+                ));
             }
+            if !stream_err.as_ref().is_some_and(|err| !err.is_timeout()) {
+                return Err(format!(
+                    "{label}: SSE stream returned headers (status={status}) and ended with clean EOF instead of transport abort: body={body}"
+                ));
+            }
+            if !body
+                .lines()
+                .all(|line| line.is_empty() || line.starts_with(':'))
+            {
+                return Err(format!(
+                    "{label}: aborted SSE stream leaked non-keepalive payload before abort: status={status} body={body}"
+                ));
+            }
+            if body.contains("response.completed")
+                || body.contains("finish_reason")
+                || body.contains("[DONE]")
+            {
+                return Err(format!(
+                    "{label}: uncommitted SSE leaked completion terminal: status={status} body={body}"
+                ));
+            }
+            for marker in leaked_markers {
+                if body.contains(marker) {
+                    return Err(format!(
+                        "{label}: uncommitted SSE leaked '{marker}': status={status} body={body}"
+                    ));
+                }
+            }
+            Ok(())
         }
+    }
+}
+
+async fn assert_hard_sse_failure(
+    label: &str,
+    result: Result<reqwest::Response, reqwest::Error>,
+    leaked_markers: &[&str],
+) {
+    if let Err(reason) = check_hard_sse_failure(label, result, leaked_markers).await {
+        panic!("{reason}");
     }
 }
 
@@ -1131,6 +1157,11 @@ async fn responses_top_level_refusal_upstream(
             {"type": "refusal", "refusal": "SLOT1_REFUSAL_A"},
             {"type": "refusal", "refusal": "SLOT2_REFUSAL_B"}
         ]),
+        "mixed_cached_container_slot_refusals" => json!([
+            {"type": "unknown_widget", "payload": {"ignored": true}},
+            {"type": "refusal", "refusal": "CACHED_SLOT1_REFUSAL_A"},
+            {"type": "refusal", "refusal": "CACHED_SLOT2_REFUSAL_B"}
+        ]),
         other => {
             return Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -1139,6 +1170,48 @@ async fn responses_top_level_refusal_upstream(
         }
     };
     if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        if prompt == "mixed_cached_container_slot_refusals" {
+            let mut sse = format!(
+                "event: response.created\ndata: {}\n\n",
+                json!({
+                    "type": "response.created",
+                    "response": {"id": "resp_refusal", "object": "response", "status": "in_progress", "model": "responses-wire", "output": []}
+                })
+            );
+            sse.push_str(&format!(
+                "event: response.in_progress\ndata: {}\n\n",
+                json!({
+                    "type": "response.in_progress",
+                    "response": {"id": "resp_refusal", "object": "response", "status": "in_progress", "model": "responses-wire", "output": output}
+                })
+            ));
+            sse.push_str(&format!(
+                "event: response.output_item.done\ndata: {}\n\n",
+                json!({
+                    "type": "response.output_item.done",
+                    "output_index": 1,
+                    "item": {"type": "refusal", "refusal": "CACHED_SLOT1_REFUSAL_A"}
+                })
+            ));
+            sse.push_str(&format!(
+                "event: response.completed\ndata: {}\n\n",
+                json!({
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_refusal",
+                        "object": "response",
+                        "status": "completed",
+                        "model": "responses-wire",
+                        "usage": {"input_tokens": 5, "output_tokens": 4, "total_tokens": 9}
+                    }
+                })
+            ));
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(sse))
+                .unwrap();
+        }
         let mut sse = String::from(
             "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_refusal\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"responses-wire\",\"output\":[]}}\n\n",
         );
@@ -1374,6 +1447,42 @@ targets = [
     assert!(
         pos_a < pos_b,
         "original slot order must be preserved: {slot_sse_text}"
+    );
+
+    // Cached in_progress container provides mixed [unknown, refusal A, refusal B],
+    // while terminal response.completed omits output and reuses the cached container slots.
+    let cached_slot_sse = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/messages"))
+        .json(&json!({
+            "model": "refusal-alias",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "mixed_cached_container_slot_refusals"}],
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cached_slot_sse.status(), StatusCode::OK);
+    let cached_slot_sse_text = cached_slot_sse.text().await.unwrap();
+    assert_eq!(
+        cached_slot_sse_text
+            .matches("CACHED_SLOT1_REFUSAL_A")
+            .count(),
+        1,
+        "{cached_slot_sse_text}"
+    );
+    assert_eq!(
+        cached_slot_sse_text
+            .matches("CACHED_SLOT2_REFUSAL_B")
+            .count(),
+        1,
+        "{cached_slot_sse_text}"
+    );
+    let cached_pos_a = cached_slot_sse_text.find("CACHED_SLOT1_REFUSAL_A").unwrap();
+    let cached_pos_b = cached_slot_sse_text.find("CACHED_SLOT2_REFUSAL_B").unwrap();
+    assert!(
+        cached_pos_a < cached_pos_b,
+        "cached container original slot order must be preserved: {cached_slot_sse_text}"
     );
 
     drop(server);
@@ -1617,18 +1726,52 @@ struct ToolSearchPairingState {
     chat_requests: Mutex<Vec<Value>>,
 }
 
+fn execute_local_tool_search(name: &str, arguments_raw: &str) -> String {
+    assert_eq!(name, "tool_search");
+    let args: Value =
+        serde_json::from_str(arguments_raw).expect("tool_search arguments must be valid JSON");
+    let query = args["q"]
+        .as_str()
+        .filter(|q| !q.trim().is_empty())
+        .expect("tool_search arguments must include non-empty q");
+    format!("found: {query}")
+}
+
+fn parse_sse_completed_response(sse_text: &str) -> Value {
+    for block in sse_text.split("\n\n") {
+        let data_lines: Vec<&str> = block
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim_start)
+            .collect();
+        if data_lines.is_empty() {
+            continue;
+        }
+        let data = data_lines.join("\n");
+        if data == "[DONE]" {
+            continue;
+        }
+        if let Ok(event) = serde_json::from_str::<Value>(&data) {
+            if event.get("type").and_then(Value::as_str) == Some("response.completed") {
+                return event["response"].clone();
+            }
+        }
+    }
+    panic!("missing response.completed event in SSE stream: {sse_text}");
+}
+
 async fn strict_tool_search_chat_upstream(
     State(state): State<Arc<ToolSearchPairingState>>,
     Json(body): Json<Value>,
 ) -> Response<Body> {
-    let mut requests = state.chat_requests.lock().unwrap();
-    requests.push(body.clone());
-    let turn = requests.len();
-    drop(requests);
+    state.chat_requests.lock().unwrap().push(body.clone());
     let tools = body["tools"].as_array().cloned().unwrap_or_default();
     let has_only_function_tool_search = tools.len() == 1
         && tools[0]["type"] == "function"
-        && tools[0]["function"]["name"] == "tool_search";
+        && tools[0]["function"]["name"] == "tool_search"
+        && tools[0]["function"]["parameters"]["type"] == "object"
+        && tools[0]["function"]["parameters"]["properties"]["q"]["type"] == "string"
+        && tools[0]["function"]["parameters"]["required"] == json!(["q"]);
     if !has_only_function_tool_search
         || body["tool_choice"] != json!({"type": "function", "function": {"name": "tool_search"}})
     {
@@ -1636,12 +1779,64 @@ async fn strict_tool_search_chat_upstream(
             .status(StatusCode::BAD_REQUEST)
             .header("content-type", "application/json")
             .body(Body::from(
-                json!({"error": {"message": format!("expected retained function tool_search + forced tool_choice, got {body}")}})
+                json!({"error": {"message": format!("expected retained function tool_search full schema + forced tool_choice, got {body}")}})
                     .to_string(),
             ))
             .unwrap();
     }
-    if turn == 1 {
+    let is_sse = body.get("stream").and_then(Value::as_bool) == Some(true);
+    let expected_call_id = if is_sse {
+        "call_fn_ts_sse_1"
+    } else {
+        "call_fn_ts_json_1"
+    };
+    let expected_query = if is_sse {
+        "MAP-002-SSE"
+    } else {
+        "MAP-002-JSON"
+    };
+    let expected_args = json!({"q": expected_query}).to_string();
+    let expected_output = format!("found: {expected_query}");
+    let messages = body["messages"].as_array().cloned().unwrap_or_default();
+    let has_tool_result = messages.iter().any(|m| m["role"] == "tool");
+
+    if !has_tool_result {
+        if is_sse {
+            let sse = format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({
+                    "id": "chatcmpl_ts_sse_turn1",
+                    "object": "chat.completion.chunk",
+                    "model": "openai-wire",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{
+                                "index": 0,
+                                "id": expected_call_id,
+                                "type": "function",
+                                "function": {"name": "tool_search", "arguments": expected_args}
+                            }]
+                        },
+                        "finish_reason": null
+                    }]
+                }),
+                json!({
+                    "id": "chatcmpl_ts_sse_turn1",
+                    "object": "chat.completion.chunk",
+                    "model": "openai-wire",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9}
+                })
+            );
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(sse))
+                .unwrap();
+        }
         return Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "application/json")
@@ -1657,11 +1852,11 @@ async fn strict_tool_search_chat_upstream(
                             "role": "assistant",
                             "content": "",
                             "tool_calls": [{
-                                "id": "call_fn_ts_1",
+                                "id": expected_call_id,
                                 "type": "function",
                                 "function": {
                                     "name": "tool_search",
-                                    "arguments": "{\"q\":\"ontology\"}"
+                                    "arguments": expected_args
                                 }
                             }]
                         }
@@ -1673,20 +1868,56 @@ async fn strict_tool_search_chat_upstream(
             .unwrap();
     }
 
-    let messages = body["messages"].as_array().cloned().unwrap_or_default();
-    let paired = messages.iter().any(|m| {
-        m["role"] == "tool"
-            && m["tool_call_id"] == "call_fn_ts_1"
-            && m["content"] == "found: MAP-002"
+    let paired = messages.windows(2).any(|pair| {
+        let assistant = &pair[0];
+        let tool_msg = &pair[1];
+        let call_ok = assistant["role"] == "assistant"
+            && assistant["tool_calls"].as_array().is_some_and(|calls| {
+                calls.len() == 1
+                    && calls[0]["id"] == expected_call_id
+                    && calls[0]["type"] == "function"
+                    && calls[0]["function"]["name"] == "tool_search"
+                    && calls[0]["function"]["arguments"]
+                        .as_str()
+                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                        == Some(json!({"q": expected_query}))
+            });
+        let result_ok = tool_msg["role"] == "tool"
+            && tool_msg["tool_call_id"] == expected_call_id
+            && tool_msg["content"] == expected_output;
+        call_ok && result_ok
     });
     if !paired {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header("content-type", "application/json")
             .body(Body::from(
-                json!({"error": {"message": format!("missing paired tool result for call_fn_ts_1: {messages:?}")}})
+                json!({"error": {"message": format!("missing paired assistant tool_calls + following tool result for {expected_call_id}: {messages:?}")}})
                     .to_string(),
             ))
+            .unwrap();
+    }
+    if is_sse {
+        let sse = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({
+                "id": "chatcmpl_ts_sse_turn2",
+                "object": "chat.completion.chunk",
+                "model": "openai-wire",
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": "paired sse tool_search ok"}, "finish_reason": null}]
+            }),
+            json!({
+                "id": "chatcmpl_ts_sse_turn2",
+                "object": "chat.completion.chunk",
+                "model": "openai-wire",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
+            })
+        );
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(sse))
             .unwrap();
     }
     Response::builder()
@@ -1812,9 +2043,12 @@ targets = [
         .unwrap();
     assert_eq!(turn1.status(), StatusCode::OK);
     let turn1_body: Value = turn1.json().await.unwrap();
-    assert_eq!(turn1_body["output"][0]["type"], "function_call");
-    assert_eq!(turn1_body["output"][0]["call_id"], "call_fn_ts_1");
-    assert_eq!(turn1_body["output"][0]["name"], "tool_search");
+    let call_item = turn1_body["output"][0].clone();
+    assert_eq!(call_item["type"], "function_call");
+    let call_id = call_item["call_id"].as_str().unwrap().to_string();
+    let call_name = call_item["name"].as_str().unwrap();
+    let call_args = call_item["arguments"].as_str().unwrap();
+    let tool_output = execute_local_tool_search(call_name, call_args);
 
     let turn2 = client
         .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
@@ -1822,8 +2056,8 @@ targets = [
             "model": "ts-alias",
             "input": [
                 {"role": "user", "content": [{"type": "input_text", "text": "find MAP-002"}]},
-                turn1_body["output"][0].clone(),
-                {"type": "function_call_output", "call_id": "call_fn_ts_1", "output": "found: MAP-002"}
+                call_item,
+                {"type": "function_call_output", "call_id": call_id, "output": tool_output}
             ],
             "tools": tools,
             "tool_choice": tool_choice,
@@ -1838,11 +2072,83 @@ targets = [
         turn2_body["output"][0]["content"][0]["text"],
         "paired tool_search ok"
     );
-    assert_eq!(state.chat_requests.lock().unwrap().len(), 2);
+
+    // Public SSE roundtrip for the same function tool_search declaration & pairing.
+    let sse_turn1 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ts-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "find MAP-002 sse"}]}],
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_turn1.status(), StatusCode::OK);
+    let sse_turn1_text = sse_turn1.text().await.unwrap();
+    let sse_turn1_response = parse_sse_completed_response(&sse_turn1_text);
+    let sse_call_item = sse_turn1_response["output"][0].clone();
+    assert_eq!(sse_call_item["type"], "function_call");
+    let sse_call_id = sse_call_item["call_id"].as_str().unwrap().to_string();
+    let sse_call_name = sse_call_item["name"].as_str().unwrap();
+    let sse_call_args = sse_call_item["arguments"].as_str().unwrap();
+    let sse_tool_output = execute_local_tool_search(sse_call_name, sse_call_args);
+
+    let sse_turn2 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ts-alias",
+            "input": [
+                {"role": "user", "content": [{"type": "input_text", "text": "find MAP-002 sse"}]},
+                sse_call_item,
+                {"type": "function_call_output", "call_id": sse_call_id, "output": sse_tool_output}
+            ],
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_turn2.status(), StatusCode::OK);
+    let sse_turn2_text = sse_turn2.text().await.unwrap();
+    let sse_turn2_response = parse_sse_completed_response(&sse_turn2_text);
+    assert_eq!(
+        sse_turn2_response["output"][0]["content"][0]["text"],
+        "paired sse tool_search ok"
+    );
+    assert_eq!(state.chat_requests.lock().unwrap().len(), 4);
 
     drop(server);
     let _ = shutdown.send(());
     let _ = task.await;
+}
+
+async fn read_next_failed_attempt_evidence(
+    samples_root: &std::path::Path,
+    seen_dirs: &mut std::collections::HashSet<std::path::PathBuf>,
+) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = std::fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                if seen_dirs.contains(&dir) {
+                    continue;
+                }
+                let path = dir.join("provider-failed-attempts.json");
+                if let Ok(raw) = std::fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        seen_dirs.insert(dir);
+                        return evidence;
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("expected new provider-failed-attempts.json under {samples_root:?}");
 }
 
 #[derive(Default)]
@@ -1880,7 +2186,8 @@ async fn map002_public_gemini_outbound_preserves_unmapped_drop_malformed_and_cap
     let home = Home::new("map002-gemini-public");
     std::env::set_var("ONTOLOGY_GEM_KEY", "gem-secret");
 
-    // Verify synthetic 502 + clean EOF would be rejected by assert_hard_sse_failure helper semantics.
+    // Verify synthetic 502 + clean EOF AND synthetic 502 + post-header stream abort are BOTH
+    // rejected by the shared check_hard_sse_failure predicate.
     let synthetic_app = Router::new().route(
         "/synthetic",
         post(|| async {
@@ -1901,34 +2208,49 @@ async fn map002_public_gemini_outbound_preserves_unmapped_drop_malformed_and_cap
             .await
             .unwrap();
     });
+    let abort_502_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let abort_502_addr = abort_502_listener.local_addr().unwrap();
+    let abort_502_task = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        if let Ok((mut sock, _)) = abort_502_listener.accept().await {
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock
+                .write_all(
+                    b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n",
+                )
+                .await;
+            let _ = sock.shutdown().await;
+            drop(sock);
+        }
+    });
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let mut syn_resp = client
+    let eof_502_res = client
         .post(format!("http://{syn_addr}/synthetic"))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(syn_resp.status(), StatusCode::BAD_GATEWAY);
-    let mut syn_bytes = Vec::new();
-    let mut syn_err = None;
-    loop {
-        match syn_resp.chunk().await {
-            Ok(Some(c)) => syn_bytes.extend_from_slice(&c),
-            Ok(None) => break,
-            Err(e) => {
-                syn_err = Some(e);
-                break;
-            }
-        }
-    }
+        .await;
     assert!(
-        syn_err.is_none() && !syn_bytes.is_empty(),
-        "clean EOF 502 control is distinct from aborted stream"
+        check_hard_sse_failure("synthetic_eof_502", eof_502_res, &[])
+            .await
+            .is_err(),
+        "shared SSE predicate must reject synthetic 502 with clean EOF"
+    );
+    let abort_502_res = client
+        .post(format!("http://{abort_502_addr}/synthetic-abort"))
+        .send()
+        .await;
+    assert!(
+        check_hard_sse_failure("synthetic_abort_502", abort_502_res, &[])
+            .await
+            .is_err(),
+        "shared SSE predicate must reject synthetic 502 even if body stream aborts after headers"
     );
     let _ = syn_sd.send(());
     let _ = syn_task.await;
+    let _ = abort_502_task.await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2017,8 +2339,17 @@ targets = [
 
     let mut manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    manifest.debug.codex_samples = true;
     manifest.debug.projection_drop_log_file = Some(drop_log.display().to_string());
     let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let no_reason_samples = home
+        .path
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join(no_reason_port.to_string());
+    let mut seen_failure_dirs = std::collections::HashSet::<std::path::PathBuf>::new();
 
     // 1) Non-reasoning Gemini model + unmapped effort "ultra" -> omits cleanly, logs drop, delivers HTTP 200 on first attempt.
     let ok_ultra = client
@@ -2039,7 +2370,7 @@ targets = [
         .pointer("/generationConfig/thinkingConfig")
         .is_none());
 
-    // 2) Non-reasoning Gemini model + whitespace-only effort -> fails MalformedOutboundField before provider.
+    // 2) Non-reasoning Gemini model + whitespace-only effort -> fails invalid_responses_request at Inbound before provider.
     let bad_empty = client
         .post(format!("http://127.0.0.1:{no_reason_port}/v1/responses"))
         .json(&json!({
@@ -2052,8 +2383,30 @@ targets = [
         .await;
     assert_eq!(state.requests.lock().unwrap().len(), 1);
     assert_hard_json_failure("gemini_empty_effort", bad_empty, &[]).await;
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("empty effort failure sample must persist");
+    let bad_empty_evidence =
+        read_next_failed_attempt_evidence(&no_reason_samples, &mut seen_failure_dirs).await;
+    assert_eq!(bad_empty_evidence["attempts"], json!([]));
+    assert_eq!(
+        bad_empty_evidence["terminal_source"]["source_stage"], "V3HubReqInbound02Normalized",
+        "{bad_empty_evidence}"
+    );
+    assert_eq!(
+        bad_empty_evidence["terminal_source"]["code"], "invalid_responses_request",
+        "{bad_empty_evidence}"
+    );
+    let bad_empty_msg = bad_empty_evidence["terminal_source"]["message"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        bad_empty_msg.contains("Responses reasoning.effort must be a non-empty string"),
+        "empty effort must fail locally at Inbound with exact message: {bad_empty_evidence}"
+    );
 
-    // 3) Non-reasoning Gemini model + mapped effort "high" -> preserves capability failure before provider.
+    // 3) Non-reasoning Gemini model + mapped effort "high" -> passes Inbound and fails Outbound capability gate before provider.
     let bad_cap = client
         .post(format!("http://127.0.0.1:{no_reason_port}/v1/responses"))
         .json(&json!({
@@ -2066,6 +2419,44 @@ targets = [
         .await;
     assert_eq!(state.requests.lock().unwrap().len(), 1);
     assert_hard_json_failure("gemini_missing_capability", bad_cap, &[]).await;
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("missing capability failure sample must persist");
+    let bad_cap_evidence =
+        read_next_failed_attempt_evidence(&no_reason_samples, &mut seen_failure_dirs).await;
+    let bad_cap_attempts = bad_cap_evidence["attempts"]
+        .as_array()
+        .expect("bad_cap attempts must be an array");
+    assert_eq!(bad_cap_attempts.len(), 1, "{bad_cap_evidence}");
+    assert_eq!(
+        bad_cap_attempts[0]["action"], "terminal_request_local_provider_compat_exhausted",
+        "{bad_cap_evidence}"
+    );
+    assert_eq!(
+        bad_cap_attempts[0]["health_state"], "request_local_provider_compat",
+        "{bad_cap_evidence}"
+    );
+    assert!(
+        bad_cap_attempts[0]["provider_status"].is_null(),
+        "local request compat exhaustion must record zero upstream HTTP status: {bad_cap_evidence}"
+    );
+    assert_eq!(
+        bad_cap_attempts[0]["failure_count"], 0,
+        "{bad_cap_evidence}"
+    );
+    assert_eq!(
+        bad_cap_evidence["terminal_source"]["source_stage"], "ProviderReqCompat06ProviderCompat",
+        "mapped high must reach ProviderReqCompat/Outbound capability gate: {bad_cap_evidence}"
+    );
+    let bad_cap_msg = bad_cap_evidence["terminal_source"]["message"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        bad_cap_msg.contains("UnmappedOutboundFields target_protocol=gemini")
+            && bad_cap_msg.contains("missing_capability=reasoning"),
+        "mapped high without capability must fail locally with missing_capability=reasoning: {bad_cap_evidence}"
+    );
 
     // 4) Reasoning-capable Gemini model + mapped effort "high" -> projects thinkingLevel == "HIGH" on first attempt.
     let ok_reason = client

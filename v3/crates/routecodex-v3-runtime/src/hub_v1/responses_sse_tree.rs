@@ -555,6 +555,7 @@ pub enum V3ResponsesSseTerminalState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesSseReducerState {
     pub response: Option<V3ResponsesSseResponseContainer>,
+    pub response_output_slots: Vec<usize>,
     pub items: Vec<V3ResponsesSseTypedOutputItem>,
     pub output_text: String,
     pub terminal: Option<V3ResponsesSseTerminalState>,
@@ -653,6 +654,7 @@ impl Default for V3ResponsesSseReducerState {
     fn default() -> Self {
         Self {
             response: None,
+            response_output_slots: Vec::new(),
             items: Vec::new(),
             output_text: String::new(),
             terminal: None,
@@ -670,6 +672,7 @@ impl V3ResponsesSseReducerState {
             "response.created" | "response.in_progress" => {
                 if let Some(response) = event.get("response") {
                     self.response = Some(parse_response_container(response)?);
+                    self.response_output_slots.clear();
                 }
             }
             "response.output_item.added" | "response.output_item.done" => {

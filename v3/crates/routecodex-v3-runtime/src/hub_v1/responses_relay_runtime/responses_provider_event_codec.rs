@@ -205,6 +205,13 @@ fn apply_v3_typed_responses_event(
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
     })?;
+    if matches!(
+        event.get("type").and_then(Value::as_str).map(str::trim),
+        Some("response.created" | "response.in_progress")
+    ) && event.get("response").is_some()
+    {
+        reducer.response_output_slots = terminal_original_slots.to_vec();
+    }
     match reducer.terminal {
         Some(V3ResponsesSseTerminalState::Completed)
         | Some(V3ResponsesSseTerminalState::Incomplete) => {
@@ -311,9 +318,18 @@ fn build_typed_responses_terminal_response(
     reducer: &V3ResponsesSseReducerState,
     terminal_original_slots: &[usize],
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    let mut response = event
+    let event_response = event
         .get("response")
-        .and_then(|value| parse_response_container(value).ok())
+        .and_then(|value| parse_response_container(value).ok());
+    let container_original_slots = if event_response
+        .as_ref()
+        .is_some_and(|container| container.output.is_some())
+    {
+        terminal_original_slots
+    } else {
+        reducer.response_output_slots.as_slice()
+    };
+    let mut response = event_response
         .or_else(|| reducer.response.clone())
         .map(|value| value.to_normalized_value())
         .unwrap_or_else(|| json!({}));
@@ -343,7 +359,7 @@ fn build_typed_responses_terminal_response(
         .unwrap_or_default();
     let mut output_slots: Vec<Option<usize>> = (0..output.len())
         .map(|index| {
-            terminal_original_slots
+            container_original_slots
                 .get(index)
                 .copied()
                 .or_else(|| {
@@ -352,7 +368,7 @@ fn build_typed_responses_terminal_response(
                         .and_then(Value::as_u64)
                         .and_then(|value| usize::try_from(value).ok())
                 })
-                .or_else(|| terminal_original_slots.is_empty().then_some(index))
+                .or_else(|| container_original_slots.is_empty().then_some(index))
         })
         .collect();
     for item in reducer
