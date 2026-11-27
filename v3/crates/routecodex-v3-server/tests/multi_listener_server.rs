@@ -6747,6 +6747,20 @@ fn execute_reasoning_lookup_tool(call: &Value) -> String {
     (limit * 14).to_string()
 }
 
+fn reasoning_lookup_tool_declaration() -> Value {
+    json!({
+        "name":REASONING_LOOKUP_TOOL,
+        "input_schema":{
+            "type":"object",
+            "properties":{
+                "query":{"type":"string"},
+                "limit":{"type":"integer"}
+            },
+            "required":["query"]
+        }
+    })
+}
+
 fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     let messages = body["messages"]
         .as_array()
@@ -6764,6 +6778,24 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
         return Err(format!(
             "missing opening reasoning lookup control text: {body}"
         ));
+    }
+    let tools = body["tools"]
+        .as_array()
+        .ok_or_else(|| format!("missing provider tool declarations: {body}"))?;
+    let mut matching_tools = tools
+        .iter()
+        .filter(|tool| tool["name"] == REASONING_LOOKUP_TOOL);
+    let tool_declaration = matching_tools
+        .next()
+        .ok_or_else(|| format!("missing reasoning lookup tool declaration: {body}"))?;
+    if matching_tools.next().is_some() {
+        return Err(format!(
+            "unexpected duplicate reasoning lookup tool declaration: {body}"
+        ));
+    }
+    let expected_tool = reasoning_lookup_tool_declaration();
+    if tool_declaration != &expected_tool {
+        return Err(format!("reasoning lookup tool declaration changed: {body}"));
     }
     let mut tool_use_at = None;
     let mut tool_result_at = None;
@@ -6834,14 +6866,14 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[tool_use.clone()]},
         {"role":"user","content":[tool_result.clone()]}
-    ]});
+    ],"tools":[reasoning_lookup_tool_declaration()]});
     assert!(validate_reasoning_lookup_followup(&valid).is_ok());
 
     let reversed = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_result.clone()]},
         {"role":"assistant","content":[tool_use.clone()]}
-    ]});
+    ],"tools":[reasoning_lookup_tool_declaration()]});
     assert!(validate_reasoning_lookup_followup(&reversed)
         .unwrap_err()
         .contains("must immediately follow"));
@@ -6850,7 +6882,7 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_use.clone()]},
         {"role":"assistant","content":[tool_result.clone()]}
-    ]});
+    ],"tools":[reasoning_lookup_tool_declaration()]});
     assert!(validate_reasoning_lookup_followup(&wrong_roles)
         .unwrap_err()
         .contains("assistant message"));
@@ -6860,19 +6892,28 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"assistant","content":[tool_use.clone()]},
         {"role":"user","content":[{"type":"text","text":"intervening"}]},
         {"role":"user","content":[tool_result.clone()]}
-    ]});
+    ],"tools":[reasoning_lookup_tool_declaration()]});
     assert!(validate_reasoning_lookup_followup(&intervening_message)
         .unwrap_err()
         .contains("must immediately follow"));
 
     let text_before_result = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
-        {"role":"assistant","content":[tool_use]},
-        {"role":"user","content":[{"type":"text","text":"before result"},tool_result]}
-    ]});
+        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"user","content":[{"type":"text","text":"before result"},tool_result.clone()]}
+    ],"tools":[reasoning_lookup_tool_declaration()]});
     assert!(validate_reasoning_lookup_followup(&text_before_result)
         .unwrap_err()
         .contains("must start its user message content"));
+
+    let missing_declaration = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[tool_use]},
+        {"role":"user","content":[tool_result]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&missing_declaration)
+        .unwrap_err()
+        .contains("tool declarations"));
 }
 
 #[tokio::test]
@@ -6914,6 +6955,28 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let missing_declaration = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":REASONING_LOOKUP_CALL_ID,
+                "name":REASONING_LOOKUP_TOOL,
+                "input":{"query":"p0 reasoning","limit":3}
+            }]},
+            {"role":"user","content":[{
+                "type":"tool_result",
+                "tool_use_id":REASONING_LOOKUP_CALL_ID,
+                "content":"42"
+            }]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_declaration.status(), StatusCode::BAD_REQUEST);
     shutdown.send(()).unwrap();
 }
 
