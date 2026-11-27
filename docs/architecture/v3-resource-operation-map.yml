@@ -483,11 +483,103 @@ resources:
     identity: [requestId, targetId, candidateIds, interfaceId, requestInputTokens]
     semantic_contract:
       context_admission: Target09 carries the typed request input token count as side-channel route evidence; Target10 compares the scaled estimate with each candidate max_context_tokens only as advisory ordering evidence. The estimate never removes a healthy, capability-eligible, request-eligible candidate from the pool and never records it in unavailable_candidates; the real provider owns the context verdict.
-      priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only as an effective-priority adjustment inside the selected route pool.
+      priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only inside the selected pool. Plans without active pools build their schedule tier table from the original merged candidate rows; active plans use occurrence-local rows.
       payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload. The provider-declared output cap and the provider-declared reasoning-effort policy are candidate fields that may influence provider wire parameters; Target09 attaches them from the published provider/model declarations, Target10 carries them unchanged, and ProviderReqCompat06ProviderCompat may project the output cap only when the client supplied no output limit and may apply the configured reasoning effort after standard projection and existing compat mappings.
     allowed_writers: [V3Target09CandidateSetExpanded]
     allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_policy
+    resource_kind: control
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-config
+    owner_node: V3RoutePoolManifest
+    identity: [routingGroupId, poolId, members, retries, onFailure, selectionStrategy]
+    semantic_contract: Optional compiled active membership. It references declared provider aliases and never contains credentials or payload data. Absence preserves legacy selection.
+    allowed_writers: [publish_v3_config_05_manifest_from_v3_config_04]
+    allowed_readers: [routecodex-v3-target, V3ActiveKeySelectionState::snapshot, V3ActiveKeySelectionState::release]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_candidate_set
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3Target09CandidateSetExpanded
+    identity: [requestId, routingGroupId, poolId, tier, activeMembers, declaredOccurrences]
+    semantic_contract: Each declaration occurrence retains its supplying pool and tier. Only that occurrence's active membership intersects candidates and request restrictions. Full provider/interface/model/key identity remains the request-local failure and health key. Read-only recovery observation uses the same eligibility without consuming selection turns.
+    allowed_writers: [V3TargetInterpreter::expand_candidates]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health_active]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-runtime, routecodex-v3-server, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_state
+    resource_kind: control
+    lifecycle: v3.active_key_selection_control
+    owner_crate: routecodex-v3-target
+    owner_node: V3ActiveKeySelectionState
+    identity: [listenerIdentity, routingGroupId, poolId, queueOrder, heldMembers, sessionBindings, memberGeneration, consecutiveDeliveryFailures]
+    semantic_contract: Target-owned selection state contains no payload, credential, raw error, retry counter, or provider health truth. Holds persist; session bindings and cursors are process-local.
+    allowed_writers: [V3ActiveKeySelectionState, V3ActiveKeySelectionState::persist, V3ActiveKeySelectionState::release]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health_active, V3ActiveKeySelectionState, V3ActiveKeySelectionState::snapshot, V3ActiveKeySelectionState::release, V3ActiveKeySelectionState::persist]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_attempt
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3ActiveKeyEpisode
+    identity: [memberGeneration, providerId, interfaceId, modelId, authAlias, actualDispatches, completedDispatch, retryBudget]
+    semantic_contract: Typed request-local witness for selected active identity and generation. Runtime begins each actual dispatch and reports each outcome once. Target records shared consecutive failures; the fourth invalidates matching affinity and holds or tails the member. Early episode closure does not reset the shared streak.
+    allowed_writers: [V3ActiveKeyEpisode::new, V3ActiveKeyEpisode::begin_attempt, V3ActiveKeyEpisode::cancel, V3ActiveKeySelectionState::record_delivery_failure, V3ActiveKeySelectionState::accepted_success, V3ActiveKeySelectionState::close_failure]
+    allowed_readers: [routecodex-v3-runtime]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-provider-responses, request.normal_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.active_key_control_endpoint_record
+    resource_kind: control
+    lifecycle: v3.active_key_selection_control
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerAggregateHandle
+    identity: [canonicalConfig, serverId, actualBusinessSocket, loopbackControlSocket, ownerPid, ownerEndpoint]
+    semantic_contract: >-
+      Server owns selected-listener transport and record lifetime. Config provides
+      canonical-parent/raw-basename/60-byte-lowercase-hex-listener addressing and
+      directory-relative IO; composed paths are diagnostic only. A stable namespace
+      lock covers complete publication and compare/remove/prune. Async acquisition
+      is deadline-bounded and cancellable; complete locked IO runs off the business
+      worker. Admin shared reads create nothing and release before HTTP. Business
+      accept starts first. Exact port-scoped cleanup preserves siblings and retains
+      failed owners for retry; Drop tries once without a waiter. The empty lock
+      remains after endpoint close. Verified managed exec carries opaque Server
+      ownership in its existing typed envelope; only Server compares/replaces or
+      retires exact inherited records. Rejected exec preserves original controls.
+      Lifecycle only transports this authority after owner adoption. Records carry
+      no queue, health, credential or business truth. Foreign records and distinct
+      listener scopes remain independent; publication or cleanup failure is explicit.
+    allowed_writers: [routecodex-v3-server]
+    allowed_readers: [routecodex-v3-admin, routecodex-v3-server, routecodex-v3-lifecycle, forward_selection_control, restart_managed_runtime_in_place, "V3ManagedLifecycle::run_managed_child_with_declaration"]
+    forbidden_writers: [routecodex-v3-target, routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.active_key_control_exec_handoff
+    resource_kind: control
+    lifecycle: v3.managed_restart
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerExecPreparation
+    identity: [canonicalConfig, completeEndpointRecord]
+    semantic_contract: Lifecycle persists opaque Server ownership through readiness and terminal disposition in the existing front handoff. The managed PID cache or its retained generation link verifies the originating nonce and process for the target declaration. Server writes exact alternatives before publication and resolves them under the namespace lock. Confirmed foreign replacement resolves responsibility with a diagnostic. Uncertain storage outcomes preserve custody and its independent authority. Rejected exec preserves original endpoints and custody.
+    allowed_writers: [routecodex-v3-server, "V3ActiveKeyControlExecHandoff::capture"]
+    allowed_readers: [routecodex-v3-server, routecodex-v3-lifecycle, restart_managed_runtime_in_place, "V3ManagedLifecycle::run_managed_child_with_declaration"]
+    forbidden_writers: [routecodex-v3-target, routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -1613,8 +1705,8 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
     identity: [controlInstanceId, startNonce, executablePath, targetDeclaration, snapshots, snapshotStages]
-    allowed_writers: [send_restart_control, remove_restart_plan_for_previous_control_identity, cleanup_previous_exec_restart_owner]
-    allowed_readers: [control_restart_plan, remove_restart_plan_for_previous_control_identity]
+    allowed_writers: [send_restart_control, settle_terminal_restart_plan, remove_verified_generation_plan, remove_restart_plan_for_previous_control_identity, cleanup_previous_exec_restart_owner]
+    allowed_readers: [control_restart_plan, verify_generation_restart_plan, remove_restart_plan_for_previous_control_identity]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1628,12 +1720,13 @@ resources:
     identity: [oldInstanceId, targetInstanceId, startNonce, artifactKind]
     semantic_contract:
       artifact_kinds: [staged_instance_declaration, front_handoff_json, provider_handoff_json]
-      creation: Exec preparation serializes the accepted declaration and owner-produced checkpoints; typed checkpoints retain their original owners.
-      adoption: Exact old instance and nonce authorize renaming handoffs and publishing the staged declaration.
-      cleanup: Rejected exec removes only files created by that attempt; replacement discards Front metadata and restores provider checkpoints through Runtime before removing handoff files.
+      creation: Exec preparation serializes the accepted declaration, origin PID/start-token/nonce and opaque Server control custody in the existing front artifact when needed. Legacy checkpoint arrays retain their previous-release meaning.
+      adoption: Native preparation publishes the typed target front even with empty Server custody. Native and previous-release adoption bind it to an independent generation cache. A legacy checkpoint array carries no endpoint custody. A managed write-ahead update records each intended exact endpoint before publication. Fresh recovery verifies both checkpoint locations, closes the transfer and retires predecessor evidence before final target front settlement. The matching Stopped record remains actionable until the fresh child publishes its own identity and startup state.
+      cleanup: Rejected exec removes its own artifacts and restores any previous retained custody. A failed successor retains its exact front and independent cache if Failed cannot be written, including after Server control publication and physical close. Exited recovery verifies any locked predecessor control before endpoint retirement and closes the abandoned provider handoff in the verified owning directory before releasing its authority. Forced stop reports retained custody in its Stopped detail. Normal adoption restores Provider checkpoints.
+      forced_disposition: A delivered scoped signal binds only its own immediately verified declaration, PID cache, live start token and control. Original exit and unchanged custody permit terminal publication. Listener release alone leaves managed proof with formal recovery. Without bare delivery, return only the verified existing Stopped baseline without rewriting it.
       front_boundary: Front metadata is not accepted-client descriptor or task transfer and does not prove client reattachment.
-    allowed_writers: [restart_managed_runtime_in_place, cleanup_rejected_restart_handoff, finish_exec_restart_adoption, V3ManagedLifecycle::run_managed_child_with_declaration]
-    allowed_readers: [restart_managed_runtime_in_place, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, V3ManagedLifecycle::run_managed_child_with_declaration]
+    allowed_writers: [restart_managed_runtime_in_place, cleanup_rejected_restart_handoff, finish_exec_restart_adoption, V3ManagedLifecycle::run_managed_child_with_declaration, persist_retained_front_control_handoff, recover_exited_front_control_handoff]
+    allowed_readers: [restart_managed_runtime_in_place, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, V3ManagedLifecycle::run_managed_child_with_declaration, verify_exec_front_control_handoff, finish_failed_front_control_handoff, recover_exited_front_control_handoff]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, raw_json_control_reconstruction]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2996,6 +3089,9 @@ resources:
     identity: [requestId, executionId]
     semantic_contract:
       current_binding: Resident Direct/Relay controllers carry one opaque V3RequestExecutionControl across typed protocol handoffs and retain the originating target plan and Error05 state.
+      actual_failure_custody: The request control retains the complete last dispatched identity, canonical typed failure source and optional HTTP witness across mode handoffs. Only the next actual send replaces that evidence; an independent local terminal source stays local.
+      custody_operations: V3RequestExecutionControl::begin_actual_send replaces prior custody only at dispatch; record_failure retains the canonical policy source and HTTP witness; take_failure_for_exhaustion submits that pair to Error qualification. V3PreferredSelection distinguishes Fresh from FailedRetry, and prepare_selected_dispatch handles invalidation before Provider failure accounting.
+      selection_invalidation: A fresh unsent occurrence can be reselected without failed-identity accounting. A failed pending retry that loses its witness closes and excludes the complete identity for this request. No-send health contention is not a Provider failure.
       target_contract: One resident request controller owns immutable target plan, cumulative attempt/deadline budget, cancellation, Error05 recovery execution, and terminal closeout.
       runtime_driver: Provider network requests and lazy response streams remain on a resident Tokio Runtime for their complete lifetime.
     allowed_writers: [plan_v3_responses_protocol_execution_with_recovery, execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core]
@@ -3287,8 +3383,8 @@ resources:
     identity: [requestId, invocationId, attemptId]
     semantic_contract:
       storage_owner: V3OperationRunnerPlanExecution persists one request-local failed-candidate exclusion set; this is not a process-global store or a second admission controller
-      mutation_owner: typed Error action consumption and real provider failures add only the exact attempted candidate keys for this request
-      provenance_rule: exclusion evidence never comes from capacity, permits, FIFO tickets, probes or Deferred state
+      mutation_owner: typed Error action consumption and real provider failures close the exact failed identity. Runtime may also exclude an identity that is currently unavailable for this request without recording a delivery failure.
+      provenance_rule: fresh pool-local occurrence invalidation is not full-identity failure exclusion; exclusive Provider recovery contention may exclude only that identity for this request and cannot mutate another owner's health or trial. Capacity, FIFO and Deferred states never supply exclusions.
       classification: the request immediately scans declared successors after excluding attempted keys; there is no all-busy capacity classification
       request_boundary: exclusion and busy provenance never enter request, response, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [RuntimeErrorActionConsumed, V3OperationRunnerPlanExecution]

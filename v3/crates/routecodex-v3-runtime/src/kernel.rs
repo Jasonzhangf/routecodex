@@ -42,7 +42,7 @@ use routecodex_v3_sse::{
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
     SseTransportIn02DecodedFrame, SseTransportIn03ValidatedFrameStream, SseTransportLimits,
 };
-use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
+use routecodex_v3_target::{V3ActiveKeyEpisode, V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -136,6 +136,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         client_identity_headers,
         now_epoch_ms,
         provider_health,
+        active_keys,
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
@@ -341,12 +342,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
+    let mut initial_selection_time = Some(now_epoch_ms);
     let mut provider_request_snapshot = None;
+    let mut active_episode = None::<V3ActiveKeyEpisode>;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
-        last_external_http = None;
-        let now_epoch_ms = if send_attempts == 0 {
-            now_epoch_ms
+        let now_epoch_ms = if let Some(initial) = initial_selection_time.take() {
+            initial
         } else {
             match v3_direct_selection_now_ms(&provider_health) {
                 Ok(now_ms) => now_ms,
@@ -360,6 +362,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             }
         };
+        let active_dispatch_clock = std::time::Instant::now();
         let (selected, planned_decision): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3Execution11ProtocolDecision>,
@@ -379,19 +382,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
-                    crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+                    crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
                         attempt_budget.clone(),
                     standardized.body.clone(),
                     manifest,
                     source.clone(),
                     &direct_failure_session_scope,
                     &provider_health,
+                    active_keys.clone(),
                     &failed_candidates,
                     &request_local_busy_candidates,
                     now_epoch_ms,
                     0,
                     allow_exhaustion_rescue_probe,
-                    preferred,
+                    preferred.map(|s| crate::operation_runner::plan_execution::V3PreferredSelection::pending(s, active_episode.as_ref())),
                     crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::responses_entry(
                         allowed_modes.clone(), standardized.request_purpose,
                     ),
@@ -441,6 +445,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             unavailable_candidates: error.attempted_candidates.clone(),
                             ..V3RuntimeObservability::default()
                         };
+                        let (_, source, witness) = request_execution_control.take_failure_for_exhaustion(source);
                         return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                             source.map_or_else(
                                 || {
@@ -456,7 +461,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 },
                                 Ok,
                             ),
-                            last_external_http,
+                            witness,
                             trace,
                             &hook_registry,
                             Some(exhausted_observability),
@@ -511,6 +516,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
             }
         };
+        if active_episode.as_ref().map(|episode| &episode.selection)
+            != selected.active_selection.as_ref()
+        {
+            active_episode = selected
+                .active_selection
+                .clone()
+                .map(V3ActiveKeyEpisode::new);
+        }
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if standardized
@@ -543,118 +556,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             now_epoch_ms,
         );
         if !selected_available {
-            let source = crate::shared::direct_plain_error(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3HubReqTarget06Resolved",
-                "selected_provider_unavailable",
-                "selected provider is unavailable",
-            );
-            let source = match source {
-                Ok(source) => source,
-                Err(fault) => {
-                    return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
-                        Err(fault),
-                        last_external_http,
-                        trace,
-                        &hook_registry,
-                        None,
-                        provider_request_snapshot,
-                        None,
-                    )
-                }
-            };
-            let policy_result = match run_v3_direct_provider_failure_policy(
-                &V3DirectProviderFailurePolicyContext {
-                    failure_session_scope: &direct_failure_session_scope,
-                    provider_health: &provider_health,
-                    recovery_control: Some(&request_execution_control),
-                    availability: &availability,
-                    expanded: expanded.as_ref(),
-                    provider_pinned: false,
-                },
-                &selected,
-                source,
-                503,
-                &mut V3DirectProviderFailurePolicyState {
-                    failed_candidates: &mut failed_candidates,
-                    same_candidate_retries: &mut same_candidate_retries,
-                    trace: &mut trace,
-                },
-                None,
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(failure) => {
-                    return direct_runtime_helpers_stream::policy_failure_output_with_observability(
-                        failure,
-                        last_external_http,
-                        trace,
-                        None,
-                    )
-                }
-            };
-            if let Some(event) = policy_result.event.clone() {
-                provider_failure_events.push(event.clone());
-                publish_v3_direct_provider_failure_event(
-                    provider_failure_event_sink.as_ref(),
-                    &selected,
-                    "responses",
-                    "json",
-                    // Published observability carries only the real upstream HTTP
-                    // status; `event.status` keeps the observed/projection value.
-                    event.external_error_status,
-                    &provider_failure_events,
-                    &event,
-                    total_attempts(&accumulator, send_attempts),
-                );
-            }
-            match &policy_result.decision.action {
-                V3Error05ExecutionAction::ReevaluateTarget => {
-                    retry_selected = None;
-                    continue;
-                }
-                V3Error05ExecutionAction::Reselect => {
-                    retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                    if policy_result.retryable_transient {
-                        // 瞬态失败切走：request-local witness 不经过
-                        // provider action gate（无 lane 可等），立即重选。
-                        continue;
-                    }
-                    continue;
-                }
-                V3Error05ExecutionAction::WaitThenRetrySame { .. } => {
-                    retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                    if policy_result.retryable_transient {
-                        // 瞬态失败重试同一 provider：不经过 provider action
-                        // gate（无 lane 可等），立即重发。
-                        continue;
-                    }
-                    continue;
-                }
-                V3Error05ExecutionAction::ProjectTerminal => {
-                    return direct_runtime_helpers_stream::provider_terminal_output(
-                        policy_result.decision,
-                        last_external_http,
-                        trace,
-                        None,
-                        None,
-                        None,
-                    );
-                }
-                V3Error05ExecutionAction::ClientDisconnected
-                | V3Error05ExecutionAction::RejectNonProviderError => {
-                    return direct_runtime_helpers_stream::source_failure_output(
-                        runtime_source(
-                            "V3Error05ExecutionDecision",
-                            "provider availability failure entered a non-provider Error05 lane",
-                        ),
-                        last_external_http.clone(),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            }
+            failed_candidates.insert(candidate_key(&selected.candidate));
+            retry_selected = None;
+            continue;
         }
         let decision = match planned_decision.map(Ok).unwrap_or_else(|| {
             build_v3_execution_11_protocol_decision_from_v3_target_10(
@@ -705,6 +609,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
                 request_execution_control,
+                active_keys.clone(),
             );
         }
         // Responses direct has a protocol-specific kernel, so it must enter the
@@ -834,30 +739,26 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             failed_candidates.insert(candidate_key(&policy.target.candidate));
             continue;
         }
-        match provider_health.acquire_business_recovery_trial(
+        match crate::provider_failure_runtime_policy::prepare_selected_dispatch(
+            &policy.target,
+            expanded.as_ref(),
+            active_keys.as_deref(),
+            active_episode.as_mut(),
             &request_execution_control,
-            &policy.target.candidate.provider_id,
-            &policy.target.candidate.interface_id,
-            &policy.target.candidate.auth_alias,
-            &policy.target.candidate.model_id,
-            now_epoch_ms,
+            &provider_health,
+            &direct_failure_session_scope,
+            &mut failed_candidates,
+            now_epoch_ms.saturating_add(active_dispatch_clock.elapsed().as_millis() as u64),
         ) {
             Ok(true) => {}
-            Ok(false) => {
-                failed_candidates.insert(
-                    crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
-                        &policy.target.candidate,
-                    ),
-                );
-                continue;
-            }
+            Ok(false) => continue,
             Err(error) => {
                 return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3ProviderHealthStateMutated", error),
-                    last_external_http.clone(),
+                    None,
                     trace,
                     &hook_registry,
-                );
+                )
             }
         }
         send_attempts = match attempt_budget.admit_transport_attempt() {
@@ -879,6 +780,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &hook_registry,
             );
         }
+        last_external_http = None;
+        request_execution_control.begin_actual_send();
         let provider_raw = match tokio::time::timeout(
             default_transport::responses_direct_transport_response_timeout(
                 manifest,
@@ -976,7 +879,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 } else {
                     source
                 };
-                let policy_result = match run_v3_direct_provider_failure_policy(
+                let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
@@ -993,6 +896,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
                     },
+                    active_keys.as_deref(),
+                    active_episode.as_mut(),
                     last_external_http.as_ref(),
                 )
                 .await
@@ -1197,7 +1102,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         None,
                     );
                 }
-                let policy_result = match run_v3_direct_provider_failure_policy(
+                let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
@@ -1214,6 +1119,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
                     },
+                    active_keys.as_deref(),
+                    active_episode.as_mut(),
                     last_external_http.as_ref(),
                 )
                 .await
@@ -1359,7 +1266,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         )
                     }
                 };
-                let policy_result = match run_v3_direct_provider_failure_policy(
+                let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
@@ -1376,7 +1283,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
                     },
-                    None,
+                    active_keys.as_deref(),
+                    active_episode.as_mut(),
+                    last_external_http.as_ref(),
                 )
                 .await
                 {
@@ -1541,7 +1450,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             // candidate exists, and with no replacement the
                             // request ends the client transport without an
                             // error payload instead of sleeping to a deadline.
-                            let mut policy_result = match run_v3_direct_provider_failure_policy(
+                            let mut policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                                 &V3DirectProviderFailurePolicyContext {
                                     failure_session_scope: &direct_failure_session_scope,
                                     provider_health: &provider_health,
@@ -1558,7 +1467,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     same_candidate_retries: &mut same_candidate_retries,
                                     trace: &mut trace,
                                 },
-                                None,
+                                active_keys.as_deref(),
+                                active_episode.as_mut(),
+                                last_external_http.as_ref(),
                             )
                             .await
                             {
@@ -1682,6 +1593,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             ) {
                 return direct_runtime_helpers_stream::source_failure_output(
                     source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
+            }
+        }
+        if let (Some(state), Some(episode)) = (active_keys.as_ref(), active_episode.as_mut()) {
+            if let Err(error) = state.accepted_success(episode) {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    runtime_source("V3ActiveKeyAcceptedSuccess", error),
                     last_external_http.clone(),
                     trace,
                     &hook_registry,

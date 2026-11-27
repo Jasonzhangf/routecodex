@@ -49,7 +49,8 @@ pub use kernel::direct_request_key_hooks::{
 pub use kernel::restore_default_provider_transport_handoff_checkpoints;
 pub use kernel::{
     default_provider_transport_handoff_checkpoints, default_responses_transport,
-    execute_v3_direct_runtime_kernel_core, execute_v3_direct_runtime_kernel_core_with_key_catalog,
+    execute_v3_direct_runtime_kernel_core, execute_v3_direct_runtime_kernel_core_with_active_keys,
+    execute_v3_direct_runtime_kernel_core_with_key_catalog,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_client_identity,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,

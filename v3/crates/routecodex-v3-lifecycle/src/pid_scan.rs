@@ -314,34 +314,78 @@ pub(crate) enum V3LifecycleSignal {
     Kill,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignalDisposition {
+    Delivered,
+    AlreadyGone,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SignalOutcome {
+    pub(crate) pid: u32,
+    pub(crate) signal: V3LifecycleSignal,
+    pub(crate) disposition: SignalDisposition,
+}
+
 pub(crate) fn signal_explicit_listener_pids(
     pids: &[u32],
     signal: V3LifecycleSignal,
+    outcomes: &mut Vec<SignalOutcome>,
 ) -> Result<(), V3LifecycleError> {
-    for pid in pids {
-        signal_explicit_pid(*pid, signal)?;
+    for &pid in pids {
+        outcomes.push(signal_explicit_pid(pid, signal)?);
     }
     Ok(())
+}
+
+pub(crate) fn with_signal_effects(
+    error: V3LifecycleError,
+    outcomes: &[SignalOutcome],
+) -> V3LifecycleError {
+    let delivered: Vec<_> = outcomes
+        .iter()
+        .filter(|s| s.disposition == SignalDisposition::Delivered)
+        .map(|s| format!("{:?} PID {}", s.signal, s.pid))
+        .collect();
+    if delivered.is_empty() {
+        error
+    } else {
+        V3LifecycleError::PartialSignal {
+            source: Box::new(error),
+            delivered: delivered.join(", "),
+        }
+    }
 }
 
 pub(crate) fn signal_explicit_pid(
     pid: u32,
     signal: V3LifecycleSignal,
-) -> Result<(), V3LifecycleError> {
+) -> Result<SignalOutcome, V3LifecycleError> {
+    let outcome = |disposition| SignalOutcome {
+        pid,
+        signal,
+        disposition,
+    };
     if pid == 0 || pid == std::process::id() {
-        return Ok(());
+        return Ok(outcome(SignalDisposition::Skipped));
     }
+    let raw_pid = libc::pid_t::try_from(pid).map_err(|_| {
+        V3LifecycleError::Validation(format!(
+            "PID {pid} cannot be represented for signal dispatch"
+        ))
+    })?;
     let raw_signal = match signal {
         V3LifecycleSignal::Terminate => libc::SIGTERM,
         V3LifecycleSignal::Kill => libc::SIGKILL,
     };
-    let result = unsafe { libc::kill(pid as libc::pid_t, raw_signal) };
+    let result = unsafe { libc::kill(raw_pid, raw_signal) };
     if result == 0 {
-        return Ok(());
+        return Ok(outcome(SignalDisposition::Delivered));
     }
     let error = std::io::Error::last_os_error();
     if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
+        return Ok(outcome(SignalDisposition::AlreadyGone));
     }
     Err(V3LifecycleError::Io(error))
 }

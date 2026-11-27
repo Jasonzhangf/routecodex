@@ -819,6 +819,8 @@ pub struct V3RouteActionAuthoringConfig {
 pub struct V3RoutePoolAuthoringConfig {
     #[serde(default)]
     pub selection: V3SelectionPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_keys: Option<V3ActiveKeyPolicy>,
     #[serde(default)]
     pub route_object: Option<String>,
     #[serde(default, rename = "match")]
@@ -900,10 +902,53 @@ impl Default for V3SelectionPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum V3SelectionStrategy {
+    ActiveQueue,
     Priority,
     Weighted,
     RoundRobin,
     Sticky,
+}
+
+/// Target-owned active identity reference. Credentials stay in provider auth
+/// declarations; this policy carries only the provider/alias selector.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct V3ActiveKeyMember {
+    pub provider: String,
+    pub alias: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ActiveKeyFailureAction {
+    #[default]
+    Hold,
+    Tail,
+}
+
+fn default_active_key_retries() -> u32 {
+    3
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ActiveKeyPolicy {
+    pub members: Vec<V3ActiveKeyMember>,
+    #[serde(
+        default = "default_active_key_retries",
+        skip_serializing_if = "is_default_active_key_retries"
+    )]
+    pub retries: u32,
+    #[serde(default, skip_serializing_if = "is_default_active_key_failure_action")]
+    pub on_failure: V3ActiveKeyFailureAction,
+}
+
+fn is_default_active_key_retries(value: &u32) -> bool {
+    *value == 3
+}
+
+fn is_default_active_key_failure_action(value: &V3ActiveKeyFailureAction) -> bool {
+    *value == V3ActiveKeyFailureAction::Hold
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

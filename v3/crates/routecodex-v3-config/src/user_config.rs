@@ -6,8 +6,8 @@
 use crate::{
     compile_v3_config_05_manifest, provider_directory::V3Config02AuthoringResolved,
     store::build_v3_config_loaded_snapshot, store::source_closure_sha256, validation,
-    V3Config02AuthoringParsed, V3Config05ManifestPublished, V3ConfigError, V3ConfigLoadedSnapshot,
-    V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind, V3SelectionPolicy,
+    V3ActiveKeyPolicy, V3Config02AuthoringParsed, V3Config05ManifestPublished, V3ConfigError,
+    V3ConfigLoadedSnapshot, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind, V3SelectionPolicy,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -84,6 +84,8 @@ fn default_all_entry_protocols() -> Vec<String> {
 pub struct V3UserRoutePool {
     #[serde(default, skip_serializing_if = "V3SelectionPolicy::is_default")]
     pub selection: V3SelectionPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_keys: Option<V3ActiveKeyPolicy>,
     pub tiers: Vec<Vec<V3UserRouteMember>>,
 }
 
@@ -91,6 +93,7 @@ impl Default for V3UserRoutePool {
     fn default() -> Self {
         Self {
             selection: V3SelectionPolicy::default(),
+            active_keys: None,
             tiers: Vec::new(),
         }
     }
@@ -362,6 +365,7 @@ pub fn project_v3_user_config_03_authoring(
             pool.selection = user_pool
                 .map(|pool| pool.selection.clone())
                 .unwrap_or_default();
+            pool.active_keys = user_pool.and_then(|pool| pool.active_keys.clone());
             pool.targets = if pool_id == "default" {
                 default_targets.clone()
             } else if let Some(user_pool) = user_pool {
@@ -488,6 +492,23 @@ fn validate_pool(
         )));
     }
 
+    match (&pool.selection.strategy, pool.active_keys.as_ref()) {
+        (crate::V3SelectionStrategy::ActiveQueue, None) => {
+            return Err(validation(format!(
+                "user config pool {server_id}.{pool_id} active_queue requires active_keys"
+            )))
+        }
+        (
+            crate::V3SelectionStrategy::Priority | crate::V3SelectionStrategy::Weighted,
+            Some(_),
+        ) => {
+            return Err(validation(format!(
+                "user config pool {server_id}.{pool_id} active_keys supports active_queue, round_robin, or sticky selection only"
+            )))
+        }
+        _ => {}
+    }
+
     let mut pool_members = BTreeSet::new();
     for (tier_index, tier) in pool.tiers.iter_mut().enumerate() {
         if tier.is_empty() {
@@ -523,6 +544,32 @@ fn validate_pool(
                 return Err(validation(format!(
                     "user config pool {server_id}.{pool_id} repeats provider/model {}/{}",
                     member.provider, member.model
+                )));
+            }
+        }
+    }
+
+    if let Some(active_keys) = pool.active_keys.as_ref() {
+        let mut active_members = BTreeSet::new();
+        for member in &active_keys.members {
+            if member.provider.trim().is_empty() || member.alias.trim().is_empty() {
+                return Err(validation(format!(
+                    "user config pool {server_id}.{pool_id} active_keys members require non-empty provider and alias"
+                )));
+            }
+            if !pool_members
+                .iter()
+                .any(|(provider, _)| provider == &member.provider)
+            {
+                return Err(validation(format!(
+                    "user config pool {server_id}.{pool_id} active_keys references provider {} outside this pool",
+                    member.provider
+                )));
+            }
+            if !active_members.insert((member.provider.clone(), member.alias.clone())) {
+                return Err(validation(format!(
+                    "user config pool {server_id}.{pool_id} active_keys repeats provider/alias {}/{}",
+                    member.provider, member.alias
                 )));
             }
         }

@@ -77,6 +77,46 @@ where
         provider_failure_event_sink,
         route_selection_event_sink,
         request_key_catalog,
+        None,
+    )
+    .await
+}
+
+pub async fn execute_v3_direct_runtime_kernel_core_with_active_keys<
+    C: V3DirectProtocolCodec,
+    T: ResponsesTransport + ?Sized + 'static,
+>(
+    control: C::Control,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    transport: &T,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C: Send + Sync + 'static,
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send + Sync + 'static,
+    C::Policy: Send + Sync + 'static,
+{
+    let request_key_catalog =
+        crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
+    execute_v3_direct_runtime_kernel_core_resident::<C, T>(
+        control,
+        manifest,
+        raw,
+        transport,
+        provider_health,
+        now_epoch_ms,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        &request_key_catalog,
+        active_keys,
     )
     .await
 }
@@ -95,6 +135,7 @@ async fn execute_v3_direct_runtime_kernel_core_resident<
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
     C: Send + Sync + 'static,
@@ -209,17 +250,18 @@ where
     let mut request_local_busy_candidates = BTreeSet::new();
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let mut active_episode = None::<V3ActiveKeyEpisode>;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
+    let mut initial_selection_time = Some(now_epoch_ms);
     let mut provider_request_snapshot = None;
     let mut provider_response_snapshot = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
-        last_external_http = None;
-        let now_epoch_ms = if send_attempts == 0 {
-            now_epoch_ms
+        let now_epoch_ms = if let Some(initial) = initial_selection_time.take() {
+            initial
         } else {
             match v3_direct_selection_now_ms(&provider_health) {
                 Ok(now_ms) => now_ms,
@@ -233,25 +275,27 @@ where
                 }
             }
         };
+        let active_dispatch_clock = std::time::Instant::now();
         let expands_target = matches!(
             target_source,
             crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(_)
         );
         let (planned_request, plan) = match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
             attempt_budget.residence_deadline(),
-            crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+            crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes_active_keys(
             attempt_budget.clone(),
             C::body(&standardized).clone(),
             manifest,
             target_source.clone(),
             &direct_failure_session_scope,
             &provider_health,
+            active_keys.clone(),
             &failed_candidates,
             &request_local_busy_candidates,
             now_epoch_ms,
             0,
             allow_exhaustion_rescue_probe,
-            retry_selected.take(),
+            retry_selected.take().map(|s| crate::operation_runner::plan_execution::V3PreferredSelection::pending(s, active_episode.as_ref())),
             crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: C::HUB_ENTRY_PROTOCOL,
                 allowed_modes: allowed_modes.clone(),
@@ -303,6 +347,7 @@ where
                     unavailable_candidates: error.attempted_candidates.clone(),
                     ..V3RuntimeObservability::default()
                 };
+                let (_, source, witness) = request_execution_control.take_failure_for_exhaustion(source);
                 return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                     source.map_or_else(
                         || {
@@ -318,7 +363,7 @@ where
                         },
                         Ok,
                     ),
-                    last_external_http,
+                    witness,
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                     Some(exhausted_observability),
@@ -334,6 +379,11 @@ where
                 expanded.clone(),
             );
         let selected = plan.selected;
+        if active_episode.as_ref().map(|episode| &episode.selection)
+            != selected.active_selection.as_ref()
+        {
+            active_episode = selected.active_selection.clone().map(V3ActiveKeyEpisode::new);
+        }
         let decision = plan.protocol_decision;
         if expands_target {
             trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]);
@@ -376,6 +426,7 @@ where
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
                 request_execution_control,
+                active_keys.clone(),
             );
         }
         let server_id = C::server_id(&standardized).to_string();
@@ -512,31 +563,17 @@ where
             failed_candidates.insert(candidate_key(&selected.candidate));
             continue;
         }
-        match provider_health.acquire_business_recovery_trial(
-                &request_execution_control,
-                &selected.candidate.provider_id,
-                &selected.candidate.interface_id,
-                &selected.candidate.auth_alias,
-                &selected.candidate.model_id,
-                now_epoch_ms,
+        match crate::provider_failure_runtime_policy::prepare_selected_dispatch(
+            C::policy_target(&policy), Some(&expanded), active_keys.as_deref(), active_episode.as_mut(),
+            &request_execution_control, &provider_health, &direct_failure_session_scope, &mut failed_candidates,
+            now_epoch_ms.saturating_add(active_dispatch_clock.elapsed().as_millis() as u64),
         ) {
             Ok(true) => {}
-            Ok(false) => {
-                failed_candidates.insert(
-                    crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
-                        &selected.candidate,
-                    ),
-                );
-                continue;
-            }
-            Err(error) => {
-                return direct_runtime_helpers_stream::source_failure_output(
-                    runtime_source("V3ProviderHealthStateMutated", error),
-                    last_external_http.clone(),
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                );
-            }
+            Ok(false) => continue,
+            Err(error) => return direct_runtime_helpers_stream::source_failure_output(
+                runtime_source("V3ProviderHealthStateMutated", error), None, trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            ),
         }
         send_attempts =
             match attempt_budget.admit_transport_attempt() {
@@ -572,6 +609,8 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
+        last_external_http = None;
+        request_execution_control.begin_actual_send();
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(error) => {
@@ -638,7 +677,7 @@ where
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                let policy_result = match run_v3_direct_provider_failure_policy(
+                let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
@@ -655,6 +694,8 @@ where
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
                     },
+                    active_keys.as_deref(),
+                    active_episode.as_mut(),
                     last_external_http.as_ref(),
                 )
                 .await
@@ -669,6 +710,9 @@ where
                         )
                     }
                 };
+                if let Some(diagnostic) = policy_result.durability_diagnostic.clone() {
+                    provider_failure_events.push(diagnostic);
+                }
                 if let Some(event) = policy_result.event.clone() {
                     let mut event = event;
                     event.failed_attempt_evidence = failed_attempt_evidence;
@@ -847,7 +891,7 @@ where
                     )),
                 },
             );
-            let policy_result = match run_v3_direct_provider_failure_policy(
+            let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,
                     provider_health: &provider_health,
@@ -864,6 +908,8 @@ where
                     same_candidate_retries: &mut same_candidate_retries,
                     trace: &mut trace,
                 },
+                active_keys.as_deref(),
+                active_episode.as_mut(),
                 last_external_http.as_ref(),
             )
             .await
@@ -878,6 +924,9 @@ where
                     )
                 }
             };
+            if let Some(diagnostic) = policy_result.durability_diagnostic.clone() {
+                provider_failure_events.push(diagnostic);
+            }
             if let Some(event) = policy_result.event.clone() {
                 provider_failure_events.push(event.clone());
                 publish_v3_direct_provider_failure_event(
@@ -1025,7 +1074,7 @@ where
                         provider_response_snapshot,
                     );
                 }
-                let policy_result = match run_v3_direct_provider_failure_policy(
+                let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                         &V3DirectProviderFailurePolicyContext {
                             failure_session_scope: &direct_failure_session_scope,
                             provider_health: &provider_health,
@@ -1042,7 +1091,9 @@ where
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
                         },
-                        None,
+                        active_keys.as_deref(),
+                        active_episode.as_mut(),
+                        last_external_http.as_ref(),
                     )
                     .await
                     {
@@ -1056,6 +1107,9 @@ where
                             )
                         }
                     };
+                if let Some(diagnostic) = policy_result.durability_diagnostic.clone() {
+                    provider_failure_events.push(diagnostic);
+                }
                 if let Some(event) = policy_result.event.clone() {
                     provider_failure_events.push(event.clone());
                     publish_v3_direct_provider_failure_event(
@@ -1221,7 +1275,7 @@ where
                                 &crate::hooks::register_responses_direct_hooks(),
                             );
                         }
-                        let mut policy_result = match run_v3_direct_provider_failure_policy(
+                        let mut policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                             &V3DirectProviderFailurePolicyContext {
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
@@ -1238,7 +1292,9 @@ where
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
                             },
-                            None,
+                            active_keys.as_deref(),
+                            active_episode.as_mut(),
+                            last_external_http.as_ref(),
                         )
                         .await
                         {
@@ -1261,6 +1317,9 @@ where
                                 trace,
                                 None,
                             );
+                        }
+                        if let Some(diagnostic) = policy_result.durability_diagnostic.clone() {
+                            provider_failure_events.push(diagnostic);
                         }
                         if let Some(event) = policy_result.event.clone() {
                             provider_failure_events.push(event.clone());
@@ -1385,7 +1444,7 @@ where
                                 )
                             }
                         };
-                        let policy_result = match run_v3_direct_provider_failure_policy(
+                        let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                             &V3DirectProviderFailurePolicyContext {
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
@@ -1402,7 +1461,9 @@ where
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
                             },
-                            None,
+                            active_keys.as_deref(),
+                            active_episode.as_mut(),
+                            last_external_http.as_ref(),
                         )
                         .await
                         {
@@ -1416,6 +1477,9 @@ where
                                 )
                             }
                         };
+                        if let Some(diagnostic) = policy_result.durability_diagnostic.clone() {
+                            provider_failure_events.push(diagnostic);
+                        }
                         if let Some(event) = policy_result.event.clone() {
                             provider_failure_events.push(event.clone());
                             publish_v3_direct_provider_failure_event(
@@ -1544,6 +1608,16 @@ where
             ) {
                 return direct_runtime_helpers_stream::source_failure_output(
                     error,
+                    last_external_http.clone(),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                );
+            }
+        }
+        if let (Some(state), Some(episode)) = (active_keys.as_ref(), active_episode.as_mut()) {
+            if let Err(error) = state.accepted_success(episode) {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    runtime_source("V3ActiveKeyAcceptedSuccess", error),
                     last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),

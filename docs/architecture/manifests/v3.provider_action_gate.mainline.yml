@@ -61,7 +61,7 @@ edges:
     to: V3Error06ClientProjected
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
+    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: terminal_projection_for
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -81,7 +81,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: run_v3_direct_provider_failure_policy
+    callee_symbol: run_v3_direct_provider_failure_policy_with_active_keys
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-15
     from: V3Error01SourceRaised
@@ -90,16 +90,16 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: handle_v3_responses_relay_provider_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-    callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
+    callee_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-16
     from: V3Error01SourceRaised
     to: V3Error05ExecutionDecision
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: handle_provider_failure_with_response_code
+    caller_symbol: handle_provider_failure_with_response_code_and_active_keys
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
-    callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
+    callee_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-33
     from: V3ProviderRespInbound01Raw
@@ -124,7 +124,7 @@ edges:
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_direct_provider_failure_policy
+    caller_symbol: run_v3_direct_provider_failure_policy_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
     callee_symbol: record_v3_direct_provider_failure_record
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs

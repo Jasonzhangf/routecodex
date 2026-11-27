@@ -111,6 +111,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             .with_client_identity_headers(shared_state.client_identity_headers.clone())
             .with_now_epoch_ms(now_epoch_ms)
             .with_provider_health(shared_state.provider_health.clone())
+            .with_active_keys(shared_state.active_keys.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
             .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
             .with_request_execution_control(Some(control.clone()));

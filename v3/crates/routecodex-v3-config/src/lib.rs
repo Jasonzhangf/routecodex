@@ -29,11 +29,18 @@ mod validate_auth_tests;
 mod validate_debug_tests;
 mod validate_relations;
 
+mod active_key_control_storage;
+
+#[cfg(feature = "test-hooks")]
+pub use active_key_control_storage::{
+    v3_test_only_set_active_key_control_lock_observer, V3ActiveKeyControlLockStage,
+};
+pub use active_key_control_storage::{V3ActiveKeyControlPaths, V3ActiveKeyControlWrite};
 pub use attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 pub use routecodex_v3_oauth::{V3OAuthDeclaration, V3OAuthSource, V3OAuthStore};
 pub use store::{
-    default_v3_config_path, load_v3_config_snapshot_from_path, v3_webui_observability_store_path,
-    V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,
+    default_v3_config_path, load_v3_config_snapshot_from_path, v3_active_key_control_paths,
+    v3_webui_observability_store_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,
 };
 pub use types::*;
 pub use user_config::{

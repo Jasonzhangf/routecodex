@@ -252,6 +252,428 @@ targets = [
     .expect("target-resolution manifest")
 }
 
+#[tokio::test]
+async fn legacy_failure_never_prefers_an_unwitnessed_active_successor() {
+    use routecodex_v3_config::{
+        V3ActiveKeyFailureAction, V3ActiveKeyMember, V3ActiveKeyPolicy, V3SelectionStrategy,
+    };
+    let mut manifest = global_pool_alive_manifest("mixed-occurrence-recovery");
+    let pools = &mut manifest
+        .route_groups
+        .get_mut("mixed-occurrence-recovery")
+        .unwrap()
+        .pools;
+    pools
+        .get_mut("client_responses")
+        .unwrap()
+        .targets
+        .retain(|target| target.provider.as_deref() == Some("second"));
+    let default = pools.get_mut("default").unwrap();
+    default
+        .targets
+        .retain(|target| target.provider.as_deref() == Some("first"));
+    default.selection.strategy = V3SelectionStrategy::ActiveQueue;
+    default.active_keys = Some(V3ActiveKeyPolicy {
+        members: vec![V3ActiveKeyMember {
+            provider: "first".into(),
+            alias: "key1".into(),
+        }],
+        retries: 3,
+        on_failure: V3ActiveKeyFailureAction::Hold,
+    });
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let target = V3TargetInterpreter::default();
+    let mut hit = resolve_v3_relay_opaque_target_once(
+        &manifest,
+        "mixed-occurrence-recovery",
+        "responses",
+        "/v1/responses",
+        &json!({"model":"client-responses","input":"hello"}),
+        0,
+    )
+    .unwrap();
+    // Keep the captured primary-to-default plan explicit: model-name routing
+    // is covered by the public fixture; this regression owns Error recovery.
+    let mut primary = hit.target_plan[0].clone();
+    primary.pool_id = "client_responses".into();
+    primary.tier_index = 0;
+    hit.target_plan[0].tier_index = 1;
+    hit.target_plan.insert(0, primary);
+    hit.pool_id = "client_responses".into();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let keys = routecodex_v3_target::V3ActiveKeySelectionState::default();
+    let excluded = BTreeSet::new();
+    let active = V3ActiveKeySelectionContext {
+        listener_id: "mixed-occurrence-recovery",
+        session_id: Some("session"),
+        state: &keys,
+        excluded: &excluded,
+    };
+    let scope = test_provider_failure_scope(
+        "mixed-occurrence-recovery",
+        "mixed-occurrence-recovery",
+        "session",
+    )
+    .unwrap();
+    let selected = select_v3_target_with_session_then_global(
+        &target,
+        expanded.clone(),
+        &scope,
+        &health.session_bound_availability(&scope),
+        &health,
+        &BTreeSet::new(),
+        1,
+        0,
+        Some(&active),
+    )
+    .unwrap();
+    assert!(
+        selected.active_selection.is_none(),
+        "selected={selected:?}; expanded={expanded:?}"
+    );
+    let observed = observe_v3_target_successors(
+        &expanded,
+        &health.session_bound_availability(&scope),
+        &health,
+        &BTreeSet::from([v3_relay_provider_candidate_key(&selected.candidate)]),
+        &scope,
+        Some(&keys),
+        v3_relay_provider_policy_now_epoch_ms().unwrap(),
+    );
+    assert!(
+        !observed.is_empty(),
+        "active successor observation: expanded={expanded:?}"
+    );
+    let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
+        manifest: &manifest,
+        captured_target_09: Some(&expanded),
+        failure_session_scope: test_provider_failure_scope(
+            "mixed-occurrence-recovery",
+            "mixed-occurrence-recovery",
+            "session",
+        )
+        .unwrap(),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let mut failed = BTreeSet::new();
+    let mut retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut witness = None;
+    let mut state = V3RelayProviderFailurePolicyState {
+        failed_candidates: &mut failed,
+        same_candidate_retries: &mut retries,
+        trace: &mut trace,
+        last_external_http: &mut witness,
+    };
+    let result = run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(
+        &context,
+        selected.clone(),
+        "V3ProviderReqOutbound09TransportRequest",
+        429,
+        Some("provider_http_429".into()),
+        "controlled failure".into(),
+        None,
+        &mut state,
+        None,
+        None,
+        Some(429),
+        None,
+        Some(&keys),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result.decision.action,
+        V3Error05ExecutionAction::Reselect,
+        "the eligible active default must remain a recovery successor: {:?}",
+        result.event
+    );
+    assert!(
+        result
+            .retry_selected
+            .as_ref()
+            .is_none_or(|next| next.active_selection.is_some()),
+        "an observed active successor must return through Target choice before preferred dispatch"
+    );
+    let excluded = expanded
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            state
+                .failed_candidates
+                .contains(&v3_relay_provider_candidate_key(candidate))
+        })
+        .map(V3TargetCandidate::active_key_identity)
+        .collect();
+    let active = V3ActiveKeySelectionContext {
+        listener_id: scope.server_id(),
+        session_id: Some("session"),
+        state: &keys,
+        excluded: &excluded,
+    };
+    let successor = select_v3_target_with_session_then_global(
+        &target,
+        expanded.clone(),
+        &scope,
+        &health.session_bound_availability(&scope),
+        &health,
+        state.failed_candidates,
+        1,
+        0,
+        Some(&active),
+    )
+    .unwrap();
+    assert_eq!(successor.occurrence.pool_id, "default");
+    assert!(
+        selection_invalidation(&successor, &expanded, Some(&keys), &health, &scope, 1).is_none()
+    );
+    let mut untagged = successor.clone();
+    untagged.active_selection = None;
+    assert!(
+        selection_invalidation(&untagged, &expanded, Some(&keys), &health, &scope, 1).is_some(),
+        "None must not bypass an active occurrence's dispatch guard"
+    );
+    let mut episode =
+        routecodex_v3_target::V3ActiveKeyEpisode::new(successor.active_selection.unwrap());
+    for _ in 0..4 {
+        episode.begin_attempt().unwrap();
+        keys.record_delivery_failure(&mut episode).unwrap();
+    }
+    let observed = observe_v3_target_successors(
+        &expanded,
+        &health.session_bound_availability(&scope),
+        &health,
+        state.failed_candidates,
+        &scope,
+        Some(&keys),
+        1,
+    );
+    assert!(
+        observed.is_empty(),
+        "held-only default cannot count as a health successor"
+    );
+    let mut failed = BTreeSet::new();
+    let mut retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut witness = None;
+    let mut held_state = V3RelayProviderFailurePolicyState {
+        failed_candidates: &mut failed,
+        same_candidate_retries: &mut retries,
+        trace: &mut trace,
+        last_external_http: &mut witness,
+    };
+    let held = run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(
+        &context,
+        selected,
+        "V3ProviderReqOutbound09TransportRequest",
+        429,
+        Some("provider_http_429".into()),
+        "controlled final failure".into(),
+        None,
+        &mut held_state,
+        None,
+        None,
+        Some(429),
+        None,
+        Some(&keys),
+    )
+    .await
+    .unwrap();
+    assert_eq!(held.event.health_record.state, "last_candidate_terminal");
+    assert_eq!(held.event.health_record.failure_count, 0);
+}
+
+#[test]
+fn active_dispatch_observes_health_changes_after_selection_without_spending_a_send() {
+    use routecodex_v3_config::{
+        V3ActiveKeyFailureAction, V3ActiveKeyMember, V3ActiveKeyPolicy, V3SelectionStrategy,
+    };
+    use routecodex_v3_target::{V3ActiveKeyEpisode, V3ActiveKeyScope, V3ActiveKeySelectionState};
+    let manifest = target_resolution_manifest("active-dispatch-health");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let V3RelayProviderTargetResolution::Selected(selected) = resolve_target(
+        &manifest,
+        "active-dispatch-health",
+        &BTreeSet::new(),
+        &health,
+    ) else {
+        panic!("healthy target");
+    };
+    let candidate = &selected.candidate;
+    let scope = V3ActiveKeyScope {
+        listener_id: "active-dispatch-health".into(),
+        routing_group_id: "active-dispatch-health".into(),
+        pool_id: "default".into(),
+    };
+    let keys = V3ActiveKeySelectionState::default();
+    let identity = candidate.active_key_identity();
+    keys.configure(
+        scope.clone(),
+        V3ActiveKeyPolicy {
+            members: vec![V3ActiveKeyMember {
+                provider: identity.provider_id.clone(),
+                alias: identity.auth_alias.clone(),
+            }],
+            retries: 3,
+            on_failure: V3ActiveKeyFailureAction::Hold,
+        },
+        V3SelectionStrategy::ActiveQueue,
+        &[identity.clone()],
+    )
+    .unwrap();
+    let selection = keys
+        .choose(
+            &scope,
+            &BTreeSet::from([identity]),
+            &BTreeSet::new(),
+            Some("session"),
+        )
+        .unwrap()
+        .unwrap();
+    let session = test_provider_failure_scope(
+        "active-dispatch-health",
+        "active-dispatch-health",
+        "session",
+    )
+    .unwrap();
+    assert!(
+        active_selection_invalidation(&selection, candidate, &keys, &health, &session, 1).is_none()
+    );
+    health
+        .store()
+        .record_provider_cooldown_failure(
+            &candidate.provider_id,
+            Some(&candidate.auth_alias),
+            Some(&candidate.model_id),
+            "health changed after planning",
+            2,
+            5000,
+        )
+        .unwrap();
+    let mut episode = V3ActiveKeyEpisode::new(selection);
+    if active_selection_invalidation(&episode.selection, candidate, &keys, &health, &session, 3)
+        .is_none()
+    {
+        episode.begin_attempt();
+    }
+    assert!(
+        !keys.accepted_success(&mut episode).unwrap(),
+        "a newly unavailable identity must not spend an actual send or accept success"
+    );
+}
+
+#[test]
+fn hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch() {
+    use routecodex_v3_config::{
+        V3ActiveKeyFailureAction, V3ActiveKeyMember, V3ActiveKeyPolicy, V3SelectionStrategy,
+    };
+    use routecodex_v3_target::{V3ActiveKeyEpisode, V3ActiveKeyScope, V3ActiveKeySelectionState};
+    let manifest =
+        global_pool_alive_manifest_with_rescue_timeout("post-acquire-selection", Some(60_000));
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let V3RelayProviderTargetResolution::Selected(mut selected) = resolve_target(
+        &manifest,
+        "post-acquire-selection",
+        &BTreeSet::new(),
+        &health,
+    ) else {
+        panic!("healthy target")
+    };
+    let identity = selected.candidate.active_key_identity();
+    let scope = V3ActiveKeyScope {
+        listener_id: "post-acquire-selection".into(),
+        routing_group_id: "post-acquire-selection".into(),
+        pool_id: "default".into(),
+    };
+    let keys = V3ActiveKeySelectionState::default();
+    keys.configure(
+        scope.clone(),
+        V3ActiveKeyPolicy {
+            members: vec![V3ActiveKeyMember {
+                provider: identity.provider_id.clone(),
+                alias: identity.auth_alias.clone(),
+            }],
+            retries: 3,
+            on_failure: V3ActiveKeyFailureAction::Hold,
+        },
+        V3SelectionStrategy::ActiveQueue,
+        &[identity.clone()],
+    )
+    .unwrap();
+    let selection = keys
+        .choose(
+            &scope,
+            &BTreeSet::from([identity.clone()]),
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+    selected.active_selection = Some(selection.clone());
+    let mut unsent = V3ActiveKeyEpisode::new(selection.clone());
+    let control = crate::execution_control::V3RequestExecutionControl::from_manifest(
+        &manifest,
+        "post-acquire-selection",
+    )
+    .unwrap();
+    health
+        .store()
+        .add_cooldown_entry_for_interface(
+            &identity.provider_id,
+            &identity.interface_id,
+            Some(&identity.auth_alias),
+            Some(&identity.model_id),
+            "probe",
+            1000,
+            1000,
+        )
+        .unwrap();
+    assert!(control
+        .acquire_business_recovery_trial(
+            &health.store(),
+            &identity.provider_id,
+            &identity.interface_id,
+            &identity.auth_alias,
+            &identity.model_id,
+            2000
+        )
+        .unwrap());
+    for _ in 0..4 {
+        let mut sibling = V3ActiveKeyEpisode::new(selection.clone());
+        sibling.begin_attempt().unwrap();
+        keys.record_delivery_failure(&mut sibling).unwrap();
+    }
+    assert!(
+        !begin_v3_active_dispatch(&selected, Some(&keys), Some(&mut unsent), &control, 2000)
+            .unwrap(),
+        "hold after acquisition must reject the unsent generation"
+    );
+    assert!(!keys.accepted_success(&mut unsent).unwrap());
+    let other = crate::execution_control::V3RequestExecutionControl::from_manifest(
+        &manifest,
+        "post-acquire-selection",
+    )
+    .unwrap();
+    assert!(
+        other
+            .acquire_business_recovery_trial(
+                &health.store(),
+                &identity.provider_id,
+                &identity.interface_id,
+                &identity.auth_alias,
+                &identity.model_id,
+                2000
+            )
+            .unwrap(),
+        "no-send rejection must release its trial without deferring cadence"
+    );
+}
+
 fn codec_failure_manifest(scope: &str) -> V3Config05ManifestPublished {
     let source = r#"
 version = 3
@@ -1150,9 +1572,13 @@ async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection
         &selected,
         &BTreeSet::from([selected_key.clone()]),
         1,
+        None,
     )
     .await;
-    let V3RelayProviderTargetResolution::Selected(reselected) = resolution else {
+    let V3RelayProviderSuccessorObservation::Resolution(V3RelayProviderTargetResolution::Selected(
+        reselected,
+    )) = resolution
+    else {
         panic!("provider failure must reselect from the full captured route pool");
     };
     assert_ne!(
