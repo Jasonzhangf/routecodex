@@ -1430,6 +1430,47 @@ mod tests {
     }
 
     #[test]
+    fn wire_strips_agent_message_encrypted_content_part_for_gpt_family_target() {
+        // Regression for sample openai-responses-router-gpt-6-luna-...-2981185-369:
+        // xingchiapi/gpt-6.1-sol returned HTTP 200
+        // "Encrypted function output content could not be decrypted or decoded"
+        // because the Responses Beta agent_message content carried a
+        // type=encrypted_content (Fernet host ciphertext) part. gpt-6.1-sol is a
+        // gpt-family model, so request-side cipher cleanup was skipped and the
+        // ciphertext leaked onto the provider wire. The Chat codec already drops
+        // these parts; the Responses wire must do the same for every target.
+        let mut target = target();
+        target.canonical_model_id = "gpt-6.1-sol".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type": "agent_message", "author": "/root", "recipient": "/worker",
+                 "content": [
+                    {"type": "input_text", "text": "Message Type: NEW_TASK"},
+                    {"type": "encrypted_content", "encrypted_content": "gAAAA_FERNET_HOST_CIPHER"}
+                 ]},
+                {"type": "message", "role": "user",
+                 "content": [{"type": "input_text", "text": "hi"}]}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-agent-message", target, body).unwrap();
+        let parts = wire.body()["input"][0]["content"].as_array().unwrap();
+        assert!(
+            parts
+                .iter()
+                .all(|p| p.get("type").and_then(|v| v.as_str()) != Some("encrypted_content")),
+            "agent_message encrypted_content ciphertext must not reach provider wire: {parts:?}"
+        );
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.get("text").and_then(|v| v.as_str()) == Some("Message Type: NEW_TASK")),
+            "visible input_text part must be preserved: {parts:?}"
+        );
+    }
+
+    #[test]
     fn wire_maps_summary_only_reasoning_to_content_for_non_gpt_target() {
         let mut target = target();
         target.canonical_model_id = "deepseek-v4-flash".into();
