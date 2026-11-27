@@ -18915,13 +18915,12 @@ async fn responses_direct_agent_message_encrypted_content_never_reaches_provider
         }]
     }))
     .unwrap();
-    let (provider_base_url, mut captures, shutdown) =
-        start_controlled_terminal_upstream_with_body(
-            StatusCode::OK,
-            "application/json",
-            provider_body,
-        )
-        .await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
     let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
         free_port(),
         free_port(),
@@ -18969,7 +18968,9 @@ async fn responses_direct_agent_message_encrypted_content_never_reaches_provider
         .iter()
         .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("agent_message"))
         .expect("agent_message must be forwarded to the provider wire");
-    let parts = agent["content"].as_array().expect("agent_message content array");
+    let parts = agent["content"]
+        .as_array()
+        .expect("agent_message content array");
     assert!(
         parts
             .iter()
@@ -18983,6 +18984,177 @@ async fn responses_direct_agent_message_encrypted_content_never_reaches_provider
             .any(|part| part.get("text").and_then(|v| v.as_str()) == Some("Message Type: NEW_TASK")),
         "visible input_text part must be preserved: {}",
         capture.body
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// Defense-in-depth for non-single-provider routes: even when the selected
+/// model is in the `gpt-*` family, a multi-provider route must strip
+/// `reasoning.encrypted_content` on the request side without injecting a
+/// synthetic `text` field, while a single-provider `gpt-*` route retains it.
+#[tokio::test]
+async fn responses_direct_multi_provider_gpt_strips_request_reasoning_encrypted_content() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("multi-provider-request-cipher-defense");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "multi-provider-cipher-key");
+    let provider_body = serde_json::to_vec(&json!({
+        "id": "resp_mp",
+        "object": "response",
+        "status": "completed",
+        "model": "gpt-6.1-sol",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "ok"}]
+        }]
+    }))
+    .unwrap();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
+    let port_multi = free_port();
+    let port_single = free_port();
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.multi]
+bind = "127.0.0.1"
+port = {port_multi}
+routing_group = "multi"
+endpoints = ["responses"]
+[servers.multi.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[servers.single]
+bind = "127.0.0.1"
+port = {port_single}
+routing_group = "single"
+endpoints = ["responses"]
+[servers.single.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[providers.primary]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "gpt-6.1-sol"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_PROTOCOL_DECISION_KEY" }}] }}
+[providers.primary.models."gpt-6.1-sol"]
+wire_name = "gpt-6.1-sol"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.secondary]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "gpt-6.1-sol"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_PROTOCOL_DECISION_KEY" }}] }}
+[providers.secondary.models."gpt-6.1-sol"]
+wire_name = "gpt-6.1-sol"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+
+[route_groups.multi.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+    {{ kind = "provider_model", provider = "primary", model = "gpt-6.1-sol", key = "key", priority = 1 }},
+    {{ kind = "provider_model", provider = "secondary", model = "gpt-6.1-sol", key = "key", priority = 2 }},
+]
+
+[route_groups.single.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+    {{ kind = "provider_model", provider = "primary", model = "gpt-6.1-sol", key = "key", priority = 1 }},
+]
+"#
+    );
+    let authored = routecodex_v3_config::parse_v3_config_02_authoring(&source).unwrap();
+    let manifest = routecodex_v3_config::compile_v3_config_05_manifest(authored).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let payload = json!({
+        "model": "gpt-6.1-sol",
+        "stream": false,
+        "input": [
+            {
+                "type": "reasoning",
+                "id": "rs_hist",
+                "summary": [{"type": "summary_text", "text": "visible"}],
+                "encrypted_content": "rsn_foreign_cipher"
+            },
+            {"role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+        ]
+    });
+
+    // 1. Multi-provider gpt route must strip reasoning.encrypted_content on request side.
+    let multi_res = client
+        .post(format!("http://127.0.0.1:{port_multi}/v1/responses"))
+        .header("accept", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .expect("multi-provider request must succeed");
+    assert_eq!(multi_res.status(), StatusCode::OK);
+    let multi_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("multi-provider attempt must reach upstream")
+        .expect("capture");
+    let multi_reasoning = &multi_capture.body["input"][0];
+    assert!(
+        multi_reasoning.get("encrypted_content").is_none(),
+        "multi-provider request must strip reasoning.encrypted_content: {}",
+        multi_capture.body
+    );
+    assert!(
+        multi_reasoning.get("text").is_none(),
+        "OpenAI Responses reasoning must not inject synthetic text field: {}",
+        multi_capture.body
+    );
+    assert_eq!(multi_reasoning["summary"][0]["text"], "visible");
+
+    // 2. Single-provider gpt route must retain reasoning.encrypted_content.
+    let single_res = client
+        .post(format!("http://127.0.0.1:{port_single}/v1/responses"))
+        .header("accept", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .expect("single-provider request must succeed");
+    assert_eq!(single_res.status(), StatusCode::OK);
+    let single_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("single-provider attempt must reach upstream")
+        .expect("capture");
+    assert_eq!(
+        single_capture.body["input"][0]["encrypted_content"], "rsn_foreign_cipher",
+        "single-provider gpt route must retain reasoning.encrypted_content"
     );
 
     handle.shutdown().await;
