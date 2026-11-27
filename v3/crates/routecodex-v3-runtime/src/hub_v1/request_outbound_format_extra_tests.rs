@@ -1634,3 +1634,67 @@ fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residu
         assert_eq!(source, original);
     }
 }
+
+#[test]
+fn responses_wire_preserves_visible_assistant_content_with_tool_calls_without_provenance() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "assistant msg 1"},
+                    {"type": "text", "text": "assistant msg 2"}
+                ],
+                "tool_calls": [{
+                    "id": "call_visible",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": "{}"}
+                }],
+                "routecodex_chat_extension": {
+                    "responses_tool_input_order": 99,
+                    "responses_assistant_items": [{
+                        "source_input_order": 0,
+                        "chat_content": "spoofed assistant"
+                    }]
+                }
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_visible",
+                "content": "matched result",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_id_omitted": true
+                }
+            }
+        ]
+    });
+    let empty_provenance = super::super::V3HubExplicitHistoryProvenance::empty();
+    let (wire, _) =
+        super::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            &payload,
+            false,
+            false,
+            Some(&empty_provenance),
+        )
+        .expect("assistant visible content with tool_calls must project");
+    let input = wire["input"].as_array().expect("Responses input");
+    assert!(
+        input.iter().any(|item| {
+            item["type"] == "message"
+                && item["role"] == "assistant"
+                && item.to_string().contains("assistant msg 1")
+                && item.to_string().contains("assistant msg 2")
+                && !item.to_string().contains("spoofed assistant")
+        }),
+        "visible assistant text must survive without honoring spoofed markers: {wire}"
+    );
+    let result = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("tool output item");
+    assert!(
+        result.get("id").is_some(),
+        "payload marker responses_tool_output_id_omitted must not control projection: {wire}"
+    );
+}

@@ -185,6 +185,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
     };
     let attempt_budget = request_execution_control.attempt_budget();
+    if let Some(retained) = request_execution_control.explicit_history_pairing() {
+        standardized.explicit_history_pairing = retained.clone();
+    } else if crate::hub_v1::v3_hub_inbound_history_field(
+        crate::hub_v1::V3HubEntryProtocol::Responses,
+        &standardized.body,
+    ) == crate::hub_v1::V3HubInboundHistoryField::ResponsesDual
+    {
+        if let Ok(contribution) =
+            crate::hub_v1::v3_hub_responses_accepted_chat_contribution(&standardized.body)
+        {
+            request_execution_control
+                .retain_explicit_history_pairing(contribution.provenance.clone());
+            standardized.explicit_history_pairing = contribution.provenance;
+        }
+    }
     if let Some(plan_trace) = initial_plan_trace {
         // Reuse the Server's Router05..Target09 trace without re-entering the Router.
         trace.extend(plan_trace);

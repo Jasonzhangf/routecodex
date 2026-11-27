@@ -1,3 +1,7 @@
+use super::req_inbound_02_normalized::{
+    V3HubAssistantItemProvenance, V3HubExplicitHistoryProvenance, V3HubMessageHistoryProvenance,
+    V3HubToolCallHistoryProvenance,
+};
 use super::V3HubEntryProtocol;
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
@@ -14,7 +18,18 @@ pub(super) use tool_output::{
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
 ) -> Result<Value, String> {
-    build_v3_chat_canonical_request_from_responses_semantic(payload, V3HubEntryProtocol::Responses)
+    build_v3_chat_canonical_request_from_responses_payload_with_provenance(payload)
+        .map(|(request, _)| request)
+}
+
+pub(crate) fn build_v3_chat_canonical_request_from_responses_payload_with_provenance(
+    payload: &Value,
+) -> Result<(Value, V3HubExplicitHistoryProvenance), String> {
+    build_v3_chat_canonical_request_from_responses_semantic_with_orphan_resolution(
+        payload,
+        V3HubEntryProtocol::Responses,
+        true,
+    )
 }
 
 pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
@@ -26,13 +41,14 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
         entry_protocol,
         true,
     )
+    .map(|(request, _)| request)
 }
 
 pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orphan_resolution(
     payload: &Value,
     entry_protocol: V3HubEntryProtocol,
     resolve_orphan_media: bool,
-) -> Result<Value, String> {
+) -> Result<(Value, V3HubExplicitHistoryProvenance), String> {
     let native_responses = entry_protocol == V3HubEntryProtocol::Responses;
     let root = payload.as_object().ok_or_else(|| {
         "Responses request payload must be an object before OpenAI Chat encoding".to_string()
@@ -52,9 +68,11 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
         }
     };
     let mut messages = Vec::new();
+    let mut message_provenance: Vec<V3HubMessageHistoryProvenance> = Vec::new();
     let mut pending_tool_message_index: Option<usize> = None;
     let mut pending_tool_call_ids: Vec<String> = Vec::new();
     let mut pending_tool_adjacent_deferred_messages: Vec<Value> = Vec::new();
+    let mut pending_deferred_provenance: Vec<V3HubMessageHistoryProvenance> = Vec::new();
     let mut turn_assistant_tail_index: Option<usize> = None;
     if let Some(instructions) = root
         .get("instructions")
@@ -63,6 +81,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
         .filter(|value| !value.is_empty())
     {
         messages.push(json!({"role":"system","content":instructions}));
+        message_provenance.push(V3HubMessageHistoryProvenance::default());
     }
 
     // The declaration registry owns the current declaration surface. It merges
@@ -122,18 +141,27 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     .unwrap_or("user")
                     .trim()
                     .eq_ignore_ascii_case("assistant");
-                let mut message = build_v3_openai_chat_message_from_responses_message(item)?;
+                let message = build_v3_openai_chat_message_from_responses_message(item)?;
+                let mut prov = V3HubMessageHistoryProvenance::default();
                 if native_responses {
-                    set_v3_responses_tool_input_order(&mut message, input_index);
+                    prov.message_input_order = Some(input_index as u64);
                     if is_assistant_message {
-                        record_v3_responses_assistant_item(&mut message, item, input_index);
+                        prov.assistant_items
+                            .push(build_v3_responses_assistant_item_provenance(
+                                &message,
+                                item,
+                                input_index,
+                            ));
                     }
                 }
-                append_v3_openai_chat_message_preserving_tool_adjacency(
+                append_v3_openai_chat_message_preserving_tool_adjacency_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_adjacent_deferred_messages,
+                    &mut pending_deferred_provenance,
                     message,
+                    prov,
                     turn_assistant_tail_index,
                 )?;
                 if is_assistant_message {
@@ -143,16 +171,25 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                 }
             }
             "output_text" => {
-                let mut message = build_v3_openai_chat_assistant_output_text_message(item);
+                let message = build_v3_openai_chat_assistant_output_text_message(item);
+                let mut prov = V3HubMessageHistoryProvenance::default();
                 if native_responses {
-                    set_v3_responses_tool_input_order(&mut message, input_index);
-                    record_v3_responses_assistant_item(&mut message, item, input_index);
+                    prov.message_input_order = Some(input_index as u64);
+                    prov.assistant_items
+                        .push(build_v3_responses_assistant_item_provenance(
+                            &message,
+                            item,
+                            input_index,
+                        ));
                 }
-                append_v3_openai_chat_message_preserving_tool_adjacency(
+                append_v3_openai_chat_message_preserving_tool_adjacency_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_adjacent_deferred_messages,
+                    &mut pending_deferred_provenance,
                     message,
+                    prov,
                     turn_assistant_tail_index,
                 )?;
                 turn_assistant_tail_index = Some(messages.len() - 1);
@@ -176,30 +213,43 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     }
                 }
                 if let Some(mut message) = build_v3_openai_chat_assistant_reasoning_message(item) {
+                    let mut prov = V3HubMessageHistoryProvenance::default();
                     if native_responses {
-                        attach_v3_responses_reasoning_input_order(&mut message, item, input_index);
+                        prov.reasoning_item_orders = attach_v3_responses_reasoning_input_order(
+                            &mut message,
+                            item,
+                            input_index,
+                        );
                     }
-                    append_v3_openai_chat_message_preserving_tool_adjacency(
+                    append_v3_openai_chat_message_preserving_tool_adjacency_with_provenance(
                         &mut messages,
+                        &mut message_provenance,
                         &mut pending_tool_message_index,
                         &mut pending_tool_adjacent_deferred_messages,
+                        &mut pending_deferred_provenance,
                         message,
+                        prov,
                         turn_assistant_tail_index,
                     )?;
                     turn_assistant_tail_index = Some(messages.len() - 1);
                 }
             }
             "function_call" | "tool_call" | "custom_tool_call" => {
-                let mut message = build_v3_openai_chat_assistant_tool_call_message(item)?;
-                if native_responses {
-                    message["tool_calls"][0]["routecodex_chat_extension"]
-                        ["responses_tool_input_order"] = json!(input_index);
-                }
-                append_v3_openai_chat_tool_call_message(
+                let message = build_v3_openai_chat_assistant_tool_call_message(item)?;
+                let prov = V3HubMessageHistoryProvenance {
+                    tool_calls: vec![V3HubToolCallHistoryProvenance {
+                        source_input_order: native_responses.then_some(input_index as u64),
+                        suppress_responses_hosted_call: false,
+                    }],
+                    ..Default::default()
+                };
+                append_v3_openai_chat_tool_call_message_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     message,
+                    prov,
                     turn_assistant_tail_index,
                 )?;
                 turn_assistant_tail_index = None;
@@ -209,25 +259,34 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
             | "custom_tool_call_output"
             | "tool_result"
             | "tool_message" => {
-                let mut message = build_v3_openai_chat_tool_result_message(item, native_responses)?;
-                if native_responses {
-                    set_v3_responses_tool_input_order(&mut message, input_index);
-                }
-                append_v3_openai_chat_tool_result_message(
+                let message = build_v3_openai_chat_tool_result_message(item, native_responses)?;
+                let prov = V3HubMessageHistoryProvenance {
+                    message_input_order: native_responses.then_some(input_index as u64),
+                    omit_tool_output_id: native_responses
+                        && read_v3_non_empty_str(item.get("id")).is_none(),
+                    preserve_native_tool_output_id: native_responses,
+                    ..Default::default()
+                };
+                append_v3_openai_chat_tool_result_message_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     &mut pending_tool_adjacent_deferred_messages,
+                    &mut pending_deferred_provenance,
                     message,
+                    prov,
                 )?;
                 turn_assistant_tail_index = None;
             }
             "web_search_call" => {
                 append_v3_openai_chat_hosted_tool_call_history_pair(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     &mut pending_tool_adjacent_deferred_messages,
+                    &mut pending_deferred_provenance,
                     item,
                     input_index,
                     V3OpenAiChatHostedToolHistoryKind::WebSearch,
@@ -236,7 +295,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                 turn_assistant_tail_index = None;
             }
             "tool_search_call" => {
-                let mut assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
+                let assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
                     item,
                     read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
                         "Responses tool_search_call is missing call_id before Chat canonicalization"
@@ -244,15 +303,20 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     })?,
                     V3OpenAiChatHostedToolHistoryKind::ToolSearch,
                 )?;
-                if native_responses {
-                    assistant["tool_calls"][0]["routecodex_chat_extension"]
-                        ["responses_tool_input_order"] = json!(input_index);
-                }
-                append_v3_openai_chat_tool_call_message(
+                let prov = V3HubMessageHistoryProvenance {
+                    tool_calls: vec![V3HubToolCallHistoryProvenance {
+                        source_input_order: native_responses.then_some(input_index as u64),
+                        suppress_responses_hosted_call: false,
+                    }],
+                    ..Default::default()
+                };
+                append_v3_openai_chat_tool_call_message_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     assistant,
+                    prov,
                     None,
                 )?;
                 turn_assistant_tail_index = None;
@@ -268,16 +332,20 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     ));
                 }
                 let tool_result = build_v3_openai_chat_tool_search_output_message(item)?;
-                let mut tool_result = tool_result;
-                if native_responses {
-                    set_v3_responses_tool_input_order(&mut tool_result, input_index);
-                }
-                append_v3_openai_chat_tool_result_message(
+                let prov = V3HubMessageHistoryProvenance {
+                    message_input_order: native_responses.then_some(input_index as u64),
+                    preserve_native_tool_output_id: native_responses,
+                    ..Default::default()
+                };
+                append_v3_openai_chat_tool_result_message_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     &mut pending_tool_adjacent_deferred_messages,
+                    &mut pending_deferred_provenance,
                     tool_result,
+                    prov,
                 )?;
             }
             "agent_message" => {
@@ -308,15 +376,19 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                         .or(item.get("content"))
                         .or(Some(&Value::Null)),
                 )?;
-                let mut message = json!({"role": "user", "content": content});
-                if native_responses {
-                    set_v3_responses_tool_input_order(&mut message, input_index);
-                }
-                append_v3_openai_chat_message_preserving_tool_adjacency(
+                let message = json!({"role": "user", "content": content});
+                let prov = V3HubMessageHistoryProvenance {
+                    message_input_order: native_responses.then_some(input_index as u64),
+                    ..Default::default()
+                };
+                append_v3_openai_chat_message_preserving_tool_adjacency_with_provenance(
                     &mut messages,
+                    &mut message_provenance,
                     &mut pending_tool_message_index,
                     &mut pending_tool_adjacent_deferred_messages,
+                    &mut pending_deferred_provenance,
                     message,
+                    prov,
                     turn_assistant_tail_index,
                 )?;
                 turn_assistant_tail_index = None;
@@ -336,8 +408,16 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
         }
     }
     messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
+    message_provenance.extend(std::mem::take(&mut pending_deferred_provenance));
+    let provenance = if native_responses {
+        V3HubExplicitHistoryProvenance {
+            message_entries: message_provenance,
+        }
+    } else {
+        V3HubExplicitHistoryProvenance::empty()
+    };
     if native_responses && resolve_orphan_media {
-        resolve_orphan_responses_tool_output_media(&mut messages);
+        resolve_orphan_responses_tool_output_media(&mut messages, &provenance);
     }
     if messages.is_empty() {
         return Err("OpenAI Chat provider encoding produced no messages".to_string());
@@ -429,7 +509,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
         request.insert("top_logprobs".to_string(), value.clone());
     }
     project_responses_reasoning_to_chat_fields(root, &mut request)?;
-    Ok(Value::Object(request))
+    Ok((Value::Object(request), provenance))
 }
 
 fn project_responses_reasoning_to_chat_fields(
@@ -506,36 +586,24 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
-fn set_v3_responses_tool_input_order(message: &mut Value, input_index: usize) {
-    message["routecodex_chat_extension"]["responses_tool_input_order"] = json!(input_index);
-}
-
-fn record_v3_responses_assistant_item(
-    message: &mut Value,
+fn build_v3_responses_assistant_item_provenance(
+    message: &Value,
     item: &Map<String, Value>,
     input_index: usize,
-) {
-    let mut entry = Map::new();
-    entry.insert("source_input_order".to_string(), json!(input_index));
-    entry.insert(
-        "chat_content".to_string(),
-        message.get("content").cloned().unwrap_or(Value::Null),
-    );
-    if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
-        entry.insert("id".to_string(), Value::String(item_id.to_string()));
+) -> V3HubAssistantItemProvenance {
+    V3HubAssistantItemProvenance {
+        source_input_order: Some(input_index as u64),
+        chat_content: message.get("content").cloned().unwrap_or(Value::Null),
+        id: read_v3_non_empty_str(item.get("id")).map(str::to_string),
+        status: item.get("status").filter(|value| !value.is_null()).cloned(),
     }
-    if let Some(status) = item.get("status").filter(|value| !value.is_null()) {
-        entry.insert("status".to_string(), status.clone());
-    }
-    message["routecodex_chat_extension"][RESPONSES_ASSISTANT_ITEMS_EXTENSION] =
-        json!([Value::Object(entry)]);
 }
 
 fn attach_v3_responses_reasoning_input_order(
     message: &mut Value,
     item: &Map<String, Value>,
     input_index: usize,
-) {
+) -> Vec<Option<u64>> {
     let mut decoder_entry = Map::new();
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         decoder_entry.insert("id".to_string(), Value::String(item_id.to_string()));
@@ -581,44 +649,43 @@ fn attach_v3_responses_reasoning_input_order(
         .get_mut("routecodex_chat_extension")
         .and_then(Value::as_object_mut)
     else {
-        return;
+        return Vec::new();
     };
     let mut ordered = extension
         .get(RESPONSES_REASONING_ITEMS_EXTENSION)
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
-        if let Some(existing) = ordered.iter_mut().find(|entry| entry["id"] == item_id) {
-            if let Some(object) = existing.as_object_mut() {
-                object.insert("source_input_order".to_string(), json!(input_index));
-            }
-        } else {
-            decoder_entry.insert("source_input_order".to_string(), json!(input_index));
+    let orders = if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
+        if !ordered.iter().any(|entry| entry["id"] == item_id) {
             ordered.push(Value::Object(decoder_entry));
         }
+        ordered
+            .iter()
+            .map(|entry| (entry["id"] == item_id).then_some(input_index as u64))
+            .collect()
     } else if !decoder_entry.is_empty() || ordered.is_empty() {
-        decoder_entry.insert("source_input_order".to_string(), json!(input_index));
+        let mut orders = vec![None; ordered.len()];
         ordered.push(Value::Object(decoder_entry));
+        orders.push(Some(input_index as u64));
+        orders
     } else {
-        for entry in &mut ordered {
-            if let Some(object) = entry.as_object_mut() {
-                object
-                    .entry("source_input_order".to_string())
-                    .or_insert_with(|| json!(input_index));
-            }
-        }
-    }
+        vec![Some(input_index as u64); ordered.len()]
+    };
     extension.insert(
         RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
         Value::Array(ordered),
     );
+    orders
 }
 
-pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value]) {
+pub(super) fn resolve_orphan_responses_tool_output_media(
+    messages: &mut [Value],
+    provenance: &V3HubExplicitHistoryProvenance,
+) {
     let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
         std::collections::HashMap::new();
-    for message in messages {
+    for (msg_idx, message) in messages.iter_mut().enumerate() {
         let is_tool_row = message.get("role").and_then(Value::as_str) == Some("tool");
         let is_named_output_row = message
             .pointer("/routecodex_chat_extension/responses_tool_output_name")
@@ -628,9 +695,7 @@ pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value])
             let call_id = is_tool_row
                 .then(|| message.get("tool_call_id").and_then(Value::as_str))
                 .flatten();
-            let output_order = message
-                .pointer("/routecodex_chat_extension/responses_tool_input_order")
-                .and_then(Value::as_u64);
+            let output_order = provenance.message_order(msg_idx);
             let paired = call_id.is_some_and(|id| {
                 seen_calls.get(id).is_some_and(|call_orders| {
                     call_orders
@@ -652,8 +717,11 @@ pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value])
                 }
             }
         }
-        for (call_id, call_order) in collect_v3_openai_chat_tool_calls_with_order(message) {
-            seen_calls.entry(call_id).or_default().push(call_order);
+        for (call_idx, call_id) in collect_v3_openai_chat_tool_call_ids_with_indices(message) {
+            seen_calls
+                .entry(call_id)
+                .or_default()
+                .push(provenance.tool_call_order(msg_idx, call_idx));
         }
     }
 }
@@ -665,6 +733,31 @@ pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
     message: Value,
     turn_assistant_tail_index: Option<usize>,
 ) -> Result<(), String> {
+    let mut unused_provenance = Vec::new();
+    let mut unused_deferred_provenance = Vec::new();
+    append_v3_openai_chat_message_preserving_tool_adjacency_with_provenance(
+        messages,
+        &mut unused_provenance,
+        pending_tool_message_index,
+        pending_tool_adjacent_deferred_messages,
+        &mut unused_deferred_provenance,
+        message,
+        V3HubMessageHistoryProvenance::default(),
+        turn_assistant_tail_index,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_v3_openai_chat_message_preserving_tool_adjacency_with_provenance(
+    messages: &mut Vec<Value>,
+    message_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
+    pending_tool_message_index: &mut Option<usize>,
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
+    pending_deferred_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
+    message: Value,
+    provenance: V3HubMessageHistoryProvenance,
+    turn_assistant_tail_index: Option<usize>,
+) -> Result<(), String> {
     if let Some(index) = *pending_tool_message_index {
         let role = message
             .get("role")
@@ -672,10 +765,17 @@ pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
             .unwrap_or("user")
             .trim();
         if role.eq_ignore_ascii_case("assistant") {
-            merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
+            merge_v3_openai_chat_message_into_pending_tool_message(
+                messages,
+                message_provenance,
+                index,
+                &message,
+                provenance,
+            )?;
             return Ok(());
         }
         pending_tool_adjacent_deferred_messages.push(message);
+        pending_deferred_provenance.push(provenance);
         return Ok(());
     } else if let Some(tail_index) = turn_assistant_tail_index {
         let role = message
@@ -691,37 +791,62 @@ pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
                 message.get("content").unwrap_or(&Value::Null),
             ))
         {
-            merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
+            merge_v3_openai_chat_message_into_pending_tool_message(
+                messages,
+                message_provenance,
+                tail_index,
+                &message,
+                provenance,
+            )?;
             return Ok(());
         }
     }
     messages.push(message);
+    message_provenance.push(provenance);
     Ok(())
 }
-fn append_v3_openai_chat_tool_call_message(
+
+fn append_v3_openai_chat_tool_call_message_with_provenance(
     messages: &mut Vec<Value>,
+    message_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
     message: Value,
+    provenance: V3HubMessageHistoryProvenance,
     turn_assistant_tail_index: Option<usize>,
 ) -> Result<(), String> {
     let call_ids = collect_v3_openai_chat_tool_call_ids(&message);
     if call_ids.is_empty() {
         messages.push(message);
+        message_provenance.push(provenance);
         return Ok(());
     }
     if let Some(index) = *pending_tool_message_index {
-        merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
+        merge_v3_openai_chat_message_into_pending_tool_message(
+            messages,
+            message_provenance,
+            index,
+            &message,
+            provenance,
+        )?;
     } else if let Some(tail_index) = turn_assistant_tail_index {
         if messages.len() == tail_index + 1 {
-            merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
+            merge_v3_openai_chat_message_into_pending_tool_message(
+                messages,
+                message_provenance,
+                tail_index,
+                &message,
+                provenance,
+            )?;
             *pending_tool_message_index = Some(tail_index);
         } else {
             messages.push(message);
+            message_provenance.push(provenance);
             *pending_tool_message_index = Some(messages.len() - 1);
         }
     } else {
         messages.push(message);
+        message_provenance.push(provenance);
         *pending_tool_message_index = Some(messages.len() - 1);
     }
     for call_id in call_ids {
@@ -731,12 +856,17 @@ fn append_v3_openai_chat_tool_call_message(
     }
     Ok(())
 }
-fn append_v3_openai_chat_tool_result_message(
+
+#[allow(clippy::too_many_arguments)]
+fn append_v3_openai_chat_tool_result_message_with_provenance(
     messages: &mut Vec<Value>,
+    message_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
     pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
+    pending_deferred_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
     message: Value,
+    provenance: V3HubMessageHistoryProvenance,
 ) -> Result<(), String> {
     let call_id = message
         .get("tool_call_id")
@@ -750,21 +880,27 @@ fn append_v3_openai_chat_tool_result_message(
             .position(|entry| entry == &call_id)
         {
             messages.push(message);
+            message_provenance.push(provenance);
             pending_tool_call_ids.remove(position);
             if pending_tool_call_ids.is_empty() {
                 *pending_tool_message_index = None;
                 messages.extend(std::mem::take(pending_tool_adjacent_deferred_messages));
+                message_provenance.extend(std::mem::take(pending_deferred_provenance));
             }
             return Ok(());
         }
     }
     messages.push(message);
+    message_provenance.push(provenance);
     Ok(())
 }
+
 fn merge_v3_openai_chat_message_into_pending_tool_message(
     messages: &mut [Value],
+    message_provenance: &mut [V3HubMessageHistoryProvenance],
     index: usize,
     source: &Value,
+    source_provenance: V3HubMessageHistoryProvenance,
 ) -> Result<(), String> {
     let target = messages
         .get_mut(index)
@@ -772,6 +908,21 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         .ok_or_else(|| {
             "OpenAI Chat provider encoding pending tool message is not an object".to_string()
         })?;
+    if let Some(target_prov) = message_provenance.get_mut(index) {
+        if target_prov.message_input_order.is_none() {
+            target_prov.message_input_order = source_provenance.message_input_order;
+        }
+        target_prov.tool_calls.extend(source_provenance.tool_calls);
+        target_prov
+            .reasoning_item_orders
+            .extend(source_provenance.reasoning_item_orders);
+        target_prov
+            .assistant_items
+            .extend(source_provenance.assistant_items);
+        target_prov.omit_tool_output_id |= source_provenance.omit_tool_output_id;
+        target_prov.preserve_native_tool_output_id |=
+            source_provenance.preserve_native_tool_output_id;
+    }
     if let Some(source_tool_calls) = source.get("tool_calls").and_then(Value::as_array) {
         let target_tool_calls = target
             .entry("tool_calls".to_string())
@@ -816,13 +967,6 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let existing_assistant_items = target
-            .get("routecodex_chat_extension")
-            .and_then(Value::as_object)
-            .and_then(|extension| extension.get(RESPONSES_ASSISTANT_ITEMS_EXTENSION))
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
         let existing_signature = target
             .get("routecodex_chat_extension")
             .and_then(Value::as_object)
@@ -836,13 +980,6 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         if let Some(source_items) = source_items {
             ordered_items.extend(source_items.iter().cloned());
         }
-        let source_assistant_items = source_extension
-            .get(RESPONSES_ASSISTANT_ITEMS_EXTENSION)
-            .and_then(Value::as_array);
-        let mut ordered_assistant_items = existing_assistant_items;
-        if let Some(source_assistant_items) = source_assistant_items {
-            ordered_assistant_items.extend(source_assistant_items.iter().cloned());
-        }
         if let Some(extension) = target
             .get_mut("routecodex_chat_extension")
             .and_then(Value::as_object_mut)
@@ -851,12 +988,6 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
                 extension.insert(
                     RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
                     Value::Array(ordered_items),
-                );
-            }
-            if !ordered_assistant_items.is_empty() {
-                extension.insert(
-                    RESPONSES_ASSISTANT_ITEMS_EXTENSION.to_string(),
-                    Value::Array(ordered_assistant_items),
                 );
             }
             if let Some(signature) = existing_signature {
@@ -940,22 +1071,23 @@ fn v3_openai_chat_message_has_visible_payload(message: &Value) -> bool {
 }
 
 pub(super) fn collect_v3_openai_chat_tool_call_ids(message: &Value) -> Vec<String> {
-    collect_v3_openai_chat_tool_calls_with_order(message)
+    collect_v3_openai_chat_tool_call_ids_with_indices(message)
         .into_iter()
-        .map(|(id, _)| id)
+        .map(|(_, id)| id)
         .collect()
 }
 
-pub(super) fn collect_v3_openai_chat_tool_calls_with_order(
+pub(super) fn collect_v3_openai_chat_tool_call_ids_with_indices(
     message: &Value,
-) -> Vec<(String, Option<u64>)> {
+) -> Vec<(usize, String)> {
     message
         .get("tool_calls")
         .and_then(Value::as_array)
         .map(|tool_calls| {
             tool_calls
                 .iter()
-                .filter_map(|call| {
+                .enumerate()
+                .filter_map(|(index, call)| {
                     let call_id = call
                         .get("id")
                         .or_else(|| call.get("call_id"))
@@ -964,10 +1096,7 @@ pub(super) fn collect_v3_openai_chat_tool_calls_with_order(
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_string)?;
-                    let order = call
-                        .pointer("/routecodex_chat_extension/responses_tool_input_order")
-                        .and_then(Value::as_u64);
-                    Some((call_id, order))
+                    Some((index, call_id))
                 })
                 .collect::<Vec<_>>()
         })
@@ -986,11 +1115,12 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
     build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat_with_orphan_resolution(
         payload, true,
     )
+    .map(|(request, _)| request)
 }
 
-pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_merge(
+pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_merge_with_provenance(
     payload: &Value,
-) -> Result<Value, String> {
+) -> Result<(Value, V3HubExplicitHistoryProvenance), String> {
     build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat_with_orphan_resolution(
         payload, false,
     )
@@ -999,8 +1129,8 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_merge(
 fn build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat_with_orphan_resolution(
     payload: &Value,
     resolve_orphan_media: bool,
-) -> Result<Value, String> {
-    let mut request =
+) -> Result<(Value, V3HubExplicitHistoryProvenance), String> {
+    let (mut request, provenance) =
         build_v3_chat_canonical_request_from_responses_semantic_with_orphan_resolution(
             payload,
             V3HubEntryProtocol::Responses,
@@ -1015,7 +1145,7 @@ fn build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
             normalize_v3_codex_integer_tool_schema(tool);
         }
     }
-    Ok(request)
+    Ok((request, provenance))
 }
 
 /// Convert a finalized Responses `message` output item into a canonical Chat
@@ -1408,11 +1538,6 @@ fn build_v3_openai_chat_tool_result_message(
     extension.insert("responses_tool_output_type".to_string(), json!(item_type));
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
-    } else if native_responses {
-        extension.insert(
-            "responses_tool_output_id_omitted".to_string(),
-            Value::Bool(true),
-        );
     }
     if native_responses
         && matches!(
@@ -1540,43 +1665,59 @@ impl V3OpenAiChatHostedToolHistoryKind {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_v3_openai_chat_hosted_tool_call_history_pair(
     messages: &mut Vec<Value>,
+    message_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
     pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
+    pending_deferred_provenance: &mut Vec<V3HubMessageHistoryProvenance>,
     item: &Map<String, Value>,
     input_index: usize,
     kind: V3OpenAiChatHostedToolHistoryKind,
     native_responses: bool,
 ) -> Result<(), String> {
     let call_id = build_v3_openai_chat_hosted_tool_history_call_id(item, input_index, kind);
-    let mut assistant =
+    let assistant =
         build_v3_openai_chat_hosted_tool_assistant_tool_call_message(item, call_id.as_str(), kind)?;
-    if native_responses {
-        assistant["tool_calls"][0]["routecodex_chat_extension"]["responses_tool_input_order"] =
-            json!(input_index);
-    }
+    let assistant_prov = V3HubMessageHistoryProvenance {
+        tool_calls: vec![V3HubToolCallHistoryProvenance {
+            source_input_order: native_responses.then_some(input_index as u64),
+            suppress_responses_hosted_call: native_responses
+                && matches!(kind, V3OpenAiChatHostedToolHistoryKind::WebSearch),
+        }],
+        ..Default::default()
+    };
     let mut tool_result =
         build_v3_openai_chat_hosted_tool_result_message(item, call_id.as_str(), kind)?;
     if native_responses {
-        set_v3_responses_tool_input_order(&mut tool_result, input_index);
         tool_result["routecodex_chat_extension"]["responses_tool_output_type"] =
             json!(kind.responses_item_type());
     }
-    append_v3_openai_chat_tool_call_message(
+    let result_prov = V3HubMessageHistoryProvenance {
+        message_input_order: native_responses.then_some(input_index as u64),
+        preserve_native_tool_output_id: native_responses,
+        ..Default::default()
+    };
+    append_v3_openai_chat_tool_call_message_with_provenance(
         messages,
+        message_provenance,
         pending_tool_message_index,
         pending_tool_call_ids,
         assistant,
+        assistant_prov,
         None,
     )?;
-    append_v3_openai_chat_tool_result_message(
+    append_v3_openai_chat_tool_result_message_with_provenance(
         messages,
+        message_provenance,
         pending_tool_message_index,
         pending_tool_call_ids,
         pending_tool_adjacent_deferred_messages,
+        pending_deferred_provenance,
         tool_result,
+        result_prov,
     )
 }
 

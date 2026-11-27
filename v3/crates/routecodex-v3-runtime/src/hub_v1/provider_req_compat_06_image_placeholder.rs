@@ -105,12 +105,12 @@ fn project_tool_output_parts(
             project(part);
         }
     } else if let Some(text) = output.as_str() {
-        if is_v3_inline_image_reference(text) {
-            *output = json!(IMAGE_PLACEHOLDER);
-            return;
-        }
         // Unpaired native Responses strings remain literal.
         if !project_string_parts {
+            return;
+        }
+        if is_v3_inline_image_reference(text) {
+            *output = json!(IMAGE_PLACEHOLDER);
             return;
         }
         // Responses may carry the tool's content-part array as JSON text.
@@ -272,14 +272,19 @@ mod provider_req_compat_06_image_placeholder_tests {
         );
         let mut payload = json!({"input":[
             {"type":"function_call_output","call_id":"image","output":"data:image/png;base64,AAAA"},
-            {"type":"function_call_output","call_id":"array","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_file","file_id":"file-123"}]}
+            {"type":"function_call_output","call_id":"array","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_file","file_id":"file-123"}]},
+            {"type":"function_call","call_id":"paired_bare","name":"read_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"paired_bare","output":"data:image/png;base64,AAAA"}
         ]});
         project_default_text_attempt_images_with_policy(
             &mut payload,
             V3HubProviderWireProtocol::Responses,
             true,
         );
-        assert_eq!(payload["input"][0]["output"], "[Image]");
+        assert_eq!(
+            payload["input"][0]["output"], "data:image/png;base64,AAAA",
+            "unpaired bare data:image URI must stay literal in Responses Relay"
+        );
         assert_eq!(
             payload["input"][1]["output"],
             json!([
@@ -287,6 +292,19 @@ mod provider_req_compat_06_image_placeholder_tests {
                 {"type":"input_file","file_id":"file-123"}
             ])
         );
+        assert_eq!(
+            payload["input"][3]["output"], "[Image]",
+            "paired bare data:image URI must project to [Image]"
+        );
+
+        let mut direct_bare_payload = json!({"input":[
+            {"type":"function_call_output","call_id":"image","output":"data:image/png;base64,AAAA"}
+        ]});
+        project_default_text_attempt_images(
+            &mut direct_bare_payload,
+            V3HubProviderWireProtocol::Responses,
+        );
+        assert_eq!(direct_bare_payload["input"][0]["output"], "[Image]");
 
         let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
         let mut same_id_later_call = json!({"input":[

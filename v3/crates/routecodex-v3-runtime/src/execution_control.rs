@@ -122,6 +122,8 @@ pub struct V3RequestExecutionControl {
     refill_excluded_candidates: Arc<Mutex<BTreeSet<String>>>,
     business_recovery_trial: Arc<Mutex<Option<V3BusinessRecoveryTrialGuard>>>,
     compaction_generation: Arc<std::sync::OnceLock<u64>>,
+    explicit_history_pairing:
+        Arc<std::sync::OnceLock<crate::hub_v1::V3HubExplicitHistoryProvenance>>,
     pub(crate) image_history: Option<crate::image_history::V3ImageHistoryView>,
 }
 
@@ -205,8 +207,22 @@ impl V3RequestExecutionControl {
             business_recovery_trial: Arc::new(Mutex::new(None)),
             failure: Arc::default(),
             compaction_generation: Arc::default(),
+            explicit_history_pairing: Arc::default(),
             image_history: None,
         })
+    }
+
+    pub(crate) fn retain_explicit_history_pairing(
+        &self,
+        provenance: crate::hub_v1::V3HubExplicitHistoryProvenance,
+    ) {
+        let _ = self.explicit_history_pairing.set(provenance);
+    }
+
+    pub(crate) fn explicit_history_pairing(
+        &self,
+    ) -> Option<&crate::hub_v1::V3HubExplicitHistoryProvenance> {
+        self.explicit_history_pairing.get()
     }
 
     pub(crate) fn retain_compaction_generation(&self, observed: Option<u64>) -> Option<u64> {

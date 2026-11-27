@@ -7392,6 +7392,34 @@ async fn issue4a0b3aa_r10_legacy_merge_named_orphan_alias_reasoning_and_provenan
         "Req04 pairing spoof mismatch must not dispatch upstream"
     );
 
+    // R11 P1-3: An orphan output whose output is a bare data:image URI must stay
+    // literal on the first Provider request for a text-only default Responses target.
+    let bare_data_uri_input = json!([{
+        "type": "function_call_output",
+        "call_id": "call_orphan_bare_data_uri",
+        "output": "data:image/png;base64,AAAA"
+    }]);
+    let bare_data_uri_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": bare_data_uri_input
+        }))
+        .send()
+        .await
+        .expect("orphan bare data:image URI must succeed");
+    assert_eq!(bare_data_uri_res.status(), StatusCode::OK);
+    let bare_data_uri_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("bare data:image URI capture timeout")
+        .expect("bare data:image URI capture");
+    assert_eq!(
+        bare_data_uri_capture.body["input"], bare_data_uri_input,
+        "unpaired bare data:image URI must stay literal on text-only default Responses target: {}",
+        bare_data_uri_capture.body
+    );
+
     handle.shutdown().await;
     let _ = shutdown.send(());
     std::env::remove_var("V3_P6_TEST_KEY");

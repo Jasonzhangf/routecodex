@@ -525,31 +525,66 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         crate::hub_v1::V3HubProviderWireProtocol::Responses
             if request_body.get("messages").is_some() =>
         {
-            let empty_provenance = crate::hub_v1::V3HubExplicitHistoryProvenance::empty();
-            let (wire_body, mut projection_drops) =
-                crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
-                    &request_body,
-                    candidate
-                        .model_capabilities
-                        .iter()
-                        .any(|capability| capability == "web_search"),
-                    false,
-                    Some(&empty_provenance),
-                )
-                .map_err(|error| {
-                    raise_v3_source_via_err01(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3ResponsesDirect11Policy",
-                        "responses_provider_request_projection_failed",
-                        error,
-                        V3Err01SourceInput::Internal(
-                            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-                        ),
+            let mut provenance = policy.explicit_history_pairing.clone();
+            let source_body = if request_body.get("input").is_some()
+                && request_body
+                    .get("messages")
+                    .and_then(Value::as_array)
+                    .is_some()
+            {
+                match crate::hub_v1::v3_hub_responses_accepted_chat_contribution(&request_body) {
+                    Ok(contribution) => {
+                        let mut collapsed = request_body.clone();
+                        if let Some(object) = collapsed.as_object_mut() {
+                            object.remove("input");
+                            object.insert(
+                                "messages".to_string(),
+                                Value::Array(contribution.messages),
+                            );
+                            if let Some(tools) = contribution.tools {
+                                object.insert("tools".to_string(), tools);
+                            }
+                        }
+                        provenance = contribution.provenance;
+                        Some(collapsed)
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                Some(request_body.clone())
+            };
+            if let Some(source_body) = source_body {
+                let (wire_body, mut projection_drops) =
+                    crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+                        &source_body,
+                        candidate
+                            .model_capabilities
+                            .iter()
+                            .any(|capability| capability == "web_search"),
+                        false,
+                        Some(&provenance),
                     )
-                    .map(|(_, source)| source)
-                })?;
-            drop_context.restamp_and_emit(&mut projection_drops);
-            wire_body
+                    .map_err(|error| {
+                        raise_v3_source_via_err01(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3ResponsesDirect11Policy",
+                            "responses_provider_request_projection_failed",
+                            error,
+                            V3Err01SourceInput::Internal(
+                                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                            ),
+                        )
+                        .map(|(_, source)| source)
+                    })?;
+                drop_context.restamp_and_emit(&mut projection_drops);
+                wire_body
+            } else {
+                let mut input_only = request_body;
+                if let Some(object) = input_only.as_object_mut() {
+                    object.remove("messages");
+                }
+                input_only
+            }
         }
         _ => request_body,
     };

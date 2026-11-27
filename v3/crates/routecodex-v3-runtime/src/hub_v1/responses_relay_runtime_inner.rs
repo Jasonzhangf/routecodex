@@ -391,6 +391,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         request_local_busy_candidates = BTreeSet::new();
         let mut initial_selected = Some((initial_plan.selected, initial_plan.protocol_decision));
         let mut req02 = req02;
+        if !req02.canonicalized_from_responses {
+            if let Some(retained) = request_execution_control.explicit_history_pairing() {
+                req02.explicit_history_pairing = retained.clone();
+            }
+        }
+        request_execution_control
+            .retain_explicit_history_pairing(req02.explicit_history_pairing.clone());
         req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
         let request_outcome = {
             compile_v3_hub_relay_request_hooks().run_from_normalized_with_image_history(

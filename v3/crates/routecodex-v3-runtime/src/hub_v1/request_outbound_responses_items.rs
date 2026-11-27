@@ -104,6 +104,13 @@ pub(super) fn chat_content_to_responses_content(
 pub(super) fn chat_tool_call_to_responses_input_item(
     call: &Value,
 ) -> Result<Option<Value>, String> {
+    chat_tool_call_to_responses_input_item_with_provenance(call, false)
+}
+
+pub(super) fn chat_tool_call_to_responses_input_item_with_provenance(
+    call: &Value,
+    suppress_responses_hosted_call: bool,
+) -> Result<Option<Value>, String> {
     let Some(row) = call.as_object() else {
         return Ok(None);
     };
@@ -113,12 +120,7 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         .and_then(|extension| extension.get("responses_tool_call_type"))
         .and_then(Value::as_str)
         .unwrap_or("function_call");
-    if responses_tool_call_type == "web_search_call"
-        && row
-            .get("routecodex_chat_extension")
-            .and_then(|extension| extension.get("responses_tool_input_order"))
-            .is_some()
-    {
+    if responses_tool_call_type == "web_search_call" && suppress_responses_hosted_call {
         // The synthetic Chat result carries the complete native hosted item.
         return Ok(None);
     }
@@ -254,8 +256,10 @@ fn responses_custom_item_id(row: &Map<String, Value>, call_id: &str) -> String {
         .unwrap_or_else(|| compact_tool_id("fc_", call_id))
 }
 
-pub(super) fn chat_tool_result_to_responses_input_item(
+pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
     row: &Map<String, Value>,
+    omit_tool_output_id: bool,
+    preserve_native_tool_output_id: bool,
 ) -> Result<Option<Value>, String> {
     let responses_tool_output_type = row
         .get("routecodex_chat_extension")
@@ -363,14 +367,9 @@ pub(super) fn chat_tool_result_to_responses_input_item(
     }
     if let Some(call_id) = call_id {
         // Responses-derived outputs retain an absent item id through the round trip.
-        if responses_item_id_from_chat_extension(row).is_some()
-            || extension
-                .and_then(|fields| fields.get("responses_tool_output_id_omitted"))
-                .and_then(Value::as_bool)
-                != Some(true)
-        {
+        if responses_item_id_from_chat_extension(row).is_some() || !omit_tool_output_id {
             let item_id = if responses_tool_output_type == "custom_tool_call_output"
-                || extension.is_some_and(|fields| fields.contains_key("responses_tool_input_order"))
+                || preserve_native_tool_output_id
             {
                 responses_custom_item_id(row, call_id)
             } else {

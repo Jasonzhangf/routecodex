@@ -150,6 +150,7 @@ fn direct_policy_with_models(
         request_id: "req-direct-model-binding".to_string(),
         request_purpose: crate::nodes::V3RequestPurpose::Conversation,
         request_body: json!({"model": client_model, "input": "hello"}),
+        explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance::empty(),
     }
 }
 
