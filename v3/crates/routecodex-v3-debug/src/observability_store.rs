@@ -312,6 +312,7 @@ impl V3ProviderUsagePersistenceStore {
     ) -> Result<Self, V3WebuiObservabilityStoreError> {
         if let Some(parent) = observability_path.parent() {
             fs::create_dir_all(parent)?;
+            prune_orphaned_observability_temp_files(parent);
         }
         let facts_path = v3_provider_usage_facts_path(observability_path);
         let coverage_path = v3_provider_usage_coverage_path(observability_path);
@@ -1200,6 +1201,41 @@ fn provider_usage_facts_temp_path(path: &Path) -> PathBuf {
 
 fn remove_provider_usage_facts_temp_file(path: &Path) {
     let _ = fs::remove_file(provider_usage_facts_temp_path(path));
+}
+
+/// Removes orphaned observability `.tmp-*` files older than one hour.
+fn prune_orphaned_observability_temp_files(dir: &Path) {
+    const ORPHAN_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !(name.contains(".provider-usage.") || name.contains(".jsonl.tmp-"))
+            || !name.contains(".tmp-")
+        {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if now
+            .duration_since(modified)
+            .is_ok_and(|age| age >= ORPHAN_TEMP_MAX_AGE)
+        {
+            let _ = fs::remove_file(&path);
+        }
+    }
 }
 
 fn write_provider_usage_facts_atomically(
