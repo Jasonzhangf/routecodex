@@ -672,9 +672,9 @@ pub(super) fn build_provider_usage(
         .timezone
         .parse::<Tz>()
         .map_err(|_| format!("invalid timezone: {}", query.timezone))?;
-    let mut summary = (UsageAccumulator::default(), HashSet::<(u16, String)>::new());
-    let mut providers: BTreeMap<Option<String>, (UsageAccumulator, HashSet<(u16, String)>)> =
-        BTreeMap::new();
+    type ProviderUsageAggregate = (UsageAccumulator, HashSet<(u16, String)>);
+    let mut summary = ProviderUsageAggregate::default();
+    let mut providers: BTreeMap<Option<String>, ProviderUsageAggregate> = BTreeMap::new();
     let mut buckets: BTreeMap<String, UsageAccumulator> = BTreeMap::new();
 
     // A retained-scope filter cannot be applied to durable facts that do not

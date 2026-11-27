@@ -868,6 +868,75 @@ fn failure_first_persistence_time_is_stable_across_later_writes() {
 }
 
 #[test]
+fn failure_floor_starts_at_successful_persistence_boundary() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+        let write_started = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_004_000);
+        let persisted_at = write_started + Duration::from_secs(60);
+        let just_before_completion_floor =
+            persisted_at + Duration::from_secs(30 * 60) - Duration::from_nanos(1);
+        let artifact = sample_dir(home_base)
+            .join("delayed-failure")
+            .join("provider-failed-attempts.json");
+        let mut clock_reads = 0;
+        store
+            .persist_with_clock(
+                10000,
+                "responses",
+                "/v1/responses",
+                "delayed-failure",
+                "provider-failed-attempts.json",
+                &json!({"status": 502}),
+                true,
+                Some(502),
+                || {
+                    clock_reads += 1;
+                    match clock_reads {
+                        1 => {
+                            assert!(!artifact.exists());
+                            write_started
+                        }
+                        2 => {
+                            assert!(artifact.is_file());
+                            persisted_at
+                        }
+                        _ => panic!("unexpected clock read"),
+                    }
+                },
+            )
+            .unwrap();
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "retention-before-completion-floor",
+                "request.json",
+                &json!({"success": true}),
+                false,
+                None,
+                just_before_completion_floor,
+            )
+            .unwrap();
+        assert!(sample_dir(home_base).join("delayed-failure").is_dir());
+        store
+            .persist_at(
+                10000,
+                "responses",
+                "/v1/responses",
+                "retention-at-completion-floor",
+                "request.json",
+                &json!({"success": true}),
+                false,
+                None,
+                persisted_at + Duration::from_secs(30 * 60),
+            )
+            .unwrap();
+        assert!(!sample_dir(home_base).join("delayed-failure").exists());
+    });
+}
+
+#[test]
 fn success_eviction_uses_stable_first_persistence_order() {
     with_test_home(|home_base| {
         let store = V3CodexSampleStore::new(true, 2, false);

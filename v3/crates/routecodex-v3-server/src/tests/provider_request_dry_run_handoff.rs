@@ -2,17 +2,13 @@ use super::*;
 use crate::endpoint_handlers::execute_v3_responses_relay_provider_request_dry_run;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
-#[allow(dead_code)]
-#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
-mod hub_v1_fixture;
-
 #[tokio::test]
 async fn issue1f60200_relay_dry_run_handoff_preserves_client_identity() {
     let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = upstream.local_addr().unwrap();
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
     let port = addr.port();
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let test_home = std::env::temp_dir().join(format!(
         "routecodex-issue1f60200-handoff-{}-{port}",
         std::process::id()

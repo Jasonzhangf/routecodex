@@ -688,7 +688,7 @@ flowchart TD
 
 ## v3.codex_sample_retention_snap_scope
 
-Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned queue and worker to the filesystem without entering MetadataCenter or normal payload truth. The queue bounds pending and in-flight writes to 64 MiB, charging each job's serialized payload plus a fixed per-job overhead so a full-sampling burst is not dropped by a message-count limit while total queued memory stays bounded. Overload is failure-ledger reported without rejecting business requests. Barriers wait for previously accepted writes and report a non-destructive failure snapshot; worker shutdown drains the bounded ledger, including any omitted-count summary, for aggregate lifecycle reporting. Server startup starts the worker after fallible listener preparation and before listener tasks begin accepting requests. Diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.
+Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned queue and worker to the filesystem without entering MetadataCenter or normal payload truth. The queue bounds pending and in-flight writes to 64 MiB, charging each job's serialized payload plus a fixed per-job overhead so a full-sampling burst is not dropped by a message-count limit while total queued memory stays bounded. Overload is failure-ledger reported without rejecting business requests. Barriers wait for previously accepted writes and report a non-destructive failure snapshot; worker shutdown drains the bounded ledger, including any omitted-count summary, for aggregate lifecycle reporting. Server startup starts the worker after fallible listener preparation and before listener tasks begin accepting requests. Diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, ordinary successes retain a global budget of at most 100 request directories across all endpoints and ports, and failed attempts use a separate 256-directory in-floor reserve.
 
 Owner feature: `v3.codex_sample_retention_snap_scope`
 
@@ -3442,7 +3442,7 @@ flowchart TD
 
 ## v3.direct_sse_accept_skeleton
 
-Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.
+Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes. Runtime buffers each attempt until accepted business frames can cross once; Error may instead qualify a complete real non-2xx response from the actual exhausted final identity for entry-protocol projection before business commit. A transport-only head is not business commit. All other terminal failures abort only the affected transport without a fabricated error frame, reparsed HTTP JSON or completion.
 
 Owner feature: `v3.direct_sse_accept_skeleton`
 Manifest: `docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml`

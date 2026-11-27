@@ -30,11 +30,14 @@ pub(crate) fn normalize_v3_direct_complete_json_response(
     Ok(())
 }
 
+type V3DirectCompleteRewriteResult =
+    Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure>;
+
 pub(crate) fn rewrite_v3_direct_complete_response_attempt(
     frames: &[Vec<u8>],
     flushed: usize,
     context: &V3DirectDsmlContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
+) -> V3DirectCompleteRewriteResult {
     let serialized_tools = rewrite_v3_direct_dsml_attempt(frames, flushed, context)?;
     let normalized = serialized_tools
         .as_ref()

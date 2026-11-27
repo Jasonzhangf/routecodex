@@ -9,7 +9,7 @@ fn contended_admin_discovery_does_not_block_same_runtime_business() {
         v3_test_only_set_active_key_control_lock_observer as observe,
         V3ActiveKeyControlLockStage as Stage,
     };
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let clients = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -145,7 +145,7 @@ fn startup_contention_serves_business_before_bounded_control_publication() {
         v3_test_only_set_active_key_control_lock_observer as observe,
         V3ActiveKeyControlLockStage as Stage,
     };
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let clients = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -258,7 +258,7 @@ fn startup_contention_serves_business_before_bounded_control_publication() {
 
 #[test]
 fn contended_drop_has_no_waiter_and_retains_exact_manual_cleanup() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

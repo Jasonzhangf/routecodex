@@ -19,7 +19,7 @@ fn prepared_publication_survives_another_owners_prefix_prune() {
         eprintln!("actual-publisher-lock cross-process=blocked");
         return;
     }
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

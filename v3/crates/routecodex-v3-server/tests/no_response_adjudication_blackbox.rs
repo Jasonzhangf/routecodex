@@ -1145,18 +1145,23 @@ async fn complete_final_provider_http_502_preserves_status_and_body() {
     )
     .await;
     let base = endpoint.trim_end_matches("/v1/responses");
-    let consumed = consume_response(
-        client()
-            .post(&endpoint)
-            .json(&json!({
-                "model":"test.test",
-                "input":"db1f482 complete upstream HTTP 502",
-                "stream":false
-            }))
-            .send()
-            .await,
-    )
-    .await;
+    let response = client()
+        .post(&endpoint)
+        .json(&json!({
+            "model":"test.test",
+            "input":"db1f482 complete upstream HTTP 502",
+            "stream":false
+        }))
+        .send()
+        .await;
+    let content_type = response
+        .as_ref()
+        .ok()
+        .and_then(|response| response.headers().get(CONTENT_TYPE))
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let consumed = consume_response(response).await;
+    assert_eq!(content_type.as_deref(), Some("text/html"), "{consumed:?}");
     assert_eq!(
         consumed.status,
         Some(StatusCode::BAD_GATEWAY),
@@ -3454,6 +3459,7 @@ struct LiveForward {
 }
 
 #[derive(Clone)]
+#[derive(Default)]
 struct LiveForwardExchange {
     request_body: Vec<u8>,
     response_status: Option<StatusCode>,
@@ -3462,17 +3468,6 @@ struct LiveForwardExchange {
     transport_error: Option<String>,
 }
 
-impl Default for LiveForwardExchange {
-    fn default() -> Self {
-        Self {
-            request_body: Vec::new(),
-            response_status: None,
-            response_content_type: None,
-            response_body: Vec::new(),
-            transport_error: None,
-        }
-    }
-}
 
 /// Explicit Anthropic SSE failures must stay failures at the public entry.
 /// This covers the user-reported risk: an explicit provider error or an
@@ -5486,7 +5481,7 @@ async fn missing_tool_parameters_and_client_validation_results_survive_correctio
                         events(&body)
                             .into_iter()
                             .filter_map(|e| e.get("response").cloned())
-                            .last()
+                            .next_back()
                             .unwrap()
                     };
                     if let Some(output) = returned.get("output") {
@@ -9075,7 +9070,7 @@ async fn responses_structured_tool_values_survive_chat_and_responses_clients() {
                                 events(&body)
                                     .into_iter()
                                     .filter_map(|event| event.get("response").cloned())
-                                    .last()
+                                    .next_back()
                                     .expect("complete terminal response")
                             };
                             let actual = returned["output"]
@@ -9307,7 +9302,7 @@ async fn chat_provider_missing_arguments_stay_absent_at_client_boundary() {
                             .filter_map(|line| line.strip_prefix("data:"))
                             .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
                             .filter_map(|v| v.get("response").cloned())
-                            .last()
+                            .next_back()
                             .unwrap()
                     };
                     let actual = returned["output"]

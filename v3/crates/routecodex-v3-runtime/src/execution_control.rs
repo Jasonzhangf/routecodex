@@ -86,7 +86,7 @@ impl Default for V3AttemptStoreLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum V3AttemptStoreError {
+pub enum V3AttemptStoreError {
     ResidenceDeadlineExceeded(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
@@ -416,7 +416,7 @@ impl V3RequestExecutionControl {
         self.attempt_budget
             .inner
             .refill_used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 (current < max_consecutive_refills).then_some(current + 1)
             })
             .is_ok()
@@ -568,7 +568,7 @@ impl V3AttemptBudget {
         let previous = self
             .inner
             .transport_attempts
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| {
@@ -638,7 +638,7 @@ fn reserve_bounded(
     label: &str,
 ) -> Result<(), V3AttemptStoreError> {
     counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current.checked_add(bytes).filter(|next| *next <= limit)
         })
         .map(|_| ())
@@ -814,10 +814,13 @@ impl V3CommittedClientSseStream {
     }
 }
 
+type V3CommittedSseTerminalCallback = Box<dyn FnOnce(V3CommittedSseTerminal) + Send>;
+type V3CommittedSseFrameCallback = Box<dyn Fn(&[u8]) + Send + Sync>;
+
 struct V3ObservedCommittedSseStream {
     source: V3CommittedClientSseStream,
-    on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
-    on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
+    on_frame: V3CommittedSseFrameCallback,
+    on_terminal: Option<V3CommittedSseTerminalCallback>,
     /// Whether the protocol terminal frame has been yielded to the client.
     /// Drop uses this to preserve Completed versus Dropped semantics.
     terminal_frame_consumed: bool,

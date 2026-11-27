@@ -4,21 +4,18 @@ use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
-use futures_util::StreamExt;
-use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError,
     V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub type V3GeminiRelayClientStream = V3RelayProjectedSseStream;
@@ -218,7 +215,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3GeminiRelayCodec；Chat Process 有界续杯循环在骨架之上的
     // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
-    let routing_group = server_routing_group(manifest, &input.server_id)
+    let _routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
         .to_string();
     let (output, _failure_events) =
@@ -612,8 +609,8 @@ fn gemini_error_output_from_projection(
                 error_chain: None,
                 observability: None,
                 provider_failure_attempts: Vec::new(),
-                diagnostic_source: Some(fault.policy_failure),
-                diagnostic_cause: fault.original_source,
+                diagnostic_source: Some(*fault.policy_failure),
+                diagnostic_cause: fault.original_source.map(|s| *s),
                 stream_observation: None,
                 provider_snapshots: None,
             }
@@ -691,14 +688,11 @@ fn project_json_response_with_source(
         && super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
             resp02.provider_payload(),
         );
-    match provider_protocol {
-        V3HubProviderWireProtocol::OpenAiChat => {
-            let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
-                resp02.provider_payload(), chat_request,
-            ).map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?;
-            resp02.set_responses_semantic_payload(canonical);
-        }
-        _ => {}
+    if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
+        let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
+            resp02.provider_payload(), chat_request,
+        ).map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?;
+        resp02.set_responses_semantic_payload(canonical);
     }
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
@@ -997,8 +991,8 @@ fn provider_failure_output(
             error_chain: None,
             observability: None,
             provider_failure_attempts,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|s| *s),
             stream_observation: None,
             provider_snapshots: None,
         };
@@ -1121,8 +1115,8 @@ mod tests {
             ));
             assert!(output.error_chain.is_none());
             assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
-            assert_eq!(output.diagnostic_source, Some(fault.policy_failure.clone()));
-            assert_eq!(output.diagnostic_cause, fault.original_source.clone());
+            assert_eq!(output.diagnostic_source, Some((*fault.policy_failure).clone()));
+            assert_eq!(output.diagnostic_cause, fault.original_source.clone().map(|s| *s));
             assert_eq!(
                 fault.policy_failure.source_kind,
                 routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
@@ -1131,7 +1125,7 @@ mod tests {
                 fault.policy_failure.code,
                 "relay_error_projection_nonterminal"
             );
-            assert_eq!(fault.original_source, Some(source.clone()));
+            assert_eq!(fault.original_source, Some(Box::new(source.clone())));
             assert_eq!(output.provider_failure_attempts, attempts);
         }
     }
@@ -1159,10 +1153,11 @@ mod tests {
             Err(error),
         )
         .expect_err("the real Error operator SDK failure must remain a typed fault");
-        let policy_failure = fault.policy_failure.clone();
+        let policy_failure = (*fault.policy_failure).clone();
         let original_source = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the real original source must remain attached to the fault");
         let trace = vec![
             "V3Error02Classified",
@@ -1213,10 +1208,11 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 is a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let diagnostic_cause = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the SDK fault keeps its original compat source");
         let trace = vec!["ProviderRespCompat02ProviderCompat"];
 
@@ -1285,10 +1281,11 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 must produce a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let diagnostic_cause = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the source fault preserves the canonical plain source");
         assert_eq!(diagnostic_cause, source);
 

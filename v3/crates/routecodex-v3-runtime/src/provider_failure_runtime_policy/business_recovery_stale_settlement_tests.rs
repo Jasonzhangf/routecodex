@@ -1,5 +1,6 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_provider_responses::{V3ProviderIdentityRef, V3ProviderKeyRef};
 
 const PROVIDER: &str = "recovery-provider";
 const INTERFACE: &str = "responses";
@@ -47,7 +48,13 @@ fn projection(
 ) -> V3ProviderSchedulingProjection {
     health
         .store()
-        .scheduling_projection_for_key_with_interface(PROVIDER, INTERFACE, KEY, MODEL, 1, 1, now_ms)
+        .scheduling_projection_for_key_with_interface(
+            V3ProviderKeyRef::new(PROVIDER, KEY, MODEL),
+            INTERFACE,
+            1,
+            1,
+            now_ms,
+        )
         .expect("health projection")
 }
 
@@ -65,10 +72,8 @@ fn superseded_business_recovery_success_does_not_mutate_newer_episode_or_skip_or
     health
         .store()
         .add_cooldown_entry_for_interface(
-            PROVIDER,
+            V3ProviderIdentityRef::new(PROVIDER, Some(KEY), Some(MODEL)),
             INTERFACE,
-            Some(KEY),
-            Some(MODEL),
             "probe",
             1_000,
             1_000,
@@ -82,10 +87,8 @@ fn superseded_business_recovery_success_does_not_mutate_newer_episode_or_skip_or
     health
         .store()
         .add_cooldown_entry_for_interface(
-            PROVIDER,
+            V3ProviderIdentityRef::new(PROVIDER, Some(KEY), Some(MODEL)),
             INTERFACE,
-            Some(KEY),
-            Some(MODEL),
             "probe",
             60_000,
             2_010,
@@ -189,10 +192,8 @@ fn current_owned_business_recovery_success_clears_the_episode() {
     health
         .store()
         .add_cooldown_entry_for_interface(
-            PROVIDER,
+            V3ProviderIdentityRef::new(PROVIDER, Some(KEY), Some(MODEL)),
             INTERFACE,
-            Some(KEY),
-            Some(MODEL),
             "probe",
             1_000,
             1_000,

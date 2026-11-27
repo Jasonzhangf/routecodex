@@ -9,10 +9,10 @@
 // 协议差异全部收敛在 `V3DirectProtocolCodec`。
 
 pub async fn execute_v3_direct_runtime_kernel_core<
-    C: V3DirectProtocolCodec,
+    C,
     T: ResponsesTransport + ?Sized + 'static,
 >(
-    mut control: C::Control,
+    control: C::Control,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     transport: &T,
@@ -23,7 +23,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -46,10 +46,10 @@ where
 }
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
-    C: V3DirectProtocolCodec,
+    C,
     T: ResponsesTransport + ?Sized + 'static,
 >(
-    mut control: C::Control,
+    control: C::Control,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     transport: &T,
@@ -61,7 +61,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -83,7 +83,7 @@ where
 }
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_active_keys<
-    C: V3DirectProtocolCodec,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     T: ResponsesTransport + ?Sized + 'static,
 >(
     control: C::Control,
@@ -98,7 +98,6 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_active_keys<
     active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -122,7 +121,7 @@ where
 }
 
 async fn execute_v3_direct_runtime_kernel_core_resident<
-    C: V3DirectProtocolCodec,
+    C,
     T: ResponsesTransport + ?Sized + 'static,
 >(
     mut control: C::Control,
@@ -138,7 +137,7 @@ async fn execute_v3_direct_runtime_kernel_core_resident<
     active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -255,7 +254,7 @@ where
     let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
     let mut initial_selection_time = Some(now_epoch_ms);
-    let mut provider_request_snapshot = None;
+    let mut provider_request_snapshot;
     let mut provider_response_snapshot = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
@@ -465,7 +464,7 @@ where
             manifest.debug.projection_drop_log_file.clone(),
             client_original_body.clone(),
         );
-        let wire =
+        let mut wire =
             match C::run_request_projection(&policy, request_key_catalog, &projection_drop_context)
             {
                 Ok(value) => value,
@@ -478,6 +477,14 @@ where
                     )
                 }
             };
+        let retain_request_cipher = crate::hub_v1::is_v3_retain_response_cipher(
+            expanded.candidates.len(),
+            &C::policy_target(&policy).candidate.model_id,
+        );
+        routecodex_v3_provider_responses::wire::apply_v3_request_cipher_policy(
+            wire.body_mut(),
+            retain_request_cipher,
+        );
         trace.push("V3Provider12ResponsesWirePayload");
         // 客户端声明的响应 transport intent（wire 构建后即固定）。provider 契约
         // 可能强制上游走 SSE（如 OpenCode Zen 免费层），但客户端响应格式仍由

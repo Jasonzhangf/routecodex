@@ -2411,6 +2411,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/issuefe23457_anthropic_tool_preservation_public.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
+  - v3/crates/routecodex-v3-server/tests/unknown_client_metadata_public.rs
   design:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
@@ -2561,7 +2562,9 @@ features:
   - openai_chat_wire_projects_responses_web_search_tool_to_options
   - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
   - openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context
-  - openai_chat_wire_rejects_unknown_client_metadata
+  - openai_chat_wire_omits_unknown_client_metadata_with_records
+  - issue3759f5d_unknown_client_metadata_json
+  - issue3759f5d_unknown_client_metadata_sse
   - responses_supported_verbosity_is_registered_local_style_hint_for_anthropic
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
   - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
@@ -2604,6 +2607,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_sse_attempt_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_terminal_public -- --nocapture --test-threads=1
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_signature_targets_public -- --nocapture --test-threads=1
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test unknown_client_metadata_public -- --nocapture --test-threads=1
   - npm run test:v3-gemini-responses-bridge-public
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
@@ -3456,7 +3460,7 @@ features:
   - A barrier reports a failure snapshot without draining it; a cancelled barrier reply cannot erase failures needed by shutdown.
   - Worker shutdown drains and returns the bounded failure ledger, including an omitted-count summary; aggregate shutdown and exec preparation return that terminal report.
   - The persistence worker starts only after fallible startup preparation and before listener tasks begin accepting requests.
-  - Startup retention and sample writes use one Debug-owned process-shared filesystem lock; concurrent CLI instances with a shared HOME and 500 old samples all become healthy, return real provider responses, preserve their request samples, and enforce the global 100-request retention limit.
+  - Startup retention and sample writes use one Debug-owned process-shared filesystem lock; concurrent CLI instances with a shared HOME and 500 old samples all become healthy, return real provider responses, preserve their request samples, and enforce the global 100-success-directory budget while keeping the separate failure reserve.
   - An invalid sample lock produces an explicit file-qualified startup error rather than silently accepting uncoordinated retention.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, or routing truth.
@@ -3858,6 +3862,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
   required_positive:
+  - complete_final_provider_http_502_preserves_status_and_body proves a complete actual-final HTTP 502 reaches the public Relay client with its original status, text/html content type and exact body, one send, no transport error and no final-identity cooldown.
   - issue720eb7f_source_policy_group_isolation and issue720eb7f_response_failure_policy_group_isolation exercise the public runtime consumer with actual HTTP and response-stream failures. The first real non-final HTTP 503 counts once against the exact identity. Neither failure classification applies the configured retry delay or auth-wide cooldown to the request.
   - responses_relay_shared_health_keeps_subthreshold_provider_routable exercises the Runtime consumer across exact real HTTP failures and a successful pre-cool probe. Reachability preserves the counted business streak, and each later subthreshold request still attempts the declared primary before the fallback.
   - issue4aeb668_compat_failure_reselects_later_tier exercises public HTTP request-side compat failure followed by a healthy later-tier provider; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_ -- --nocapture --test-threads=1
@@ -3890,9 +3895,11 @@ features:
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
   - Error05 cannot re-match a response-content policy from compressed error message.
   - Retry exhaustion cannot project before route/default exhaustion and cannot project more than once.
-  - Genuine provider HTTP or native SSE errors cannot reach the client as HTTP errors, protocol error events or fabricated successful completion.
+  - Non-final Provider errors remain private while an untried eligible declared successor exists; they cannot reach the client before recovery.
+  - Only a complete real non-2xx response from the actual exhausted final identity may project before business commit using the client entry protocol. Internal, incomplete, transport, stale-witness and synthetic failures cannot qualify or fabricate a client error or successful completion.
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox complete_final_provider_http_502_preserves_status_and_body -- --exact --nocapture --test-threads=1
   - CARGO_BUILD_JOBS=2 cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout issue720eb7f_ -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuee63d2f2_ -- --nocapture --test-threads=1
 

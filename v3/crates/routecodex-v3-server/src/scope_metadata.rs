@@ -2,8 +2,7 @@ use crate::*;
 use axum::http::HeaderMap;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::Deserialize;
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use serde_json::Value;
 use std::fmt;
 
 pub(crate) struct V3ResponsesEntryFacts {

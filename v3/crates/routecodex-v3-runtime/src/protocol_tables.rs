@@ -166,7 +166,7 @@ enum V3TableData {
 }
 
 #[derive(Debug)]
-struct V3ProtocolTables {
+pub struct V3ProtocolTables {
     tables: BTreeMap<String, V3TableData>,
 }
 

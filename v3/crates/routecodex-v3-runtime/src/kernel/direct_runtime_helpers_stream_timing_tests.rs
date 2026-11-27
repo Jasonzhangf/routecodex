@@ -865,8 +865,8 @@ async fn direct_sse_collector_never_swallows_post_terminal_sdk_fault_as_success(
         "seeded post-terminal SDK fault",
     );
     let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-        policy_failure: policy_failure.clone(),
-        original_source: Some(original.clone()),
+        policy_failure: Box::new(policy_failure.clone()),
+        original_source: Some(Box::new(original.clone())),
     };
     let source: V3SseAttemptStream = Box::pin(stream::iter(vec![
         Ok(V3SseAttemptFrame::new(
@@ -887,8 +887,8 @@ async fn direct_sse_collector_never_swallows_post_terminal_sdk_fault_as_success(
 
     match result {
         Err(Err(returned)) => {
-            assert_eq!(returned.policy_failure, policy_failure);
-            assert_eq!(returned.original_source, Some(original));
+            assert_eq!(*returned.policy_failure, policy_failure);
+            assert_eq!(returned.original_source, Some(Box::new(original)));
         }
         Err(Ok(source)) => panic!("fault was collapsed into an ordinary source: {source:?}"),
         Ok(_) => panic!("post-terminal SDK fault was incorrectly sealed as success"),
@@ -910,8 +910,8 @@ async fn direct_sse_collector_preserves_post_terminal_sdk_fault_before_seal() {
         "seeded committed post-terminal SDK fault",
     );
     let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-        policy_failure: policy_failure.clone(),
-        original_source: Some(original.clone()),
+        policy_failure: Box::new(policy_failure.clone()),
+        original_source: Some(Box::new(original.clone())),
     };
     let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"clean-prefix\"}\n\n".to_vec();
     let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[{\"id\":\"m1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"clean-prefix\"}]}]}}\n\n".to_vec();
@@ -938,8 +938,8 @@ async fn direct_sse_collector_preserves_post_terminal_sdk_fault_before_seal() {
 
     match result {
         Err(Err(returned)) => {
-            assert_eq!(returned.policy_failure, policy_failure);
-            assert_eq!(returned.original_source, Some(original));
+            assert_eq!(*returned.policy_failure, policy_failure);
+            assert_eq!(returned.original_source, Some(Box::new(original)));
         }
         Err(Ok(source)) => panic!("fault was collapsed into an ordinary source: {source:?}"),
         Ok(_) => panic!("post-terminal SDK fault was incorrectly sealed as success"),

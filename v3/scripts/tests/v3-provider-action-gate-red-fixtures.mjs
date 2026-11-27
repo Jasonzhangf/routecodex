@@ -95,7 +95,37 @@ function removeEdge(document, chainId, stepId) {
   const owner = chain(document, chainId);
   owner.edges = owner.edges.filter((item) => item.step_id !== stepId);
 }
+const positiveCases = [
+  {
+    name: 'typed macro calls accept an omitted optional trailing comma',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source.replace(/response_processing_code,(\s*\)\s*\.await\?)/gu, 'response_processing_code$1'),
+  },
+  {
+    name: 'cleaned Anthropic owner passes through the live shared typed-action relation',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source.replace(
+      'use super::relay_runtime_shared::provider_response_governance_failure;',
+      '// Positive fixture: this owner relies on the shared typed-action consumer.\nuse super::relay_runtime_shared::provider_response_governance_failure;',
+    ),
+  },
+];
 const cases = [
+  {
+    name: 'shared policy drops only its typed response code argument',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace('        state,\n        response_processing_code,\n        active_source,', '        state,\n        None,\n        active_source,'),
+    diagnostic: /policy call must forward response_processing_code/u,
+  },
+  {
+    name: 'typed macro invocation survives only in a dead expression arm',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source.replace(
+      /if let Some\(failure\) = (active_failure!\((?:(?!active_failure!)[\s\S])*?response_processing_code,\s*\)\s*\.await\?)/u,
+      'if let Some(failure) = if false { $1 } else { Some(failure) }',
+    ),
+    diagnostic: /response-code call .* must directly drive the failure branch/u,
+  },
   {
     name: 'Direct inner policy bypasses the owning failure recorder',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
@@ -600,6 +630,125 @@ const cases = [
     mutate: (source) => source.replaceAll('npm --prefix v3 run verify:ci', 'echo v3-verification-skipped'),
     diagnostic: /missing npm --prefix v3 run verify:ci/u,
   },
+  {
+    name: 'Anthropic real failure calls disappear behind typed-action decoys',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source
+      .replace(
+        'use super::relay_runtime_shared::{',
+        'use routecodex_v3_error::V3Error05ExecutionAction;\n'
+          + "const _: fn(&V3Error05ExecutionAction) -> &'static str =\n"
+          + '    V3Error05ExecutionAction::observability_label;\n'
+          + '// V3Error05ExecutionAction decoy\n'
+          + 'use super::relay_runtime_shared::{',
+      )
+      .replaceAll('active_failure!(', 'bypass_provider_failure!(')
+      .replaceAll(
+        'handle_provider_failure_with_response_code_and_active_keys(',
+        'bypass_provider_failure_with_response_code(',
+      ),
+    diagnostic: /active_failure macro must delegate|expected eight live active_failure calls/u,
+  },
+  {
+    name: 'Anthropic response-code caller disappears while ordinary caller remains',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source.replaceAll('response_processing_code,', ''),
+    diagnostic: /expected two response-code calls/u,
+  },
+  ...['both', 'first', 'second'].map((site) => ({
+    name: `Anthropic ${site} response-code caller loses its final typed code`,
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => {
+      let callIndex = 0;
+      return source.replace(
+        /response_processing_code,(\s*\)\s*\.await\?)/gu,
+        (argument, tail) => {
+          callIndex += 1;
+          return site === 'both' || callIndex === (site === 'first' ? 1 : 2)
+            ? `None,${tail}`
+            : argument;
+        },
+      );
+    },
+    diagnostic: /response-code call \d+ must forward response_processing_code as its final argument/u,
+  })),
+  {
+    name: 'Shared policy output is disconnected behind a dead nested policy call',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace(
+      'let mut result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(',
+      'if false { crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(); }\n'
+        + '    let mut result = match unrelated_policy(',
+    ),
+    diagnostic: /must bind the top-level policy result/u,
+  },
+  {
+    name: 'Shared policy returns a different Ok binding',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace('Ok(result) => result,', 'Ok(result) => unrelated_result,'),
+    diagnostic: /must return the policy Ok binding/u,
+  },
+  ...[
+    'let result = unrelated_result;',
+    'result = unrelated_result;',
+    'result.decision = unrelated_decision;',
+    'result.decision.action = unrelated_action;',
+    'let decision = unrelated_decision;',
+    'let action = unrelated_action;',
+  ].map((statement) => ({
+    name: `Shared policy binding changes before consumption: ${statement}`,
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace(
+      'match result.decision.action {',
+      `${statement}\n    match result.decision.action {`,
+    ),
+    diagnostic: /policy result must reach the action match unchanged/u,
+  })),
+  {
+    name: 'Shared catch-all mentions the missing typed variant only inside its body',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace(
+      'V3Error05ExecutionAction::Reselect => {',
+      'other => { let _ = V3Error05ExecutionAction::Reselect;',
+    ),
+    diagnostic: /typed action match must (?:handle V3Error05ExecutionAction::Reselect|use only explicit typed action patterns)/u,
+  },
+  {
+    name: 'Anthropic shared failure delegation is disconnected',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replaceAll(
+      '    handle_provider_failure_with_response_code_and_active_keys(\n',
+      '    bypass_provider_failure_with_response_code(\n',
+    ),
+    diagnostic: /does not call handle_provider_failure_with_response_code_and_active_keys/u,
+  },
+  {
+    name: 'Shared typed action variants survive outside the required match',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace(
+      'match result.decision.action {',
+      'match bypassed_action {',
+    ),
+    diagnostic: /must match result\.decision\.action/u,
+  },
+  {
+    name: 'Shared typed action match drops a required variant',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace(
+      'V3Error05ExecutionAction::Reselect =>',
+      'V3Error05ExecutionAction::Bypass =>',
+    ),
+    diagnostic: /typed action match must handle V3Error05ExecutionAction::Reselect/u,
+  },
+  {
+    name: 'Shared typed action match hides a missing variant with a wildcard',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace(
+      'V3Error05ExecutionAction::RejectNonProviderError =>',
+      '_ =>',
+    ),
+    diagnostic: /typed action match must (?:handle V3Error05ExecutionAction::RejectNonProviderError|not use a wildcard arm)/u,
+  },
 ];
 
 function sourcePath(rel) {
@@ -631,6 +780,32 @@ if (baseline.status !== 0) {
   process.exit(1);
 }
 
+for (const testCase of positiveCases) {
+  const root = mkdtempSync(join(tmpdir(), 'v3-provider-action-gate-positive-'));
+  try {
+    copyFixtureSurface(root);
+    const target = resolve(root, testCase.path);
+    const original = readFileSync(target, 'utf8');
+    const mutated = testCase.mutate(original);
+    if (mutated === original) {
+      failures.push(`${testCase.name}: mutation did not change ${testCase.path}`);
+      continue;
+    }
+    writeFileSync(target, mutated);
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
+    });
+    if (result.status !== 0) {
+      const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+      failures.push(`${testCase.name}: positive fixture failed: ${output.slice(-1200)}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-provider-action-gate-red-'));
   try {
@@ -660,4 +835,6 @@ if (failures.length) {
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log(`[test:v3-provider-action-gate-red-fixtures] ok (${cases.length} forbidden mutations rejected)`);
+console.log(
+  `[test:v3-provider-action-gate-red-fixtures] ok (${positiveCases.length} positive, ${cases.length} forbidden mutations)`,
+);

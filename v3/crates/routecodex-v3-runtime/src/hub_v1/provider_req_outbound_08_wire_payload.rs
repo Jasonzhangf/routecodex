@@ -220,6 +220,10 @@ impl V3ProviderReqOutbound08WirePayload {
         self.wire.as_ref()
     }
 
+    pub(crate) fn provider_wire_mut(&mut self) -> Option<&mut V3Provider12ResponsesWirePayload> {
+        self.wire.as_mut()
+    }
+
     pub(crate) fn provider_protocol(&self) -> super::V3HubProviderWireProtocol {
         self.previous.previous.provider_protocol
     }

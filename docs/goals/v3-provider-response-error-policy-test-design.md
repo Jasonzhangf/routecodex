@@ -2,7 +2,7 @@
 
 ## Objective
 
-Pass successful, representable provider responses without content adjudication. Genuine provider HTTP and native SSE errors enter the typed Error01-06 path before client commit. Client exhaustion terminates transport without an error response or fabricated completion.
+Pass successful, representable provider responses without content adjudication. Genuine provider HTTP and native SSE errors enter the typed Error01-06 path before business commit. Only a complete real non-2xx response from the actual exhausted final identity may project using the client entry protocol. All other exhausted failures terminate only the affected transport without a fabricated response or completion.
 
 ## Lifecycle
 
@@ -10,18 +10,19 @@ Pass successful, representable provider responses without content adjudication. 
 provider HTTP / complete SSE attempt
   -> protocol parsing and genuine error extraction
   -> successful output: lossless canonical projection -> Resp03/Resp04 -> client commit
-  -> genuine failure: typed Error01-05 -> retry/reselect/cooldown decision
-  -> configured minimum backoff through Provider Action Gate
-  -> recovery: successful provider output -> client commit
-  -> exhaustion: typed Error06 -> transport termination
+  -> genuine failure: typed Error01-05 -> declared successor or explicit active-key retry decision
+  -> recovery: accepted provider business output -> client commit
+  -> exhaustion: typed Error06 qualification
+       -> complete actual-final non-2xx before business commit -> entry-protocol projection
+       -> internal / incomplete / transport / stale-witness / synthetic failure -> affected transport termination
 ```
 
 ## Owners and boundaries
 
 - Config authoring/compile owner: `routecodex-v3-config`.
 - Genuine error extraction owner: registered provider protocol codecs before Resp03.
-- Retry timing/admission owner: `v3.provider_action_gate`.
-- Terminal failure owner: typed Error06, with transport termination at the client boundary.
+- Candidate recovery owner: Error/Target. Explicit active-key retry and queue state belong to Target and remain separate from Provider health. Requests do not wait for cooldown or recovery admission.
+- Terminal qualification owner: typed Error06. Server projects only a qualified complete actual-final non-2xx response before business commit using the client entry protocol; every other exhausted failure terminates only the affected transport. A transport-only SSE head or heartbeat is not business commit.
 - `V3ProviderFailureDirective` is an error/control side-channel. It must never enter provider/client payload, MetadataCenter, continuation context, debug snapshot, or protocol metadata.
 - SSE transport and Server handler remain framing/projection only.
 
@@ -46,18 +47,19 @@ provider HTTP / complete SSE attempt
 ### Directive and policy execution
 
 - Genuine errors retain typed source and declared recovery path; Error05 never re-matches business content.
-- `max_attempts=3` means initial send plus two same-provider retries.
-- Retry delays follow `max(action_gate_delay, configured_backoff)` with saturating exponent and 60-second cap.
-- Success on retry stops further retry/project and only successful response reaches Resp04.
-- Exhaustion ends client transport without provider error bytes.
+- By default, a failed complete identity is excluded from another send in the same request; recovery selects an untried eligible declared successor. Explicit active-key policy may retry within its declared episode budget and apply its separate fourth-failure queue transition; it never overrides Provider health.
+- The final or only eligible identity remains Provider-health neutral. Recovery does not wait for cooldown, probes or admission. The separately declared fixed two-second delay applies only to consecutive unresolved errors in the same session.
+- Accepted business success stops further retry or reselection and reaches Resp04 once.
+- Exhaustion projects only a complete real non-2xx response from the actual exhausted final identity before business commit. Internal, incomplete, transport, stale-witness and synthetic failures end only the affected transport without provider error bytes or fabricated completion.
 
 ## Black-box matrix
 
 - JSON and SSE representable incomplete/refusal output passes Direct and Relay paths.
-- Genuine native SSE error ends transport without error bytes or fabricated completion.
+- A genuine native SSE failure is not a complete HTTP non-2xx witness. After declared recovery is exhausted, it ends only the affected transport without error bytes or fabricated completion. Projection of a qualified complete HTTP error into client SSE is a separate path.
 - Second attempt success commits only successful response.
 - Exhausted attempts leave continuation at pre-request state.
-- Real HTTP failures use the provider-scoped typed recovery path and never become a client error response.
+- Non-final real HTTP failures remain private and recover through an untried eligible declared successor. Only a complete actual-final non-2xx response may project before business commit, with its actual status, applicable headers, body and cause retained through necessary client-protocol conversion.
+- The existing `complete_final_provider_http_502_preserves_status_and_body` public Relay regression asserts the actual HTTP 502, provider `text/html` content type, exact HTML body, no transport error, one send and no cooldown for the final identity. Independent requests remain usable.
 - Public Direct and Relay requests discard a reasoning-plus-explicit-final attempt whose final contains only U+200B or FEFF, recover through the next candidate, and expose neither the source attempt nor an internal error.
 - One recoverable failure leaves the provider eligible; a subsequent real success resets the pre-cooldown streak.
 - Positive control: normal provider HTTP 200 content completes unchanged.

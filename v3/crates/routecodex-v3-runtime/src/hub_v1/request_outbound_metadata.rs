@@ -1,10 +1,13 @@
 use serde_json::{Map, Value};
 
-use super::client_metadata_projection::unsupported_client_metadata_paths;
+use super::client_metadata_projection::is_supported_client_metadata_key;
+use super::request_outbound_format::json_path_child;
+use crate::projection_drop_log::V3ProjectionDropRecord;
 
 pub(super) fn project_openai_client_metadata_to_metadata(
     projected: &mut Value,
     target_protocol: &str,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let Some(row) = projected.as_object_mut() else {
         return Ok(());
@@ -15,12 +18,16 @@ pub(super) fn project_openai_client_metadata_to_metadata(
     let client_metadata = client_metadata.as_object().ok_or_else(|| {
         format!("MalformedOutboundField target_protocol={target_protocol} path=$.client_metadata")
     })?;
-    let unsupported = unsupported_client_metadata_paths(client_metadata);
-    if !unsupported.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol={target_protocol} paths={}",
-            unsupported.join(",")
-        ));
+    for (key, value) in client_metadata {
+        if !is_supported_client_metadata_key(key) {
+            drops.push(V3ProjectionDropRecord::new(
+                target_protocol,
+                json_path_child("$.client_metadata", key),
+                "unmapped_target_protocol_field_unrepresentable",
+                value.clone(),
+                "project_openai_client_metadata_to_metadata",
+            ));
+        }
     }
     let Some(user_id) = client_metadata.get("user_id") else {
         return Ok(());
@@ -138,7 +145,7 @@ pub(super) fn project_openai_chat_reasoning_effort_from_reasoning(
         effort.as_str(),
         "none" | "off" | "disabled" | "disable" | "false"
     ))
-    .then(|| Value::String(effort))
+    .then_some(Value::String(effort))
 }
 
 pub(super) fn project_openai_chat_reasoning_context_policy(

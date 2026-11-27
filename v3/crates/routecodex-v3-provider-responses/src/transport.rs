@@ -696,6 +696,7 @@ pub trait ResponsesTransport: Send + Sync {
         None
     }
 
+    #[must_use = "transport send futures must be awaited"]
     async fn send(
         &self,
         request: V3Transport13ResponsesRequest,
@@ -713,6 +714,7 @@ pub trait ResponsesTransport: Send + Sync {
     /// Attach an already-started attempt control without changing the original
     /// send result type. ProviderResponsesTransport::send validates ownership
     /// and consumes the control for phase observation.
+    #[must_use = "transport send futures must be awaited"]
     async fn send_observed(
         &self,
         request: V3Transport13ResponsesRequest,
@@ -756,10 +758,7 @@ impl ProviderResponsesTransport {
                 timeout,
                 reqwest::redirect::Policy::custom(|attempt| {
                     if attempt.previous().len() > V3_PROVIDER_REDIRECT_LIMIT {
-                        return attempt.error(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "too many redirects",
-                        ));
+                        return attempt.error(std::io::Error::other("too many redirects"));
                     }
                     if attempt
                         .previous()
@@ -1150,13 +1149,13 @@ impl ProviderResponsesTransport {
         attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<reqwest::Response, V3ProviderError> {
-        ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
+        ensure_not_cancelled(request_id, provider_id, cancellation.as_ref())?;
         let timeout = deadline
             .map(|deadline| remaining_timeout(deadline, request_id, provider_id))
             .transpose()?;
         let secret = resolve_secret(
-            &request_id,
-            &provider_id,
+            request_id,
+            provider_id,
             &auth,
             timeout,
             cancellation.clone(),

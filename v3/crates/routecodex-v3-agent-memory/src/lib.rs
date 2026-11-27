@@ -88,23 +88,12 @@ pub struct CapturedMemoryEntry {
     pub source_ref: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryCaptureReport {
     pub captured: Vec<CapturedMemoryEntry>,
     pub diagnostics: Vec<MemoryCaptureDiagnostic>,
     pub bytes_after_strip: usize,
     pub memory_unit_found: bool,
-}
-
-impl Default for MemoryCaptureReport {
-    fn default() -> Self {
-        Self {
-            captured: Vec::new(),
-            diagnostics: Vec::new(),
-            bytes_after_strip: 0,
-            memory_unit_found: false,
-        }
-    }
 }
 
 impl MemoryCaptureReport {

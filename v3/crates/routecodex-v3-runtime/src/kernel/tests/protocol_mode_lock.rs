@@ -1,5 +1,4 @@
 use super::*;
-use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct DirectOnlyFailureTransport {

@@ -169,9 +169,11 @@ fn anthropic_valid_tool_name(name: &str) -> bool {
 // Safe controlled consumer for the received custom-tool input. The receipt is
 // derived from the actual returned input, so a lost or corrupted argument
 // cannot reach the expected provider acceptance.
+type BinaryI64Operation = fn(i64, i64) -> i64;
+
 fn evaluate_custom_input(input: &str) -> i64 {
     let trimmed = input.trim();
-    let ops: [(char, fn(i64, i64) -> i64); 4] = [
+    let ops: [(char, BinaryI64Operation); 4] = [
         ('+', i64::wrapping_add),
         ('-', i64::wrapping_sub),
         ('*', i64::wrapping_mul),
@@ -797,7 +799,7 @@ async fn goaichat_responses_custom_alias_collisions_roundtrip_json_and_sse_black
         .build()
         .unwrap();
 
-    for (_index, stream) in [false, true].into_iter().enumerate() {
+    for stream in [false, true].into_iter() {
         let mut payload = base_payload.clone();
         payload["stream"] = json!(stream);
         let first = client.post(&url).json(&payload).send().await;

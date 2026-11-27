@@ -73,6 +73,7 @@ pub use provider_failure_runtime_policy::{
 };
 pub use route_policy::*;
 pub use routecodex_v3_provider_responses::{
-    V3ProviderHealthListenerScope, V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
+    V3ProviderHealthListenerScope, V3ProviderIdentityRef, V3ProviderKeyRef,
+    V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
 };
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

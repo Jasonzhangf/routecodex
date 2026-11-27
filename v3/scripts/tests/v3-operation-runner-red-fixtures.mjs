@@ -555,6 +555,71 @@ const mutations = [
     expect: /node error_err02_classified typed resources mismatch/u,
   },
   {
+    name: 'error03-active-key-attempt-missing-read',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'error_err03_target_local_action');
+      if (!node) throw new Error('missing error_err03_target_local_action node');
+      node.resources.reads = node.resources.reads.filter((resource) => resource !== 'v3.target.active_key_attempt');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /node error_err03_target_local_action typed resources mismatch .*missing reads: v3\.target\.active_key_attempt/u,
+  },
+  {
+    name: 'error03-active-key-state-missing-read',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'error_err03_target_local_action');
+      if (!node) throw new Error('missing error_err03_target_local_action node');
+      node.resources.reads = node.resources.reads.filter((resource) => resource !== 'v3.target.active_key_state');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /node error_err03_target_local_action typed resources mismatch .*missing reads: v3\.target\.active_key_state/u,
+  },
+  {
+    name: 'error03-active-key-state-missing-write',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'error_err03_target_local_action');
+      if (!node) throw new Error('missing error_err03_target_local_action node');
+      node.resources.writes = node.resources.writes.filter((resource) => resource !== 'v3.target.active_key_state');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /node error_err03_target_local_action typed resources mismatch .*missing writes: v3\.target\.active_key_state/u,
+  },
+  {
+    name: 'error03-undeclared-resource-extra-read',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'error_err03_target_local_action');
+      if (!node) throw new Error('missing error_err03_target_local_action node');
+      node.resources.reads.push('v3.target.unknown_resource');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /node error_err03_target_local_action typed resources mismatch .*extra reads: v3\.target\.unknown_resource/u,
+  },
+  {
+    name: 'error03-undeclared-resource-extra-write',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'error_err03_target_local_action');
+      if (!node) throw new Error('missing error_err03_target_local_action node');
+      node.resources.writes.push('v3.target.unknown_resource');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /node error_err03_target_local_action typed resources mismatch .*extra writes: v3\.target\.unknown_resource/u,
+  },
+  {
     name: 'error-graph-missing-classification',
     mutate(tmp) {
       const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
@@ -1567,11 +1632,15 @@ for (const mutation of mutations) {
       encoding: 'utf8',
     });
     const output = `${result.stdout}\n${result.stderr}`;
-    if (!mutation.expect.test(output)) {
+    const rejectedWithoutSignal = Number.isInteger(result.status) && result.status !== 0 && result.signal === null;
+    if (!mutation.expect.test(output) || !rejectedWithoutSignal) {
       failed += 1;
-      console.error(`[v3-operation-runner-red] ${mutation.name}: expected ${mutation.expect}, got:\n${output || '<no output>'}`);
+      console.error(
+        `[v3-operation-runner-red] ${mutation.name}: expected ${mutation.expect} and nonzero exit without signal; `
+        + `got status=${result.status} signal=${result.signal}:\n${output || '<no output>'}`,
+      );
     } else {
-      console.log(`[v3-operation-runner-red] ${mutation.name}: failed as expected`);
+      console.log(`[v3-operation-runner-red] ${mutation.name}: failed as expected (exit ${result.status}, no signal)`);
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

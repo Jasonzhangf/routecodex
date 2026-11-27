@@ -9,6 +9,7 @@ pub mod probe;
 mod probe_backoff;
 mod provider_auth;
 mod provider_cooldown_probe;
+mod provider_identity;
 pub use provider_cooldown_probe::V3ProviderCooldownProbeKey;
 pub mod raw_response;
 mod shared;
@@ -37,6 +38,7 @@ pub use key_health::{
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
 pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};
 pub use provider_auth::{V3DiscoveredModel, V3DiscoveredModelSource};
+pub use provider_identity::{V3ProviderIdentityRef, V3ProviderKeyRef};
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3ProviderSseStream,

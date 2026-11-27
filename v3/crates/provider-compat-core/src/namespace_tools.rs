@@ -73,7 +73,7 @@ pub fn namespace_tool_name_map(tool: &Value) -> Result<Option<HashMap<String, St
     if tool.get("type").and_then(Value::as_str) != Some("namespace") {
         return Ok(None);
     }
-    let registry = NamespaceToolIdentityRegistry::from_tools(&[tool.clone()])?;
+    let registry = NamespaceToolIdentityRegistry::from_tools(std::slice::from_ref(tool))?;
     Ok(Some(
         registry
             .identities()
@@ -264,7 +264,7 @@ fn flatten_namespace_custom(
             Value::String(format!("{namespace_name}__{name}")),
         );
         let source_description = child.get("description").cloned();
-        if source_description.as_ref().map_or(true, Value::is_string) {
+        if source_description.as_ref().is_none_or(Value::is_string) {
             if let Some(description) =
                 compose_namespace_description(namespace_descriptions, source_description)
             {
