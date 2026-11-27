@@ -557,6 +557,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     plan.relay_runtime_seeds()
                 });
                 seeds.request_execution_control = responses_request_execution_control.clone();
+                seeds.request_purpose = Some(request_purpose);
                 seeds.client_identity_headers = responses_client_identity_headers(&request_headers);
                 seeds
             },

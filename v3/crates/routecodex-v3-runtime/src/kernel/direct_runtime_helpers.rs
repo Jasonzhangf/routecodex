@@ -822,6 +822,55 @@ targets = [
     }
 }
 
+fn direct_compaction_completed(
+    body: &V3ClientBody,
+    purpose: crate::nodes::V3RequestPurpose,
+) -> bool {
+    use crate::nodes::V3RequestPurpose::{AuxiliaryCompaction, NativeCompaction};
+    let nonempty_string = |value: &serde_json::Value| {
+        value.as_str().is_some_and(|text| !text.trim().is_empty())
+    };
+    let completed = |body: &serde_json::Value| {
+        let outputs = body.get("output").and_then(serde_json::Value::as_array);
+        if purpose == NativeCompaction {
+            return outputs.is_some_and(|items| items.iter().any(|item| {
+                item["type"] == "compaction" && nonempty_string(&item["encrypted_content"])
+            }));
+        }
+        if purpose != AuxiliaryCompaction {
+            return false;
+        }
+        if let Some(choices) = body.get("choices").and_then(serde_json::Value::as_array) {
+            return choices.iter().any(|choice| {
+                choice["finish_reason"] == "stop"
+                    && choice["message"]["refusal"].is_null()
+                    && choice["message"]["content"].as_str()
+                        .is_some_and(crate::hub_v1::v3_text_has_visible_content)
+            });
+        }
+        crate::hub_v1::v3_responses_compact_summary_completed(body)
+    };
+    match body {
+        V3ClientBody::Json(body) => completed(body),
+        V3ClientBody::CommittedSse(stream) if purpose == AuxiliaryCompaction => {
+            let frames = stream.sealed_frames();
+            let mut chat = crate::hub_v1::V3OpenAiChatSseReducerState::default();
+            for event in frames.iter().flat_map(|frame| {
+                direct_runtime_helpers_stream::parse_direct_sse_json_frames(frame)
+            }) {
+                if event["type"] == "response.completed" {
+                    return completed(&event["response"]);
+                }
+                if event.get("choices").is_some() && chat.apply_chunk(&event).is_err() {
+                    return false;
+                }
+            }
+            chat.materialize_completion().is_ok_and(|reply| completed(&reply))
+        }
+        _ => false,
+    }
+}
+
 fn v3_direct_selection_now_ms(
     provider_health: &V3ProviderFailureRuntimeHealth,
 ) -> Result<u64, String> {
@@ -835,6 +884,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     source: V3Error01SourceRaised,
     status: u16,
     state: &mut V3DirectProviderFailurePolicyState<'_>,
+    witness: Option<&V3ExternalHttpWitness>,
 ) -> Result<V3DirectProviderFailurePolicyResult, DirectPolicyFailure> {
     if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect) {
         let decision = run_v3_direct_policy_error_02_to_05_decision(
@@ -871,7 +921,16 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .external_error
         .as_ref()
         .and_then(|error| error.provider_http_status());
-    let is_health_neutral_failure = is_response_processing_failure
+    let ordinary_request = selected.route.estimated_history_turns.is_some();
+    let session_turn_limit_rejected = ordinary_request && provider_http_status == Some(400)
+        && witness.is_some_and(V3ExternalHttpWitness::is_session_turn_limit_rejection);
+    if session_turn_limit_rejected {
+        context.provider_health.record_session_turn_limit(
+            context.failure_session_scope,
+            &selected.candidate.provider_id,
+        );
+    }
+    let is_health_neutral_failure = session_turn_limit_rejected || is_response_processing_failure
         || (provider_http_status != Some(403)
             && crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
                 source.source_stage,
@@ -898,7 +957,20 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     state
         .failed_candidates
         .extend(request_local_excluded.iter().cloned());
+    if session_turn_limit_rejected {
+        state.failed_candidates.extend(expanded_candidates.into_iter().flatten()
+            .filter(|candidate| candidate.provider_id == selected.candidate.provider_id)
+            .map(candidate_key));
+    }
     let mut failed_with_current = state.failed_candidates.clone();
+    if ordinary_request {
+        failed_with_current.extend(expanded_candidates.into_iter().flatten()
+            .filter(|candidate| context.provider_health.provider_blocked_until_compact(
+                context.failure_session_scope,
+                &candidate.provider_id,
+            ))
+            .map(candidate_key));
+    }
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
@@ -987,7 +1059,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             .map(|alternative| candidate_key(&alternative.candidate));
     }
     let final_eligible = remaining == 0 && next_provider_key.is_none();
-    let trial_failed = match context.recovery_control {
+    let trial_failed = match context.recovery_control.filter(|_| !session_turn_limit_rejected) {
         Some(control) => context.provider_health.settle_business_recovery_failure(
             control,
             &selected.candidate.provider_id,
@@ -1001,6 +1073,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     };
     if is_health_neutral_failure
         && !trial_failed
+        && !session_turn_limit_rejected
         && !final_eligible
         && matches!(provider_http_status, Some(400..=402 | 404..=599))
     {
@@ -1023,7 +1096,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
-            state: if is_response_processing_failure {
+            state: if session_turn_limit_rejected {
+                "session_turn_limit_exceeded"
+            } else if is_response_processing_failure {
                 "request_local_response_processing"
             } else if is_health_neutral_failure {
                 "request_local_provider_compat"

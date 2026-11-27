@@ -64,6 +64,7 @@ async fn direct_ordinary_429_streak_uses_the_failure_observation_time() {
             same_candidate_retries: &mut BTreeMap::new(),
             trace: &mut Vec::new(),
         },
+        None,
     )
     .await
     .unwrap();
@@ -159,6 +160,7 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
             same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("first-byte timeout policy");
@@ -389,6 +391,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
             same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("response processing recovery");

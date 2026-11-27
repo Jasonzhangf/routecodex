@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn session_turn_limit_requires_exact_code_in_complete_http_400() {
+    let exact = br#"{"error":{"code":"session_turn_limit_exceeded","message":"105 model turns"}}"#;
+    assert!(
+        V3ExternalHttpWitness::new(400, vec![], exact.to_vec()).is_session_turn_limit_rejection()
+    );
+    assert!(!V3ExternalHttpWitness::new(400, vec![], exact.to_vec())
+        .with_body_read_failure("incomplete")
+        .is_session_turn_limit_rejection());
+    assert!(
+        !V3ExternalHttpWitness::new(200, vec![], exact.to_vec()).is_session_turn_limit_rejection()
+    );
+    for malformed in [
+        r#"{"error":{"code":"other","message":"session_turn_limit_exceeded"}}"#,
+        r#"{"error":{"code":"SESSION_TURN_LIMIT_EXCEEDED"}}"#,
+        r#"{"error":{"code":"session_turn_limit_exceeded""#,
+    ] {
+        assert!(
+            !V3ExternalHttpWitness::new(400, vec![], malformed.as_bytes().to_vec())
+                .is_session_turn_limit_rejection()
+        );
+    }
+}
+
+#[test]
 fn pending_endpoint_uses_all_adjacent_typed_nodes() {
     let projected = project_v3_pending_endpoint_error(V3Debug01NodeEventRegistered {
         server_id: "srv".to_string(),

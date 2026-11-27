@@ -1107,6 +1107,7 @@ features:
   - build_v3_router_request_facts_for_entry
   - V3TargetInterpreter::classify_kind
   - V3TargetInterpreter::expand_candidates
+  - V3TargetInterpreter::candidate_within_turn_limit
   - V3TargetInterpreter::select_available
   - select_available_with_health_sticky
   - V3StickySelectionState::select

@@ -38,6 +38,25 @@ pub(crate) enum V3PlanExecutionModePolicy {
         entry_protocol: V3HubEntryProtocol,
         allowed_modes: Vec<String>,
     },
+    NativeResponsesCompact {
+        allowed_modes: Vec<String>,
+    },
+}
+
+impl V3PlanExecutionModePolicy {
+    pub(crate) fn responses_entry(
+        allowed_modes: Vec<String>,
+        purpose: crate::nodes::V3RequestPurpose,
+    ) -> Self {
+        if purpose == crate::nodes::V3RequestPurpose::NativeCompaction {
+            Self::NativeResponsesCompact { allowed_modes }
+        } else {
+            Self::DirectEntry {
+                entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes,
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -155,6 +174,28 @@ impl PlanExecutionOperator {
                 entry_protocol,
                 allowed_modes,
             } => (*entry_protocol, allowed_modes.clone()),
+            V3PlanExecutionModePolicy::NativeResponsesCompact { allowed_modes } => {
+                if !allowed_modes
+                    .iter()
+                    .any(|mode| mode.eq_ignore_ascii_case("direct"))
+                {
+                    return Err(crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3Execution11ProtocolDecision",
+                        "native_compact_direct_not_allowed",
+                        "native Responses compact requires the Direct execution mode",
+                    ));
+                }
+                // Native compact is a Responses endpoint with its own
+                // response object. The ordinary Responses Chat process
+                // setting cannot represent that compact object.
+                return Ok(crate::nodes::V3Execution11ProtocolDecision {
+                    mode: crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+                    entry_protocol: crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                    selected_provider_protocol: crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                    target: selected,
+                });
+            }
         };
         let entry_protocol = match entry_protocol {
             V3HubEntryProtocol::Responses => "responses",
@@ -171,7 +212,7 @@ impl PlanExecutionOperator {
     }
 
     fn execute_plan(&self) -> PlanExecutionOperatorOutput {
-        let expanded = match &self.target_source {
+        let mut expanded = match &self.target_source {
             V3PlanExecutionTargetSource::Expanded(expanded) => expanded.clone(),
             V3PlanExecutionTargetSource::OpaqueHit(hit) => {
                 match expand_v3_relay_target_candidates_from_opaque_hit(
@@ -185,11 +226,36 @@ impl PlanExecutionOperator {
                 }
             }
         };
+        if matches!(
+            self.mode_policy,
+            V3PlanExecutionModePolicy::NativeResponsesCompact { .. }
+        ) {
+            expanded.candidates.retain(|candidate| {
+                crate::hub_v1::provider_wire_protocol_for_selected_candidate(candidate).is_ok_and(
+                    |protocol| protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                ) && candidate.responses_transport
+                    == routecodex_v3_config::V3ResponsesTransportKind::Http
+            });
+        }
         // Selection remains immediate and never waits. Declared candidates are
         // not excluded by local capacity state; a real Provider failure switches
         // to the next declared candidate on the following iteration.
         let selected = match self.preferred_selected.clone().filter(|preferred| {
-            V3TargetInterpreter::candidate_admitted(&preferred.candidate, self.now_ms)
+            (!matches!(
+                self.mode_policy,
+                V3PlanExecutionModePolicy::NativeResponsesCompact { .. }
+            ) || expanded.candidates.contains(&preferred.candidate))
+                && V3TargetInterpreter::candidate_within_turn_limit(
+                    &self.manifest,
+                    &expanded.route,
+                    &preferred.candidate,
+                )
+                && !(expanded.route.estimated_history_turns.is_some()
+                    && self.provider_health.provider_blocked_until_compact(
+                        &self.failure_session_scope,
+                        &preferred.candidate.provider_id,
+                    ))
+                && V3TargetInterpreter::candidate_admitted(&preferred.candidate, self.now_ms)
                 && !self.request_local_excluded_candidates.contains(
                     &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
                         &preferred.candidate,

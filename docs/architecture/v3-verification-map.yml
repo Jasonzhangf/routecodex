@@ -1511,6 +1511,12 @@ features:
     forbidden_claim: Do not claim P5 Router/Target selection, P6 Responses Provider request, P7 relay/protocol support, real ~/.rcc mutation, or global install from P3/P4 evidence.
 - feature_id: v3.virtual_router_target_interpreter
   status: p5_source_and_live_verified
+  estimated_turn_filter_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server estimated_turn_filter
+    test_ids: [responses_estimated_turn_filter_applies_per_request, estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_role]
+  session_turn_limit_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server turn_limit
+    test_ids: [responses_session_turn_limit_skips_every_key_until_compact, responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider]
   admission_nonblocking_blackbox:
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e37891a_admission_nonblocking -- --nocapture --test-threads=1
     test_ids:

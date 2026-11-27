@@ -140,6 +140,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
 > {
     Box::pin(async move {
         chat_process_refill.clear();
+        let auxiliary_compaction = initial_relay_seeds.request_purpose
+            == Some(crate::nodes::V3RequestPurpose::AuxiliaryCompaction);
         let client_identity_headers = initial_relay_seeds.client_identity_headers.clone();
         let observability_accumulator = initial_relay_seeds
             .observability_accumulator
@@ -177,6 +179,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .to_string(),
             ));
         }
+        let source_estimated_turns = initial_expanded
+            .is_none()
+            .then(|| crate::nodes::estimate_history_turns(&input.payload, "responses"));
         let req01 = build_v3_hub_req_inbound_01_client_raw(
             input.payload,
             V3HubEntryProtocol::Responses,
@@ -215,6 +220,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 entry_kind: "responses".to_string(),
                 endpoint_path: "/v1/responses".to_string(),
                 requested_model: None,
+                source_estimated_turns,
+                is_compaction: auxiliary_compaction,
                 deterministic_sample,
             },
         };
@@ -278,6 +285,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
                 })?
             }
+        };
+        let compact_generation = if auxiliary_compaction {
+            request_execution_control.retain_compaction_generation(
+                provider_health.compaction_turn_limit_generation(&input.failure_session_scope),
+            )
+        } else {
+            None
         };
         failed_candidates.extend(
             request_execution_control
@@ -722,6 +736,19 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 .map(|history| {
                     history.capture_attempt(transport_request.body(), provider_wire_protocol)
                 });
+            if selected.route.estimated_history_turns.is_some()
+                && provider_health.provider_blocked_until_compact(
+                    &failure_context.failure_session_scope,
+                    &selected_target_provider_id,
+                )
+            {
+                failed_candidates.insert(
+                    crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                        &selected.candidate,
+                    ),
+                );
+                continue;
+            }
             if !provider_health
                 .acquire_business_recovery_trial(
                     &request_execution_control,
@@ -1144,6 +1171,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     {
                         history.record_success(&attempt_success_receipt, images);
                     }
+                    if let Some(generation) = compact_generation.filter(|_| {
+                        disposition != V3ChatProcessRefillDisposition::RequestRefill
+                            && super::v3_responses_compact_summary_completed(&finalized_response)
+                    }) {
+                        provider_health.clear_turn_limits_after_compaction(
+                            &failure_context.failure_session_scope,
+                            generation,
+                            &attempt_success_receipt,
+                        );
+                    }
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,
                         terminal_disposition: None,
@@ -1429,6 +1466,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         (&request_execution_control.image_history, attempt_images)
                     {
                         history.record_success(&attempt_success_receipt, images);
+                    }
+                    if let Some(generation) = compact_generation.filter(|_| {
+                        disposition != V3ChatProcessRefillDisposition::RequestRefill
+                            && super::v3_responses_compact_summary_completed(&finalized_response)
+                    }) {
+                        provider_health.clear_turn_limits_after_compaction(
+                            &failure_context.failure_session_scope,
+                            generation,
+                            &attempt_success_receipt,
+                        );
                     }
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,

@@ -189,6 +189,844 @@ async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
 mod image_input_blackbox;
 
 #[tokio::test]
+async fn estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_role() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("estimated-turn-cross-protocol");
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "estimated-turn-fixture");
+    let (upstream, mut captures, shutdown) = start_controlled_snapall_upstream().await;
+    let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Direct);
+    for (provider, model) in [("chat_ok", "chat-wire"), ("gemini_ok", "gemini-wire")] {
+        manifest
+            .providers
+            .get_mut(provider)
+            .unwrap()
+            .models
+            .get_mut(model)
+            .unwrap()
+            .exclude_at_estimated_turns = std::num::NonZeroU64::new(99);
+    }
+    let (limited_url, mut limited, limited_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::BAD_REQUEST,
+            "application/json",
+            br#"{"error":{"code":"session_turn_limit_exceeded","message":"105 model turns"}}"#
+                .to_vec(),
+        )
+        .await;
+    let mut limited_provider = manifest.providers["chat_ok"].clone();
+    limited_provider.id = "chat_limited".into();
+    limited_provider.base_url = limited_url.clone();
+    limited_provider
+        .interfaces
+        .get_mut("default")
+        .unwrap()
+        .base_url = limited_url;
+    manifest
+        .providers
+        .insert(limited_provider.id.clone(), limited_provider);
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    let mut compact = group.pools["default"].clone();
+    compact.id = "compact".into();
+    compact.route_object = Some("compact".into());
+    compact.targets[0].provider = Some("chat_ok".into());
+    compact.targets[0].model = Some("chat-wire".into());
+    group.compact_route_object = compact.route_object.clone();
+    group.pools.insert(compact.id.clone(), compact);
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", server.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let chat_history: Vec<_> = (0..100).map(|index| {
+        json!({"role": if index % 2 == 0 { "assistant" } else { "user" }, "content": format!("chat {index}")})
+    }).collect();
+    let chat_body = json!({"model":"chat_ok.chat-wire","messages":chat_history,"stream":false});
+    let chat_url = format!("{base}/v1/chat/completions");
+    assert!(client
+        .post(&chat_url)
+        .json(&chat_body)
+        .send()
+        .await
+        .is_err());
+    assert!(captures.try_recv().is_err());
+    let compact = client
+        .post(&chat_url)
+        .header("x-routecodex-request-purpose", "compaction")
+        .json(&chat_body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(compact.status(), StatusCode::OK);
+    assert!(compact
+        .text()
+        .await
+        .unwrap()
+        .contains("controlled chat JSON"));
+    let capture = captures
+        .try_recv()
+        .expect("Chat compact must reach its provider");
+    assert_eq!(
+        capture.body["messages"].as_array().unwrap().len(),
+        chat_history.len()
+    );
+    let limited_request = json!({
+        "model":"chat_limited.chat-wire",
+        "messages":[{"role":"user","content":"ordinary limited chat request"}],"stream":false
+    });
+    let ordinary = || {
+        client
+            .post(&chat_url)
+            .header("x-session-id", "aux-compact-fixture")
+            .json(&limited_request)
+    };
+    assert_eq!(
+        ordinary().send().await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(limited.try_recv().is_ok());
+    for (current, expected_dispatch) in [
+        ("turn-limit-content-filter", false),
+        ("turn-limit-good-summary", true),
+    ] {
+        let response = client.post(&chat_url)
+            .header("x-session-id", "aux-compact-fixture")
+            .header("x-routecodex-request-purpose", "compaction")
+            .json(&json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":current}],"stream":false}))
+            .send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = response.json::<Value>().await.unwrap();
+        let expected_reason = if expected_dispatch {
+            "stop"
+        } else {
+            "content_filter"
+        };
+        assert_eq!(response["choices"][0]["finish_reason"], expected_reason);
+        assert!(captures.try_recv().is_ok());
+        let ordinary_response = ordinary().send().await;
+        if expected_dispatch {
+            assert_eq!(ordinary_response.unwrap().status(), StatusCode::BAD_REQUEST);
+            assert!(limited.try_recv().is_ok());
+        } else {
+            assert!(ordinary_response.is_err());
+            assert!(limited.try_recv().is_err());
+        }
+    }
+
+    let gemini_url = format!("{base}/v1beta/models/gemini_ok.gemini-wire:generateContent");
+    for explicit_user_role in [false, true] {
+        for count in [98, 99] {
+            let mut contents: Vec<_> = (0..count)
+                .map(|index| {
+                    let mut message = json!({"parts":[{"text":format!("gemini {index}")}]});
+                    if index % 2 == 0 {
+                        if explicit_user_role {
+                            message["role"] = json!("user");
+                        }
+                    } else {
+                        message["role"] = json!("model");
+                    }
+                    message
+                })
+                .collect();
+            contents.push(json!({"role":"user","parts":[{"text":"current user turn"}]}));
+            let response = client
+                .post(&gemini_url)
+                .json(&json!({"contents":contents}))
+                .send()
+                .await;
+            if count == 98 {
+                assert_eq!(response.unwrap().status(), StatusCode::OK);
+                assert!(captures.try_recv().is_ok());
+            } else {
+                assert!(response.is_err(), "roleless input bypassed the turn limit");
+                assert!(captures.try_recv().is_err());
+            }
+        }
+    }
+    server.shutdown().await;
+    let _ = shutdown.send(());
+    let _ = limited_shutdown.send(());
+}
+
+#[tokio::test]
+async fn responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("nonmatching-turn-limit");
+    std::env::set_var("V3_P6_TEST_KEY", "nonmatching-turn-limit-fixture");
+    for relay in [false, true] {
+        for (status, body) in [
+            (
+                StatusCode::BAD_REQUEST,
+                r#"{"error":{"code":"another_code","message":"session_turn_limit_exceeded"}}"#,
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                r#"{"error":{"code":"session_turn_limit_exceeded""#,
+            ),
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"error":{"code":"session_turn_limit_exceeded"}}"#,
+            ),
+            (
+                StatusCode::OK,
+                r#"{"id":"resp_content","status":"completed","output_text":"session_turn_limit_exceeded","output":[{"type":"output_text","text":"session_turn_limit_exceeded"}]}"#,
+            ),
+        ] {
+            let (primary_url, mut primary, primary_shutdown) =
+                start_controlled_terminal_upstream_with_body(
+                    status,
+                    "application/json",
+                    body.as_bytes().to_vec(),
+                )
+                .await;
+            let (fallback_url, mut fallback, fallback_shutdown) =
+                start_controlled_responses_relay_upstream().await;
+            let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+                free_port(),
+                free_port(),
+                &primary_url,
+                "responses",
+                Some(&fallback_url),
+                "",
+                relay,
+            );
+            let provider = manifest.providers.get_mut("test").unwrap();
+            provider.health.as_mut().unwrap().enabled = true;
+            if let Some(responses) = &mut provider.responses {
+                responses.streaming = routecodex_v3_config::V3StreamingPolicy::Client;
+                provider.interfaces.get_mut("default").unwrap().responses = Some(responses.clone());
+            }
+            let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+            let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap();
+            for _ in 0..2 {
+                let result = client
+                    .post(&endpoint)
+                    .header("x-session-id", "nonmatching-witness")
+                    .json(&json!({"model":"client-test","input":"ordinary","stream":false}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(result.status(), StatusCode::OK);
+                assert!(primary.try_recv().is_ok(), "relay={relay} status={status}");
+                assert_eq!(fallback.try_recv().is_ok(), status != StatusCode::OK);
+            }
+            server.shutdown().await;
+            let _ = primary_shutdown.send(());
+            let _ = fallback_shutdown.send(());
+        }
+    }
+}
+
+#[tokio::test]
+async fn responses_session_turn_limit_skips_every_key_until_compact() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("session-turn-limit");
+    std::env::set_var("V3_P6_TEST_KEY", "session-turn-limit-fixture");
+    for relay in [false, true] {
+        let (primary_url, mut primary, primary_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                br#"{"error":{"code":"session_turn_limit_exceeded","message":"105 model turns"}}"#
+                    .to_vec(),
+            )
+            .await;
+        let (fallback_url, mut fallback, fallback_shutdown) =
+            start_controlled_responses_relay_upstream().await;
+        let (compact_url, mut compact_upstream, compact_shutdown) =
+            start_controlled_terminal_upstream_with_body_when(
+                StatusCode::OK,
+                "application/json",
+                br#"{"id":"cmp_fixture","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque-fixture-summary"}]}"#.to_vec(),
+                |body| body.to_string().contains("compact-success"),
+            ).await;
+        let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+            free_port(),
+            free_port(),
+            &primary_url,
+            "responses",
+            Some(&fallback_url),
+            "exclude_at_estimated_turns = 99",
+            relay,
+        );
+        let auth = &mut manifest.providers.get_mut("test").unwrap().auth;
+        let mut sibling = auth.entries[0].clone();
+        sibling.alias = "sibling".into();
+        auth.entries.push(sibling);
+        manifest
+            .providers
+            .get_mut("test")
+            .unwrap()
+            .health
+            .as_mut()
+            .unwrap()
+            .enabled = true;
+        let mut compact_provider = manifest.providers["fallback"].clone();
+        compact_provider.id = "compact_fixture".into();
+        compact_provider.base_url = compact_url.clone();
+        compact_provider
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .base_url = compact_url;
+        compact_provider.responses = manifest.providers["test"].responses.clone();
+        if let Some(responses) = &mut compact_provider.responses {
+            responses.streaming = routecodex_v3_config::V3StreamingPolicy::Client;
+        }
+        compact_provider
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .responses = compact_provider.responses.clone();
+        manifest
+            .providers
+            .insert(compact_provider.id.clone(), compact_provider);
+        let group = manifest.route_groups.get_mut("default").unwrap();
+        for pool in group.pools.values_mut() {
+            let mut sibling = pool.targets[0].clone();
+            sibling.key = Some("sibling".into());
+            pool.targets.insert(1, sibling);
+        }
+        let mut compact_pool = group.pools["client_test"].clone();
+        compact_pool.id = "compact".into();
+        compact_pool.route_object = Some("fixture-compact".into());
+        let mut compact_target = compact_pool.targets.pop().unwrap();
+        compact_target.provider = Some("compact_fixture".into());
+        compact_pool.targets = vec![compact_target];
+        group.compact_route_object = compact_pool.route_object.clone();
+        group.pools.insert(compact_pool.id.clone(), compact_pool);
+        let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let final_pin =
+            || {
+                client.post(&endpoint)
+            .header("x-session-id", "final-turn-limit")
+            .json(&json!({"model":"test.test","input":"ordinary pinned request","stream":false}))
+            };
+        let final_error = final_pin().send().await.unwrap();
+        assert_eq!(final_error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            final_error.json::<Value>().await.unwrap()["error"]["code"],
+            "session_turn_limit_exceeded"
+        );
+        assert!(primary.try_recv().is_ok());
+        assert!(
+            primary.try_recv().is_err(),
+            "final provider retried a sibling key"
+        );
+        assert!(
+            final_pin().send().await.is_err(),
+            "pre-dispatch exhaustion reused an old witness"
+        );
+        assert!(primary.try_recv().is_err());
+        assert!(fallback.try_recv().is_err());
+        for (session, expected_primary) in [
+            ("blocked-turn-limit", true),
+            ("blocked-turn-limit", false),
+            ("independent-turn-limit", true),
+        ] {
+            let body = client
+                .post(&endpoint)
+                .header("x-session-id", session)
+                .json(&json!({"model":"client-test","input":"short request","stream":false}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                body.status(),
+                StatusCode::OK,
+                "relay={relay} session={session}"
+            );
+            assert_eq!(body.json::<Value>().await.unwrap()["status"], "completed");
+            assert!(fallback.try_recv().is_ok());
+            assert_eq!(
+                primary.try_recv().is_ok(),
+                expected_primary,
+                "relay={relay} session={session}"
+            );
+            assert!(
+                primary.try_recv().is_err(),
+                "sibling key was tried for {session}"
+            );
+        }
+        let pin = client
+            .post(&endpoint)
+            .header("x-session-id", "blocked-turn-limit")
+            .json(&json!({"model":"test.test","input":"short request","stream":false}))
+            .send()
+            .await;
+        assert!(
+            pin.is_err(),
+            "a blocked explicit pin must never send: {pin:?}"
+        );
+        assert!(primary.try_recv().is_err());
+        assert!(fallback.try_recv().is_err());
+        for (marker, expected_status, expected_primary) in [
+            ("compact-failure", StatusCode::BAD_REQUEST, false),
+            ("compact-success", StatusCode::OK, true),
+        ] {
+            let compact = client
+                .post(format!("{endpoint}/compact"))
+                .header("x-session-id", "blocked-turn-limit")
+                .json(&json!({"model":"client-test","input":marker,"stream":false}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                compact.status(),
+                expected_status,
+                "relay={relay} purpose={marker}"
+            );
+            if expected_primary {
+                let compact_body = compact.json::<Value>().await.unwrap();
+                assert_eq!(
+                    compact_body["output"][0]["encrypted_content"], "opaque-fixture-summary",
+                    "relay={relay} compact body={compact_body}"
+                );
+            }
+            let compact_capture = compact_upstream
+                .try_recv()
+                .expect("compact did not reach its declared upstream");
+            assert_eq!(
+                compact_capture.request_path.as_deref(),
+                Some("/v1/responses/compact")
+            );
+            let ordinary = client
+                .post(&endpoint)
+                .header("x-session-id", "blocked-turn-limit")
+                .json(&json!({"model":"client-test","input":"after compact","stream":false}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(ordinary.status(), StatusCode::OK);
+            assert!(fallback.try_recv().is_ok());
+            assert_eq!(
+                primary.try_recv().is_ok(),
+                expected_primary,
+                "relay={relay} purpose={marker}"
+            );
+            assert!(primary.try_recv().is_err());
+        }
+        for stream in [false, true] {
+            let session_id = format!("auxiliary-responses-conversation-{stream}");
+            let auxiliary_pin = || {
+                client.post(&endpoint)
+                .header("x-session-id", &session_id)
+                .json(&json!({"model":"test.test","input":"limited auxiliary session","stream":false}))
+            };
+            assert_eq!(
+                auxiliary_pin().send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(primary.try_recv().is_ok());
+            for marker in [
+                "turn-limit-refusal-summary",
+                "turn-limit-invisible-summary",
+                "turn-limit-good-responses-summary",
+            ] {
+                let compact = client
+                    .post(&endpoint)
+                    .header("x-session-id", &session_id)
+                    .header("x-routecodex-request-purpose", "compaction")
+                    .json(&json!({"model":"client-test","input":marker,"stream":stream,
+                        "tools":[{"type":"function","name":"lookup_weather","parameters":{"type":"object"}}]
+                    }))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(compact.status(), StatusCode::OK);
+                let compact_body = if stream {
+                    compact
+                        .text()
+                        .await
+                        .unwrap()
+                        .lines()
+                        .filter_map(|line| line.strip_prefix("data: "))
+                        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                        .find(|event| event["type"] == "response.completed")
+                        .expect("compaction SSE must deliver its terminal response")["response"]
+                        .clone()
+                } else {
+                    compact.json().await.unwrap()
+                };
+                assert_eq!(compact_body["status"], "completed");
+                let output = compact_body["output"].as_array().unwrap();
+                let parts: Vec<_> = output
+                    .iter()
+                    .flat_map(|item| item["content"].as_array().into_iter().flatten())
+                    .collect();
+                match marker {
+                    "turn-limit-refusal-summary" => {
+                        assert!(
+                            parts.iter().any(|part| part["type"] == "refusal"
+                                && part["refusal"] == "No usable summary"),
+                            "{compact_body}"
+                        );
+                        assert!(
+                            parts
+                                .iter()
+                                .any(|part| part["type"] == "output_text"
+                                    && part["text"] == "Some text"),
+                            "{compact_body}"
+                        );
+                    }
+                    "turn-limit-invisible-summary" => {
+                        assert!(
+                            output.iter().any(|item| item["type"] == "function_call"
+                                && item["call_id"] == "invisible_summary_call"),
+                            "{compact_body}"
+                        );
+                    }
+                    _ => assert!(
+                        parts.iter().any(|part| part["type"] == "output_text"
+                            && part["text"] == "Completed compact summary"),
+                        "{compact_body}"
+                    ),
+                }
+                let dispatched = compact_upstream.try_recv().unwrap();
+                assert_eq!(dispatched.request_path.as_deref(), Some("/v1/responses"));
+                assert_eq!(dispatched.body["stream"], stream);
+                let next = auxiliary_pin().send().await;
+                if marker == "turn-limit-good-responses-summary" {
+                    assert_eq!(
+                        next.unwrap().status(),
+                        StatusCode::BAD_REQUEST,
+                        "relay={relay}"
+                    );
+                    assert!(primary.try_recv().is_ok());
+                } else {
+                    assert!(next.is_err(), "invalid compact result cleared the block: relay={relay} stream={stream} purpose={marker}");
+                    assert!(primary.try_recv().is_err());
+                }
+            }
+        }
+        // There are two keys. These independent failures exceed the normal
+        // cooldown threshold for both keys if exact turn-limit failures are
+        // recorded as ordinary provider failures.
+        for i in 0..24 {
+            let pinned = client.post(&endpoint)
+                .header("x-session-id", format!("health-final-{i}"))
+                .json(&json!({"model":"test.test","input":"final error health control","stream":false}))
+                .send().await.unwrap();
+            assert_eq!(pinned.status(), StatusCode::BAD_REQUEST);
+            assert!(primary.try_recv().is_ok());
+            assert!(primary.try_recv().is_err());
+            let recovered = client.post(&endpoint)
+                .header("x-session-id", format!("health-successor-{i}"))
+                .json(&json!({"model":"client-test","input":"successor health control","stream":false}))
+                .send().await.unwrap();
+            assert_eq!(recovered.status(), StatusCode::OK);
+            assert!(
+                primary.try_recv().is_ok(),
+                "an exact rejection affected provider health"
+            );
+            assert!(primary.try_recv().is_err());
+            assert!(fallback.try_recv().is_ok());
+        }
+        server.shutdown().await;
+        let _ = primary_shutdown.send(());
+        let _ = fallback_shutdown.send(());
+        let _ = compact_shutdown.send(());
+    }
+}
+
+#[tokio::test]
+async fn responses_estimated_turn_filter_applies_per_request() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("estimated-turn-filter");
+    std::env::set_var("V3_P6_TEST_KEY", "estimated-turn-filter-fixture");
+    for relay in [false, true] {
+        assert_estimated_turn_filter_through_responses(relay).await;
+        assert_estimated_turn_filter_on_real_tool_followup(relay).await;
+    }
+}
+
+async fn assert_estimated_turn_filter_on_real_tool_followup(relay: bool) {
+    let (primary_url, mut primary, primary_shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    let (fallback_url, mut fallback, fallback_shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+        free_port(),
+        free_port(),
+        &primary_url,
+        "responses",
+        Some(&fallback_url),
+        "exclude_at_estimated_turns = 99",
+        relay,
+    );
+    if relay {
+        let primary_responses = manifest.providers.get_mut("test").unwrap();
+        primary_responses.responses.as_mut().unwrap().streaming =
+            routecodex_v3_config::V3StreamingPolicy::Client;
+        primary_responses
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .responses = primary_responses.responses.clone();
+    }
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let mut history: Vec<_> = (0..97).map(|i| {
+        json!({"role": if i % 2 == 0 { "user" } else { "assistant" }, "content": format!("history {i}")})
+    }).collect();
+    history.push(json!({"role":"user","content":"Get the weather for Paris."}));
+    let tools = json!([{"type":"function","name":"lookup_weather","parameters":{
+        "type":"object","properties":{"city":{"type":"string"}},"required":["city"]
+    }}]);
+    let first = client
+        .post(&endpoint)
+        .header("x-session-id", "turn-limit-tool-followup")
+        .json(&json!({"model":"client-test","input":history,"tools":tools,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: Value = first.json().await.unwrap();
+    let call = first["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap();
+    assert_eq!(call["name"], "lookup_weather");
+    let args: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+    assert_eq!(args, json!({"city":"Paris"}));
+    assert!(primary.try_recv().is_ok());
+    assert!(fallback.try_recv().is_err());
+
+    let call_id = call["call_id"].as_str().unwrap();
+    let result = execute_turn_limit_fixture_tool(call["name"].as_str().unwrap(), &args);
+    history.push(call.clone());
+    history.push(json!({"type":"function_call_output","call_id":call_id,"output":result}));
+    let followup = client
+        .post(&endpoint)
+        .header("x-session-id", "turn-limit-tool-followup")
+        .json(&json!({"model":"client-test","input":history,"tools":tools,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(followup.status(), StatusCode::OK);
+    let followup: Value = followup.json().await.unwrap();
+    assert_eq!(followup["output_text"], "RCCV3_BODY_METADATA_TURN2_OK");
+    assert!(
+        primary.try_recv().is_err(),
+        "estimated limit must exclude the first provider"
+    );
+    let wire = fallback
+        .try_recv()
+        .expect("follow-up must reach the eligible provider");
+    let input = wire.body["input"].as_array().unwrap();
+    let forwarded = input
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["call_id"] == call_id)
+        .unwrap();
+    assert_eq!(forwarded["name"], call["name"]);
+    assert_eq!(forwarded["arguments"], call["arguments"]);
+    let forwarded_result = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output" && item["call_id"] == call_id)
+        .unwrap();
+    assert_eq!(forwarded_result["output"], result);
+    server.shutdown().await;
+    let _ = primary_shutdown.send(());
+    let _ = fallback_shutdown.send(());
+}
+
+fn execute_turn_limit_fixture_tool(name: &str, args: &Value) -> String {
+    let readings = [("Paris", 18), ("London", 15)];
+    match (name, args["city"].as_str()) {
+        ("lookup_weather", Some(city)) => {
+            let (_, degrees) = readings
+                .iter()
+                .find(|(known_city, _)| *known_city == city)
+                .expect("fixture weather lookup must receive a known city");
+            format!("{city}: {degrees} C")
+        }
+        _ => panic!("unexpected fixture tool call {name}"),
+    }
+}
+
+async fn assert_estimated_turn_filter_through_responses(relay: bool) {
+    let (primary_url, mut primary, primary_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    let (fallback_url, mut fallback, fallback_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+        free_port(),
+        free_port(),
+        &primary_url,
+        "responses",
+        Some(&fallback_url),
+        "exclude_at_estimated_turns = 99",
+        relay,
+    );
+    manifest.debug.snapshots = false;
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    let mut compact_pool = group.pools["client_test"].clone();
+    compact_pool.id = "compact".into();
+    compact_pool.route_object = Some("estimated-turn-compact".into());
+    compact_pool.targets.truncate(1);
+    group.compact_route_object = compact_pool.route_object.clone();
+    group.pools.insert(compact_pool.id.clone(), compact_pool);
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let history = |count| {
+        let mut input: Vec<_> = (0..count)
+            .map(|index| {
+                let role = if index % 2 == 0 { "user" } else { "assistant" };
+                json!({"role":role,"content":format!("fixture history {index}")})
+            })
+            .collect();
+        input.push(json!({"role":"user","content":"fixture current user input"}));
+        input
+    };
+    for count in [98, 99, 98] {
+        let input = history(count);
+        let response = client
+            .post(&endpoint)
+            .header("x-session-id", "estimated-turn-fixture")
+            .json(&json!({"model":"client-test","input":input,"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "relay={relay}, estimated turns {count}"
+        );
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["status"], "completed");
+        let (expected, excluded) = if count == 99 {
+            (&mut fallback, &mut primary)
+        } else {
+            (&mut primary, &mut fallback)
+        };
+        let capture = tokio::time::timeout(std::time::Duration::from_secs(2), expected.recv())
+            .await
+            .expect("expected provider was not called")
+            .unwrap();
+        let wire = capture.body.to_string();
+        assert!(wire.contains("fixture history 0"));
+        assert!(wire.contains(&format!("fixture history {}", count - 1)));
+        assert!(wire.contains("fixture current user input"));
+        assert!(
+            excluded.try_recv().is_err(),
+            "excluded provider received traffic"
+        );
+    }
+    let pinned = client
+        .post(&endpoint)
+        .json(&json!({"model":"test.test","input":history(99),"stream":false}))
+        .send()
+        .await;
+    assert!(
+        pinned.is_err(),
+        "a filtered explicit pin must not fabricate a provider response: {pinned:?}"
+    );
+    assert!(primary.try_recv().is_err());
+    assert!(fallback.try_recv().is_err());
+    let compact: Value = client
+        .post(format!(
+            "http://{}/_routecodex/diagnostics/virtual-router/dry-run",
+            server.listeners[0].addr
+        ))
+        .json(&json!({
+            "request":{"model":"client-test","input":history(99),"stream":false},
+            "metadata":{"requestId":"estimated-turn-compact","entryEndpoint":"/v1/responses/compact"}
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        compact["diagnostics"]["decision"]["selectedProviderKey"], "test:default:key:test",
+        "the long history must retain access to the compact model: {compact}"
+    );
+    assert!(
+        primary.try_recv().is_err(),
+        "dry-run contacted the provider"
+    );
+    if relay {
+        let mut request = format!("ws://{}/v1/responses", server.listeners[0].addr)
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            "openai-beta",
+            HeaderValue::from_static("responses_websockets=2026-02-06"),
+        );
+        let (mut socket, _) = connect_async(request).await.unwrap();
+        let mut history = history(97);
+        let current = history.pop().unwrap();
+        history.extend([
+            json!({"type":"function_call","name":"lookup","call_id":"call_turn",
+                "arguments":"{\"query\":\"fixture\"}"}),
+            json!({"type":"function_call_output","call_id":"call_turn","output":"fixture result"}),
+            current,
+        ]);
+        socket
+            .send(Message::Text(
+                json!({
+                    "type":"response.create","model":"client-test","input":history,"stream":false
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let completion = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let message = socket.next().await.unwrap().unwrap();
+                let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                if event["type"] == "response.completed" {
+                    break event;
+                }
+                assert_ne!(event["type"], "error", "{event}");
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(completion["response"]["status"], "completed");
+        let capture = primary
+            .try_recv()
+            .expect("original 98-turn WebSocket request was filtered");
+        let input = capture.body["input"].as_array().unwrap();
+        assert!(input
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["call_id"] == "call_turn"));
+        assert!(input
+            .iter()
+            .any(|item| item["type"] == "function_call_output"
+                && item["call_id"] == "call_turn"
+                && item["output"] == "fixture result"));
+        assert!(fallback.try_recv().is_err());
+        let _ = socket.close(None).await;
+    }
+    server.shutdown().await;
+    let _ = primary_shutdown.send(());
+    let _ = fallback_shutdown.send(());
+}
+
+#[tokio::test]
 async fn responses_same_session_routes_only_current_shell_operation() {
     let guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "current-shell-route-fixture");
@@ -1627,9 +2465,36 @@ fn responses_relay_provider_protocol_manifest(
     provider_type: &str,
     fallback_base_url: Option<&str>,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_provider_protocol_manifest_with_primary_options(
+        port_a,
+        port_b,
+        provider_base_url,
+        provider_type,
+        fallback_base_url,
+        "",
+        true,
+    )
+}
+
+fn responses_provider_protocol_manifest_with_primary_options(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    provider_type: &str,
+    fallback_base_url: Option<&str>,
+    primary_model_options: &str,
+    relay: bool,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
     let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
-    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let (hub_v1_declaration, responses_options) = if relay {
+        (
+            HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding),
+            r#"responses = { process = "chat", streaming = "always" }"#,
+        )
+    } else {
+        (HUB_V1_TEST_DECLARATION.to_owned(), "")
+    };
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
     let fallback_provider = fallback_base_url.map_or(String::new(), |base_url| {
         format!(
@@ -1662,7 +2527,7 @@ base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "chat", streaming = "always" }}
+{responses_options}
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
@@ -1672,6 +2537,7 @@ supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
 max_context_tokens = 128000
+{primary_model_options}
 {fallback_provider}
 [debug]
 log_console = false
@@ -2305,6 +3171,7 @@ targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropi
 
 #[derive(Debug)]
 struct ProviderCapture {
+    request_path: Option<String>,
     authorization: Option<String>,
     accept: Option<String>,
     session_id: Option<String>,
@@ -2318,6 +3185,7 @@ struct ProviderCapture {
 impl ProviderCapture {
     fn from_http(headers: &HeaderMap, body: Value) -> Self {
         Self {
+            request_path: None,
             authorization: header_text(headers, "authorization"),
             accept: header_text(headers, "accept"),
             session_id: header_text(headers, "session-id"),
@@ -2331,6 +3199,7 @@ impl ProviderCapture {
 
     fn from_websocket_handshake(request: &Request) -> Self {
         Self {
+            request_path: None,
             authorization: request
                 .headers()
                 .get("authorization")
@@ -2348,6 +3217,7 @@ impl ProviderCapture {
 
     fn from_body(body: Value) -> Self {
         Self {
+            request_path: None,
             authorization: None,
             accept: None,
             session_id: None,
@@ -3024,14 +3894,49 @@ struct ControlledTerminalState {
 
 async fn controlled_terminal_upstream(
     State(state): State<Arc<ControlledTerminalState>>,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    let compact_reply = if uri.path() == "/v1/responses" {
+        let text = body.to_string();
+        if text.contains("turn-limit-refusal-summary") {
+            Some(
+                r#"{"id":"resp_compact_refusal","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Some text"},{"type":"refusal","refusal":"No usable summary"}]}]}"#,
+            )
+        } else if text.contains("turn-limit-invisible-summary") {
+            Some(
+                r#"{"id":"resp_invisible_summary","status":"completed","output_text":"\u200b","output":[{"type":"output_text","text":"\u200b"},{"type":"function_call","call_id":"invisible_summary_call","name":"lookup_weather","arguments":"{}"}]}"#,
+            )
+        } else if text.contains("turn-limit-good-responses-summary") {
+            Some(
+                r#"{"id":"resp_compact_summary","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Completed compact summary"}]}]}"#,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let compact_stream = body["stream"].as_bool() == Some(true);
     let accepted = (state.accepts)(&body);
-    state
-        .captures
-        .send(ProviderCapture::from_http(&headers, body))
-        .unwrap();
+    let mut capture = ProviderCapture::from_http(&headers, body);
+    capture.request_path = Some(uri.path().to_owned());
+    state.captures.send(capture).unwrap();
+    if let Some(reply) = compact_reply {
+        let (content_type, body) = if compact_stream {
+            ("text/event-stream", format!(
+                "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{reply}}}\n\ndata: [DONE]\n\n"
+            ))
+        } else {
+            ("application/json", reply.to_owned())
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+    }
     if !accepted {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -3305,6 +4210,20 @@ async fn controlled_snapall_upstream(
     uri: Uri,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    if uri.path().ends_with("/chat/completions")
+        && body.pointer("/messages/0/content").and_then(Value::as_str)
+            == Some("turn-limit-content-filter")
+    {
+        state
+            .captures
+            .send(ProviderCapture::from_http(&headers, body))
+            .unwrap();
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"id":"chatcmpl_filtered","object":"chat.completion","model":"chat-wire","choices":[{"index":0,"message":{"role":"assistant","content":null},"finish_reason":"content_filter"}]}"#))
+            .unwrap();
+    }
     state
         .captures
         .send(ProviderCapture::from_http(&headers, body.clone()))
@@ -4648,6 +5567,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         max_tokens: Some(8192),
                         max_context_tokens: Some(262144),
                         context_token_estimate_scale_bps: 10_000,
+                        exclude_at_estimated_turns: None,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
@@ -4673,6 +5593,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         max_tokens: Some(8192),
                         max_context_tokens: Some(262144),
                         context_token_estimate_scale_bps: 10_000,
+                        exclude_at_estimated_turns: None,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
@@ -11576,10 +12497,20 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
                 let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
                 assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
-                assert!(
-                    captures.try_recv().is_ok(),
+                let capture = captures.try_recv().expect(&format!(
                     "{endpoint} must exercise actual provider transport"
-                );
+                ));
+                if endpoint == "/v1/responses/compact" && streaming {
+                    assert_eq!(
+                        capture.body,
+                        json!({
+                            "model":"wire-test",
+                            "input":"hello",
+                            "max_output_tokens":4096
+                        }),
+                        "native compact must omit the client stream field from its provider body"
+                    );
+                }
                 assert!(
                     received.is_ok(),
                     "{endpoint} failed to reach a terminal transport outcome"
