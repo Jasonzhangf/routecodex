@@ -2200,3 +2200,141 @@ fn a_429_during_an_outstanding_cooldown_preserves_the_committed_restriction() {
             .available
     );
 }
+
+#[test]
+fn policy_matched_streaks_and_generic_http_403_or_500_streaks_do_not_clobber_or_inflate_each_other()
+{
+    use routecodex_v3_provider_responses::{V3ProviderFailurePolicy, V3ProviderMatchedPolicyRule};
+
+    let store = V3ProviderKeyHealthStore::default();
+    let http_403 = V3ProviderFailureAction {
+        recovery: V3ProviderRecoveryKind::RecoverableCounted,
+        failure_threshold: 10,
+        failure_fingerprint: build_v3_provider_global_error_fingerprint(403).unwrap(),
+        cooldown_ms: 3_600_000,
+        ..V3ProviderFailureAction::recoverable("http_403")
+    };
+    for step in 0..9_u64 {
+        let proj = store
+            .record_provider_failure_action("p", "a", "m", &http_403, 1_000 + step)
+            .unwrap();
+        assert!(proj.available);
+        assert_eq!(proj.failure_streak, (step + 1) as u32);
+    }
+
+    // One matched transport policy failure must not wipe out the 9x HTTP 403 streak or clear `failure_streak_is_http_403`.
+    let conn_closed_action = V3ProviderFailureAction {
+        recovery: V3ProviderRecoveryKind::RecoverableCounted,
+        failure_threshold: 3,
+        failure_fingerprint: None,
+        cooldown_ms: 5_000,
+        ..V3ProviderFailureAction::recoverable("connection_closed")
+    };
+    let policy_rule = V3ProviderMatchedPolicyRule {
+        policy_id: "xingchiapi_transport_connection_closed",
+        failure_threshold: 3,
+        cooldown_ms: 5_000,
+    };
+    let during_policy = store
+        .record_provider_failure_action_with_matched_policy_for_interface(
+            "p",
+            "default",
+            "a",
+            "m",
+            &conn_closed_action,
+            1_020,
+            Some(policy_rule),
+        )
+        .unwrap();
+    assert!(during_policy.available);
+    assert_eq!(
+        during_policy.failure_streak, 9,
+        "policy failure must preserve generic HTTP 403 streak"
+    );
+
+    // Next HTTP 403 must reach 10 and commit cooldown immediately rather than restarting at 1.
+    let tenth_403 = store
+        .record_provider_failure_action("p", "a", "m", &http_403, 1_030)
+        .unwrap();
+    assert!(tenth_403.cooldown);
+    assert_eq!(tenth_403.failure_streak, 10);
+
+    // Conversely, policy streaks must never inflate generic failure_streak on an identity.
+    let store2 = V3ProviderKeyHealthStore::default();
+    for step in 0..2_u64 {
+        let p = store2
+            .record_provider_failure_action_with_matched_policy_for_interface(
+                "p2",
+                "default",
+                "a2",
+                "m2",
+                &conn_closed_action,
+                2_000 + step,
+                Some(policy_rule),
+            )
+            .unwrap();
+        assert!(p.available);
+        assert_eq!(
+            p.failure_streak, 0,
+            "policy streak must not inflate generic failure_streak"
+        );
+    }
+    let http_500 = V3ProviderFailureAction {
+        recovery: V3ProviderRecoveryKind::RecoverableCounted,
+        failure_threshold: 10,
+        failure_fingerprint: build_v3_provider_global_error_fingerprint(500).unwrap(),
+        cooldown_ms: 3_600_000,
+        ..V3ProviderFailureAction::recoverable("http_500")
+    };
+    let after_500 = store2
+        .record_provider_failure_action("p2", "a2", "m2", &http_500, 2_010)
+        .unwrap();
+    assert!(after_500.available);
+    assert_eq!(
+        after_500.failure_streak, 1,
+        "generic failure_streak after 2 policy hits + 1 HTTP 500 must be 1, not inflated to 2 or 3"
+    );
+
+    // Also verify V3ProviderFailureRecord reports policy-owned failure_count on policy hits cleanly.
+    let mut base_policy = V3ProviderFailurePolicy::default();
+    base_policy.failure_threshold = 10;
+    base_policy.cooldown_ms = 3_600_000;
+    let store3 = V3ProviderHealthStore::default();
+    let session_scope = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+        .expect("session scope");
+    let r1 = store3
+        .record_provider_failure_in_session_with_matched_policy_for_interface(
+            &session_scope,
+            "p3",
+            "default",
+            Some("a3"),
+            Some("m3"),
+            Some("http_403"),
+            build_v3_provider_global_error_fingerprint(403).unwrap(),
+            3_000,
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(r1.failure_count, 1);
+    let r_pol = store3
+        .record_provider_failure_in_session_with_matched_policy_for_interface(
+            &session_scope,
+            "p3",
+            "default",
+            Some("a3"),
+            Some("m3"),
+            Some("connection_closed"),
+            None,
+            3_001,
+            Some("xingchiapi_transport_connection_closed"),
+            Some(V3ProviderFailurePolicy {
+                failure_threshold: 3,
+                cooldown_ms: 5_000,
+                ..base_policy.clone()
+            }),
+        )
+        .unwrap();
+    assert_eq!(r_pol.failure_count, 1);
+    assert_eq!(r_pol.state, "healthy");
+}

@@ -1712,38 +1712,72 @@ async fn read_json_disguised_as_sse_or_stream(
             .unwrap_or_else(routecodex_v3_config::default_provider_sse_first_frame_timeout_ms),
     );
     let sse_first_frame_deadline = sniff_started + sse_first_frame_budget;
-    // Wait up to `max(deadline, sse_first_frame_deadline)` before classifying:
-    // slow disguised JSON remains legal until `deadline` (`request_timeout_ms`),
-    // while genuine SSE still fails immediately once `sse_first_frame_budget` expires.
-    let sniff_deadline = Some(
-        deadline
-            .map(|deadline| deadline.max(sse_first_frame_deadline))
-            .unwrap_or(sse_first_frame_deadline),
-    );
+    // Always bound the initial SSE/disguised-JSON prefix peek by `sse_first_frame_deadline`
+    // so an upstream sending `200 text/event-stream` and stalling with zero bytes never
+    // exceeds the declared `sse_first_frame_timeout_ms` budget (remote max 120s).
+    // Once `{`/`[` arrives within `sse_first_frame_deadline`, the remainder of the JSON
+    // document continues under `deadline` (`request_timeout_ms`).
+    let sse_prefix_limit = routecodex_v3_sse::SseTransportLimits::default().max_buffer_bytes;
+    let sniff_deadline = Some(sse_first_frame_deadline);
     let mut byte_stream = Box::pin(response.bytes_stream());
     let mut prefetched = Vec::<Bytes>::new();
+    let mut prefetched_prefix_bytes = 0usize;
     let mut first_non_ws: Option<u8> = None;
 
-    while let Some(chunk) = next_stream_chunk_with_budget(
-        &mut byte_stream,
-        &request_id,
-        &provider_id,
-        status,
-        &headers,
-        cancellation.as_ref(),
-        sniff_deadline,
-    )
-    .await?
-    {
-        if !chunk.is_empty() {
-            if let Some(byte) = chunk
-                .iter()
-                .copied()
-                .find(|byte| !byte.is_ascii_whitespace())
+    loop {
+        let chunk = match next_stream_chunk_with_budget(
+            &mut byte_stream,
+            &request_id,
+            &provider_id,
+            status,
+            &headers,
+            cancellation.as_ref(),
+            sniff_deadline,
+        )
+        .await
+        {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(V3ProviderError::ResponseBodyUnreadable { reason, .. })
+                if reason == "provider request budget exhausted while reading response body" =>
             {
-                first_non_ws = Some(byte);
+                return Err(V3ProviderError::Transport {
+                    request_id,
+                    provider_id,
+                    reason: format!(
+                        "provider SSE stream did not produce a first frame within timeout ({}ms)",
+                        sse_first_frame_budget.as_millis()
+                    ),
+                });
+            }
+            Err(err) => return Err(err),
+        };
+        if !chunk.is_empty() {
+            if let Some(pos) = chunk.iter().position(|byte| !byte.is_ascii_whitespace()) {
+                if prefetched_prefix_bytes.saturating_add(pos) > sse_prefix_limit {
+                    return Err(response_body_read_error(
+                        status,
+                        &request_id,
+                        &provider_id,
+                        headers,
+                        format!(
+                            "provider SSE prefix exceeded buffer limit ({sse_prefix_limit} bytes)"
+                        ),
+                    ));
+                }
+                first_non_ws = Some(chunk[pos]);
                 prefetched.push(chunk);
                 break;
+            }
+            prefetched_prefix_bytes = prefetched_prefix_bytes.saturating_add(chunk.len());
+            if prefetched_prefix_bytes > sse_prefix_limit {
+                return Err(response_body_read_error(
+                    status,
+                    &request_id,
+                    &provider_id,
+                    headers,
+                    format!("provider SSE prefix exceeded buffer limit ({sse_prefix_limit} bytes)"),
+                ));
             }
         }
         prefetched.push(chunk);

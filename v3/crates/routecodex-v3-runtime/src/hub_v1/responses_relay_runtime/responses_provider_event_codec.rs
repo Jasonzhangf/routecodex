@@ -146,15 +146,23 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
             if let Err(V3ResponsesSseTreeError::UnsupportedItemType { item_type }) =
                 classify_v3_responses_sse_output_item(item)
             {
-                eprintln!(
-                    "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec item_type={item_type:?} reason=unregistered_output_item_ignored"
-                );
+                let mut drops = vec![
+                    crate::projection_drop_log::V3ProjectionDropRecord::new_response_drop(
+                        "responses",
+                        "$.item",
+                        "unregistered_output_item_ignored",
+                        item.clone(),
+                        Value::String(item_type.to_string()),
+                        "observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook",
+                    ),
+                ];
+                observation.record_response_drops(&mut drops);
                 return Ok(None);
             }
         }
     }
     let terminal_original_slots =
-        filter_unknown_responses_output_items_in_event_response(&mut event)?;
+        filter_unknown_responses_output_items_in_event_response(&mut event, Some(observation))?;
     let transport_object = V3ResponsesSseTransportObject::new(
         object.event_name().map(ToOwned::to_owned),
         event.clone(),
@@ -176,13 +184,19 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     observation
         .record_provider_event_json(&projected_event)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    apply_v3_typed_responses_event(&projected_event, reducer, &terminal_original_slots)
+    apply_v3_typed_responses_event(
+        &projected_event,
+        reducer,
+        &terminal_original_slots,
+        Some(observation),
+    )
 }
 
 fn apply_v3_typed_responses_event(
     event: &Value,
     reducer: &mut V3ResponsesSseReducerState,
     terminal_original_slots: &[usize],
+    observation: Option<&V3RuntimeStreamObservation>,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     if let Some(error) = extract_v3_provider_event_error(event) {
         return Err(error);
@@ -196,9 +210,22 @@ fn apply_v3_typed_responses_event(
             ));
         }
         if !is_supported_typed_responses_event(event_type) {
-            eprintln!(
-                "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec event_type={event_type:?} reason=unregistered_event_ignored"
-            );
+            let mut drops = vec![
+                crate::projection_drop_log::V3ProjectionDropRecord::new_response_drop(
+                    "responses",
+                    "$.type",
+                    "unregistered_event_ignored",
+                    event.clone(),
+                    Value::String(event_type.to_string()),
+                    "apply_v3_typed_responses_event",
+                ),
+            ];
+            if let Some(observation) = observation {
+                observation.record_response_drops(&mut drops);
+            } else {
+                crate::projection_drop_log::V3ProjectionDropContext::disabled()
+                    .restamp_response_and_emit(&mut drops);
+            }
             return Ok(None);
         }
     }
@@ -236,6 +263,7 @@ fn apply_v3_typed_responses_event(
 
 fn filter_unknown_responses_output_items_in_event_response(
     event: &mut Value,
+    observation: Option<&V3RuntimeStreamObservation>,
 ) -> Result<Vec<usize>, V3ResponsesRelayRuntimeError> {
     let Some(output) = event
         .get_mut("response")
@@ -247,6 +275,7 @@ fn filter_unknown_responses_output_items_in_event_response(
     };
     let mut retained = Vec::with_capacity(output.len());
     let mut retained_slots = Vec::with_capacity(output.len());
+    let mut drops = Vec::new();
     for (original_index, item) in output.drain(..).enumerate() {
         match classify_v3_responses_sse_output_item(&item) {
             Ok(_) => {
@@ -254,8 +283,15 @@ fn filter_unknown_responses_output_items_in_event_response(
                 retained_slots.push(original_index);
             }
             Err(V3ResponsesSseTreeError::UnsupportedItemType { item_type }) => {
-                eprintln!(
-                    "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec item_type={item_type:?} reason=unregistered_output_item_ignored"
+                drops.push(
+                    crate::projection_drop_log::V3ProjectionDropRecord::new_response_drop(
+                        "responses",
+                        format!("$.response.output[{original_index}]"),
+                        "unregistered_output_item_ignored",
+                        item,
+                        Value::String(item_type.to_string()),
+                        "filter_unknown_responses_output_items_in_event_response",
+                    ),
                 );
             }
             Err(error) => {
@@ -263,6 +299,14 @@ fn filter_unknown_responses_output_items_in_event_response(
                     error.to_string(),
                 ));
             }
+        }
+    }
+    if !drops.is_empty() {
+        if let Some(observation) = observation {
+            observation.record_response_drops(&mut drops);
+        } else {
+            crate::projection_drop_log::V3ProjectionDropContext::disabled()
+                .restamp_response_and_emit(&mut drops);
         }
     }
     *output = retained;
@@ -805,6 +849,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
             &[],
+            None,
         )
         .expect("an output-cap response.incomplete is valid partial output")
         .expect("response.incomplete must project a terminal response");
@@ -821,6 +866,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
             &[],
+            None,
         )
         .expect("response.completed without usage must remain valid")
         .expect("response.completed must be terminal");
@@ -848,6 +894,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
             &[],
+            None,
         )
         .expect("output-cap incomplete terminal must be admitted")
         .expect("response.incomplete must be terminal");
@@ -874,6 +921,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
             &[],
+            None,
         )
         .expect("content_filter is representable")
         .expect("incomplete is terminal");
@@ -895,7 +943,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
         ] {
             let mut reducer = V3ResponsesSseReducerState::default();
-            let response = apply_v3_typed_responses_event(&payload, &mut reducer, &[])
+            let response = apply_v3_typed_responses_event(&payload, &mut reducer, &[], None)
                 .expect("reason is opaque business data")
                 .expect("incomplete is terminal");
             assert_eq!(response["status"], "incomplete");
@@ -920,6 +968,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
             &[],
+            None,
         )
         .expect_err("response.failed must remain an explicit provider event failure");
         assert!(error.to_string().contains("upstream model crashed"));

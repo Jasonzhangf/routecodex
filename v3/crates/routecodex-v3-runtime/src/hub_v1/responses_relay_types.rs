@@ -288,6 +288,7 @@ pub struct V3RuntimeStreamObservation {
     /// snapshot (`provider_raw_sse`) so a 2 MiB diagnostic cap or a split UTF-8
     /// chunk can never hide a provider-explicit reasoning summary.
     source_summary_observed: Arc<AtomicBool>,
+    projection_drop_context: crate::projection_drop_log::V3ProjectionDropContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,6 +398,22 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
 }
 
 impl V3RuntimeStreamObservation {
+    pub(crate) fn with_projection_drop_context(
+        mut self,
+        context: crate::projection_drop_log::V3ProjectionDropContext,
+    ) -> Self {
+        self.projection_drop_context = context;
+        self
+    }
+
+    pub(crate) fn record_response_drops(
+        &self,
+        records: &mut [crate::projection_drop_log::V3ProjectionDropRecord],
+    ) {
+        self.projection_drop_context
+            .restamp_response_and_emit(records);
+    }
+
     #[cfg(test)]
     pub(crate) fn poison_diagnostics_for_test(&self) {
         let inner = self.inner.clone();

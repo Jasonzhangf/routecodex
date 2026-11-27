@@ -94,11 +94,7 @@ fn key_health_projection(
         auth_alias: key.auth_alias.clone().unwrap_or_default(),
         model_id: key.model_id.clone().unwrap_or_default(),
         score_milli: history.map_or(100, |history| history.score_milli),
-        failure_streak: history.map_or(0, |history| {
-            history
-                .failure_streak
-                .max(history.policy_streaks.values().copied().max().unwrap_or(0))
-        }),
+        failure_streak: history.map_or(0, |history| history.failure_streak),
         success_streak: history.map_or(0, |history| history.success_streak),
         cooldown,
         cooldown_until_ms,

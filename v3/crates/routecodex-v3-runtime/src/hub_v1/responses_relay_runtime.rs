@@ -951,6 +951,7 @@ pub(super) fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> V
 mod provider_stream_materialization;
 mod responses_provider_event_codec;
 
+pub(crate) use provider_stream_materialization::materialize_v3_provider_sse_as_canonical_response_with_observation;
 use provider_stream_materialization::*;
 pub use provider_stream_materialization::{
     materialize_v3_provider_sse_as_canonical_response,

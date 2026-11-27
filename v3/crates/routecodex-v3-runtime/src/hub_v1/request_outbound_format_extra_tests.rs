@@ -1736,6 +1736,44 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
         "image search_content_types omission must emit scoped drop record: {text_image_drops:?}"
     );
 
+    let (offline_search_wire, offline_search_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "web_search", "external_web_access": false, "search_context_size": "high"},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": {"type": "web_search"}
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("external_web_access=false must omit hosted web_search cleanly without blocking remaining tools");
+    assert!(
+        offline_search_wire.get("web_search_options").is_none(),
+        "external_web_access=false must not emit web_search_options (would enable live search): {offline_search_wire}"
+    );
+    assert!(
+        offline_search_wire.get("tool_choice").is_none(),
+        "hosted web_search tool_choice must be removed alongside external_web_access=false: {offline_search_wire}"
+    );
+    assert_eq!(offline_search_wire["tools"].as_array().unwrap().len(), 1);
+    assert!(
+        offline_search_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0]"),
+        "expected drop record for omitted external_web_access=false web_search: {offline_search_drops:?}"
+    );
+    assert!(
+        offline_search_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "expected drop record for removed hosted web_search tool_choice: {offline_search_drops:?}"
+    );
+
     let (server_tool_search_wire, server_tool_search_drops) =
         build_v3_openai_chat_standard_request_from_chat_canonical_recording(
             &json!({

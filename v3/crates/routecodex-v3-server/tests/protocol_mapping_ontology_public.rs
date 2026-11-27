@@ -3600,10 +3600,11 @@ async fn map001_public_delayed_sse_on_json_intent_respects_combined_first_frame_
                             let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
                             let _ = conn.write_all(chunk.as_bytes()).await;
                         } else if idx == 2 {
-                            // Case 3: Disguised JSON arriving at 320ms (>250ms sse_first_frame_timeout_ms,
-                            // <5000ms request_timeout_ms) must succeed on attempt 1 under request deadline.
+                            // Case 3: Disguised JSON whose opener `{` arrives at 50ms (<250ms sse_first_frame_timeout_ms)
+                            // continues reading remaining body after 320ms (>250ms SSE budget, <5000ms request_timeout_ms)
+                            // and succeeds on attempt 1 under request deadline.
                             let _ = conn.write_all(head.as_bytes()).await;
-                            tokio::time::sleep(Duration::from_millis(320)).await;
+                            tokio::time::sleep(Duration::from_millis(50)).await;
                             let json_body = json!({
                                 "id": "resp_slow_disguised_json_ok",
                                 "object": "response",
@@ -3617,8 +3618,17 @@ async fn map001_public_delayed_sse_on_json_intent_respects_combined_first_frame_
                                 "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
                             })
                             .to_string();
-                            let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
-                            let _ = conn.write_all(chunk.as_bytes()).await;
+                            let (first, rest) = json_body.split_at(1);
+                            let chunk1 = format!("{:x}\r\n{}\r\n", first.len(), first);
+                            let _ = conn.write_all(chunk1.as_bytes()).await;
+                            tokio::time::sleep(Duration::from_millis(320)).await;
+                            let chunk2 = format!("{:x}\r\n{}\r\n0\r\n\r\n", rest.len(), rest);
+                            let _ = conn.write_all(chunk2.as_bytes()).await;
+                        } else if idx == 5 {
+                            // Case 6: Silent `200 text/event-stream` sending zero bytes forever with request_timeout_ms=5000
+                            // must time out primary at ~sse_first_frame_timeout_ms (250ms) and recover on backup.
+                            let _ = conn.write_all(head.as_bytes()).await;
+                            tokio::time::sleep(Duration::from_secs(6)).await;
                         } else {
                             let _ = conn.write_all(head.as_bytes()).await;
                             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -3910,6 +3920,30 @@ targets = [
     );
     assert_eq!(primary_hits.load(Ordering::SeqCst), 5);
     assert_eq!(backup_hits.load(Ordering::SeqCst), 3);
+
+    // Case 6: Silent `200 text/event-stream` hanging with zero bytes when request_timeout_ms=5000
+    // and sse_first_frame_timeout_ms=250 must fail primary near 250ms (never waiting 5000ms)
+    // and recover via backup.
+    let silent_started = std::time::Instant::now();
+    let silent_resp = client
+        .post(format!("http://127.0.0.1:{slow_port}/v1/responses"))
+        .json(&json!({"model":"delayed-sse-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    let silent_elapsed = silent_started.elapsed();
+    assert_eq!(silent_resp.status(), StatusCode::OK);
+    let silent_body: Value = silent_resp.json().await.unwrap();
+    assert_eq!(
+        silent_body["output"][0]["content"][0]["text"],
+        "backup after combined sse timeout"
+    );
+    assert!(
+        silent_elapsed < Duration::from_millis(1_500),
+        "silent text/event-stream took {silent_elapsed:?} instead of respecting sse_first_frame_timeout_ms=250ms"
+    );
+    assert_eq!(primary_hits.load(Ordering::SeqCst), 6);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 4);
 
     drop(server);
     let _ = p_sd.send(());
@@ -4326,4 +4360,332 @@ targets = [
     let _ = x_task.await;
     let _ = f_task.await;
     let _ = b_task.await;
+}
+
+#[tokio::test]
+async fn map002_public_external_web_access_false_omits_openai_chat_web_search_options_with_drop_log(
+) {
+    let _guard = LOCK.lock().await;
+    let home = Home::new("external-web-access-false");
+    std::env::set_var("ONTOLOGY_WEB_ACCESS_KEY", "sk-ontology-web-access");
+
+    let captured_wires = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured_ref = captured_wires.clone();
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move |Json(body): Json<Value>| {
+            let captured_ref = captured_ref.clone();
+            async move {
+                captured_ref.lock().unwrap().push(body);
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "id": "chatcmpl_offline_ok",
+                            "object": "chat.completion",
+                            "model": "gpt-5.5",
+                            "choices": [{
+                                "index": 0,
+                                "finish_reason": "stop",
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "answered without live web search"
+                                }
+                            }],
+                            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (sd, stop) = oneshot::channel();
+    let up_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let listen_port = test_ports::free_port();
+    let drop_log = home.path.join("projection-drops.jsonl");
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.a]
+bind = "127.0.0.1"
+port = {}
+routing_group = "default"
+endpoints = ["responses"]
+{}
+
+[providers.chat_search]
+type = "openai_chat"
+base_url = "http://{addr}/v1"
+default_model = "gpt-5.5"
+responses = {{ process = "relay", streaming = "client" }}
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_WEB_ACCESS_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.chat_search.models."gpt-5.5"]
+wire_name = "gpt-5.5"
+aliases = ["web-search-cap"]
+capabilities = ["text", "tools", "web_search"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "chat_search", model = "gpt-5.5", key = "key", priority = 1 }}]
+"#,
+        hub_v1_fixture::hub_v1_test_declaration(),
+        listen_port,
+        hub_v1_fixture::hub_v1_server_execution("a"),
+    );
+    let mut manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    manifest.debug.projection_drop_log_file = Some(drop_log.display().to_string());
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "web-search-cap",
+            "input": "answer offline",
+            "tools": [
+                {"type": "web_search", "external_web_access": false, "search_context_size": "high"},
+                {"type": "function", "name": "read_file", "parameters": {"type": "object"}}
+            ],
+            "tool_choice": {"type": "web_search"},
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "answered without live web search"
+    );
+
+    let wires = captured_wires.lock().unwrap();
+    assert_eq!(wires.len(), 1);
+    assert!(
+        wires[0].get("web_search_options").is_none(),
+        "external_web_access=false must omit web_search_options on openai_chat wire: {}",
+        wires[0]
+    );
+    assert!(
+        wires[0].get("tool_choice").is_none(),
+        "hosted web_search tool_choice must omit cleanly: {}",
+        wires[0]
+    );
+    assert_eq!(wires[0]["tools"].as_array().unwrap().len(), 1);
+
+    let drops_raw = std::fs::read_to_string(&drop_log)
+        .expect("projection-drops.jsonl must persist external_web_access=false drops");
+    let drop_rows: Vec<Value> = drops_raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    assert!(
+        drop_rows.iter().any(|row| {
+            row["target_protocol"] == "openai_chat"
+                && row["json_path"] == "$.tools[0]"
+                && row["reason"] == "unmapped_target_protocol_field_unrepresentable"
+                && row["source_value"]["external_web_access"] == false
+        }),
+        "expected $.tools[0] drop record preserving external_web_access=false: {drop_rows:?}"
+    );
+    assert!(
+        drop_rows
+            .iter()
+            .any(|row| row["json_path"] == "$.tool_choice"),
+        "expected $.tool_choice drop record: {drop_rows:?}"
+    );
+
+    drop(server);
+    let _ = sd.send(());
+    let _ = up_task.await;
+}
+
+#[tokio::test]
+async fn map002_public_responses_sse_unregistered_item_omits_with_scoped_response_drop_log() {
+    let _guard = LOCK.lock().await;
+    let home = Home::new("responses-sse-drop-log");
+    std::env::set_var("ONTOLOGY_RESP_SSE_DROP_KEY", "sk-ontology-resp-sse-drop");
+
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            let created = json!({
+                "type": "response.created",
+                "response": {
+                    "id": "resp_sse_drop_1",
+                    "object": "response",
+                    "status": "in_progress",
+                    "model": "responses-wire",
+                    "output": []
+                }
+            });
+            let unknown_item = json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "item_unknown_1",
+                    "type": "future_telemetry_widget",
+                    "payload": {"flag": true}
+                }
+            });
+            let msg_item = json!({
+                "type": "response.output_item.done",
+                "output_index": 1,
+                "item": {
+                    "id": "msg_ok_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "sse response after omitted unregistered item"}]
+                }
+            });
+            let completed = json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_sse_drop_1",
+                    "object": "response",
+                    "status": "completed",
+                    "model": "responses-wire",
+                    "output": [
+                        {
+                            "id": "item_unknown_1",
+                            "type": "future_telemetry_widget",
+                            "payload": {"flag": true}
+                        },
+                        {
+                            "id": "msg_ok_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{"type": "output_text", "text": "sse response after omitted unregistered item"}]
+                        }
+                    ],
+                    "usage": {"input_tokens": 2, "output_tokens": 4, "total_tokens": 6}
+                }
+            });
+            let sse = format!(
+                "event: response.created\ndata: {created}\n\n\
+                 event: response.output_item.done\ndata: {unknown_item}\n\n\
+                 event: response.output_item.done\ndata: {msg_item}\n\n\
+                 event: response.completed\ndata: {completed}\n\n"
+            );
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(sse))
+                .unwrap()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (sd, stop) = oneshot::channel();
+    let up_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let listen_port = test_ports::free_port();
+    let drop_log = home.path.join("projection-drops.jsonl");
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.a]
+bind = "127.0.0.1"
+port = {}
+routing_group = "default"
+endpoints = ["responses"]
+{}
+
+[providers.resp_relay]
+type = "responses"
+base_url = "http://{addr}/v1"
+default_model = "responses-wire"
+responses = {{ process = "chat", streaming = "always" }}
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_RESP_SSE_DROP_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.resp_relay.models."responses-wire"]
+wire_name = "responses-wire"
+aliases = ["resp-sse-drop-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "resp_relay", model = "responses-wire", key = "key", priority = 1 }}]
+"#,
+        hub_v1_fixture::hub_v1_test_declaration(),
+        listen_port,
+        hub_v1_fixture::hub_v1_server_execution("a"),
+    );
+    let mut manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    manifest.debug.projection_drop_log_file = Some(drop_log.display().to_string());
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({"model": "resp-sse-drop-alias", "input": "hi", "stream": false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "sse response after omitted unregistered item"
+    );
+
+    let drops_raw = std::fs::read_to_string(&drop_log)
+        .expect("projection-drops.jsonl must persist Responses SSE omitted item diagnostics");
+    let drop_rows: Vec<Value> = drops_raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    assert!(
+        drop_rows.iter().any(|row| {
+            row["stage"] == "response_target_protocol_projection"
+                && row["target_protocol"] == "responses"
+                && row["reason"] == "unregistered_output_item_ignored"
+                && row["entry_port"] == listen_port.to_string()
+                && !row["request_id"].as_str().unwrap_or("").is_empty()
+                && row["source_value"]["type"] == "future_telemetry_widget"
+        }),
+        "expected scoped response_target_protocol_projection drop rows for omitted future_telemetry_widget: {drop_rows:?}"
+    );
+
+    drop(server);
+    let _ = sd.send(());
+    let _ = up_task.await;
 }

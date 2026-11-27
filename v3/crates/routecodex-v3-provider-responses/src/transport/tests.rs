@@ -1241,8 +1241,9 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         "expected request budget timeout error, got {err}"
     );
 
-    // 3. Mislabeled JSON arriving after short sse_first_frame_timeout_ms (80ms) yet within longer
-    // request_timeout_ms (500ms) must succeed as Json.
+    // 3. Disguised JSON under text/event-stream whose leading `{` arrives within
+    // sse_first_frame_timeout_ms (80ms) continues reading the remaining JSON body up to
+    // request_timeout_ms (500ms) and succeeds as Json.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -1251,10 +1252,14 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         assert!(conn.read(&mut req_buf).await.unwrap() > 0);
         let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
         conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let part1 = "{";
+        let chunk1 = format!("{:x}\r\n{}\r\n", part1.len(), part1);
+        let _ = conn.write_all(chunk1.as_bytes()).await;
         tokio::time::sleep(Duration::from_millis(140)).await;
-        let json_body = r#"{"id":"resp_slow_disguised_json_ok"}"#;
-        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
-        let _ = conn.write_all(chunk.as_bytes()).await;
+        let part2 = r#""id":"resp_slow_disguised_json_ok"}"#;
+        let chunk2 = format!("{:x}\r\n{}\r\n0\r\n\r\n", part2.len(), part2);
+        let _ = conn.write_all(chunk2.as_bytes()).await;
     });
     let request =
         build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
@@ -1277,15 +1282,15 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         .send(request)
         .await
         .expect(
-        "mislabeled JSON past short sse_first_frame_timeout_ms must still obey request_timeout_ms",
+        "mislabeled JSON whose opener arrives within sse_first_frame_timeout_ms must obey request_timeout_ms",
     );
     server.abort();
     assert_eq!(raw.body_kind(), crate::V3ProviderResponseBodyKind::Json);
     let parsed: Value = serde_json::from_slice(&raw.into_body_bytes().await.unwrap()).unwrap();
     assert_eq!(parsed["id"], "resp_slow_disguised_json_ok");
 
-    // 4. Genuine SSE arriving after sse_first_frame_timeout_ms (80ms) must fail even when
-    // request_timeout_ms (500ms) is longer.
+    // 4. Genuine SSE / silent headers with request_timeout_ms=5000 and sse_first_frame_timeout_ms=80
+    // must fail near 80ms instead of waiting up to request_timeout_ms.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -1294,11 +1299,12 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         assert!(conn.read(&mut req_buf).await.unwrap() > 0);
         let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
         conn.write_all(head.as_bytes()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(140)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
         let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_late_sse\",\"status\":\"completed\",\"output\":[]}}\n\n";
         let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
         let _ = conn.write_all(chunk.as_bytes()).await;
     });
+    let started = std::time::Instant::now();
     let request =
         build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
             "req-late-sse-long-req",
@@ -1311,7 +1317,7 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
             V3ResponsesStreamIntent::Json,
             json!({"model":"gpt-test","input":"hi","stream":false}),
             vec![],
-            Some(Duration::from_millis(500)),
+            Some(Duration::from_millis(5_000)),
             5_000,
             Some(80),
         )
@@ -1319,10 +1325,62 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
     let err = ProviderResponsesTransport::default()
         .send(request)
         .await
-        .expect_err("genuine SSE past sse_first_frame_timeout_ms must fail immediately");
+        .expect_err(
+            "silent text/event-stream past sse_first_frame_timeout_ms must fail immediately",
+        );
+    let elapsed = started.elapsed();
     server.abort();
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "silent text/event-stream waited {elapsed:?} instead of failing near sse_first_frame_timeout_ms=80ms"
+    );
     assert!(
         err.to_string().contains("first frame"),
         "expected SSE first-frame timeout error, got {err}"
+    );
+
+    // 5. Whitespace-only flood exceeding SseTransportLimits::max_buffer_bytes under text/event-stream
+    // must be rejected cleanly instead of buffering unbounded prefix chunks.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        let _ = conn.write_all(head.as_bytes()).await;
+        let blank_chunk = " ".repeat(256 * 1024);
+        let framed = format!("{:x}\r\n{}\r\n", blank_chunk.len(), blank_chunk);
+        for _ in 0..10 {
+            if conn.write_all(framed.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-ws-flood-sse",
+            "ws-flood-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-ws-flood".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(5_000)),
+            5_000,
+            Some(1_000),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("whitespace-only SSE prefix flood must be rejected at buffer limit");
+    server.abort();
+    assert!(
+        err.to_string().contains("SSE prefix exceeded buffer limit"),
+        "expected SSE prefix limit error, got {err}"
     );
 }

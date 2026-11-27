@@ -316,6 +316,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     let mut normalized_tool_indexes = HashMap::<String, usize>::new();
     let mut web_search_options = Map::new();
     let mut has_web_search = false;
+    let mut forbids_live_web_search = false;
     let mut dropped_hosted_tool_search = false;
     for (index, tool) in tools.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
@@ -338,34 +339,23 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             tool_type,
             Some("web_search" | "web_search_preview" | "web_search_20250305")
         ) {
-            if web_search_execution_mode == V3WebSearchExecutionMode::NativeRemoteSearchToolMix {
-                // Mode A 与 Mode B 共用同一 capability 护栏：provider 未声明
-                // web_search 能力时不保留 hosted web_search 声明（工具与
-                // web_search_options 一并移除），避免无能力 provider 收到
-                // 未知字段或误调用。
-                if has_web_search_capability {
-                    has_web_search = true;
-                    merge_openai_chat_web_search_options(
-                        &mut web_search_options,
-                        tool,
-                        &format!("$.tools[{index}]"),
-                        drops,
-                    )?;
-                }
-            } else if has_web_search_capability {
-                // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
-                // web_search_options 投影（与 HEAD 行为一致）。
-                has_web_search = true;
-                merge_openai_chat_web_search_options(
+            if has_web_search_capability {
+                if merge_openai_chat_web_search_options(
                     &mut web_search_options,
                     tool,
                     &format!("$.tools[{index}]"),
                     drops,
-                )?;
+                )? {
+                    if !forbids_live_web_search {
+                        has_web_search = true;
+                    }
+                } else {
+                    forbids_live_web_search = true;
+                    has_web_search = false;
+                }
             }
-            // gpt 模型 + provider 无 web_search 能力：web_search 工具声明与
-            // web_search_options 完全移除（无能力 provider 不收到搜索工具，
-            // 避免未知字段/误调用）。
+            // provider 无 web_search 能力或显式禁止外部实时搜索（external_web_access=false）时，
+            // 移除 hosted web_search 声明与 web_search_options，避免无能力/越权调用。
         } else if let Some(normalized) =
             normalize_openai_chat_provider_tool_with_drops(tool, index, drops)?
         {
@@ -416,12 +406,21 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             return Err("ConflictingOutboundFields target_protocol=openai_chat paths=$.web_search_options,$.tools[].type".to_string());
         }
         root.insert("web_search_options".to_string(), projected);
-    } else if !has_web_search_capability
-        && root
-            .get("tool_choice")
-            .is_some_and(is_hosted_web_search_choice)
+    } else if root
+        .get("tool_choice")
+        .is_some_and(is_hosted_web_search_choice)
     {
-        root.remove("tool_choice");
+        if let Some(choice) = root.remove("tool_choice") {
+            if has_web_search_capability {
+                drops.push(V3ProjectionDropRecord::new(
+                    "openai_chat",
+                    "$.tool_choice",
+                    "unmapped_target_protocol_field_unrepresentable",
+                    choice,
+                    "project_openai_chat_provider_tools_for_web_search_mode_recording",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -448,10 +447,31 @@ fn merge_openai_chat_web_search_options(
     tool: &Value,
     path: &str,
     drops: &mut Vec<V3ProjectionDropRecord>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let row = tool
         .as_object()
         .ok_or_else(|| format!("MalformedOutboundField target_protocol=openai_chat path={path}"))?;
+    if let Some(external_web_access) = row.get("external_web_access") {
+        let Some(enabled) = external_web_access.as_bool() else {
+            return Err(format!(
+                "MalformedOutboundField target_protocol=openai_chat path={path}.external_web_access"
+            ));
+        };
+        if !enabled {
+            // `external_web_access=false` explicitly forbids live web search.
+            // OpenAI Chat `web_search_options` always enables live web search and has
+            // no toggle for offline-only search, so omit the entire hosted web_search
+            // tool instead of weakening the client restriction.
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                path.to_string(),
+                "unmapped_target_protocol_field_unrepresentable",
+                tool.clone(),
+                "merge_openai_chat_web_search_options",
+            ));
+            return Ok(false);
+        }
+    }
     for (key, value) in row {
         if !matches!(
             key.as_str(),
@@ -466,22 +486,6 @@ fn merge_openai_chat_web_search_options(
                 format!("{path}.{key}"),
                 "unmapped_target_protocol_field_unrepresentable",
                 value.clone(),
-                "merge_openai_chat_web_search_options",
-            ));
-        }
-    }
-    if let Some(external_web_access) = row.get("external_web_access") {
-        let Some(enabled) = external_web_access.as_bool() else {
-            return Err(format!(
-                "MalformedOutboundField target_protocol=openai_chat path={path}.external_web_access"
-            ));
-        };
-        if !enabled {
-            drops.push(V3ProjectionDropRecord::new(
-                "openai_chat",
-                format!("{path}.external_web_access"),
-                "unmapped_target_protocol_field_unrepresentable",
-                external_web_access.clone(),
                 "merge_openai_chat_web_search_options",
             ));
         }
@@ -532,7 +536,7 @@ fn merge_openai_chat_web_search_options(
         }
         output.insert(key.to_string(), value.clone());
     }
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn normalize_openai_chat_provider_tool_with_drops(

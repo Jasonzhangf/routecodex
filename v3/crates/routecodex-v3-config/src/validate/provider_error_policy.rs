@@ -262,6 +262,11 @@ fn validate_provider_error_path(
                         "provider error policy {policy_id} cooldown failure_threshold must be 1..=100"
                     )));
                 }
+                if failure_threshold.is_some() && has_restart {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} cooldown failure_threshold cannot be combined with until_restart=true"
+                    )));
+                }
             }
             V3ProviderDispositionStepManifest::Project { reason_code, .. } => {
                 project_count += 1;

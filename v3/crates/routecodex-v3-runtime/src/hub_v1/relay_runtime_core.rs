@@ -1557,7 +1557,8 @@ where
                     v3_provider_sse_idle_timeout(manifest, &selected_target_provider_id)
                         .map_err(V3RelayCoreError::Target)?,
                 );
-                let stream_observation = V3RuntimeStreamObservation::default();
+                let stream_observation = V3RuntimeStreamObservation::default()
+                    .with_projection_drop_context(drop_ctx.clone());
                 let idle_guarded_stream = observe_v3_provider_sse(
                     idle_guarded_stream,
                     stream_observation.clone(),
@@ -1575,8 +1576,11 @@ where
                         Arc::clone(&local_failure),
                     );
                     let materialized =
-                        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
-                            provider_wire_protocol, stream).await;
+                        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response_with_observation(
+                            provider_wire_protocol,
+                            stream,
+                            &stream_observation,
+                        ).await;
                     if let Some(error) = local_failure
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())

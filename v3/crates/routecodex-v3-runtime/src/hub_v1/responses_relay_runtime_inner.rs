@@ -1298,7 +1298,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     } else {
                         stream
                     };
-                    let stream_observation = V3RuntimeStreamObservation::default();
+                    let stream_observation = V3RuntimeStreamObservation::default()
+                        .with_projection_drop_context(projection_drop_context.clone());
                     let stream =
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle_with_first_frame_elapsed(
                             &input.request_id,

@@ -2586,7 +2586,7 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_sendi
             payload: json!({
                 "model":"client-responses",
                 "messages":[{"role":"user","content":"provider compat must reselect"}],
-                "store":true,
+                "tools":[{"type":"web_search","allowed_domains":["example.com"],"blocked_domains":["blocked.example"]}],
                 "stream":false
             }),
         },
@@ -2654,7 +2654,7 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
                 payload: json!({
                     "model":"client-responses",
                     "messages":[{"role":"user","content":"serialize provider compat failures"}],
-                    "store":true,
+                    "tools":[{"type":"web_search","allowed_domains":["example.com"],"blocked_domains":["blocked.example"]}],
                     "stream":false
                 }),
             },
@@ -3184,7 +3184,7 @@ wire_name = "claude-fable-5"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 200000
-capabilities = ["text", "tools", "reasoning"]
+capabilities = ["text", "tools", "reasoning", "web_search"]
 [providers.minimax]
 type = "responses"
 base_url = "http://minimax.invalid/v1"
@@ -3196,7 +3196,7 @@ wire_name = "MiniMax-M3"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 1000000
-capabilities = ["text", "tools", "reasoning"]
+capabilities = ["text", "tools", "reasoning", "web_search"]
 [route_groups.compat_reselect.pools.client_responses]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
@@ -3242,7 +3242,7 @@ wire_name = "claude-fable-5"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 200000
-capabilities = ["text", "tools", "reasoning"]
+capabilities = ["text", "tools", "reasoning", "web_search"]
 [providers.compat_storm_responses]
 type = "responses"
 base_url = "http://compat-storm-responses.invalid/v1"
@@ -3253,7 +3253,7 @@ wire_name = "MiniMax-M3"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 1000000
-capabilities = ["text", "tools", "reasoning"]
+capabilities = ["text", "tools", "reasoning", "web_search"]
 [route_groups.compat_storm.pools.client_responses]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
