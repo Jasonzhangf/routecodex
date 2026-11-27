@@ -3,6 +3,7 @@ mod auth_types;
 mod defaults;
 mod entry_protocol_validation;
 mod memory_raw_capture;
+mod operation_runner_manifest;
 mod provider_config;
 mod provider_directory;
 mod provider_priority_schedule;
@@ -11,6 +12,10 @@ mod store;
 mod types;
 mod user_config;
 pub use memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
+pub use operation_runner_manifest::{
+    compile_operation_runner_manifest_from_yaml, V3OperationRunnerManifestBundle,
+    V3OperationRunnerPath, V3OperationRunnerPathConsumer,
+};
 pub use provider_config::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
