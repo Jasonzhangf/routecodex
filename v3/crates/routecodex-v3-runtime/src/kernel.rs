@@ -645,7 +645,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             manifest.debug.projection_drop_log_file.clone(),
             client_original_body.clone(),
         );
-        let wire = match hook_registry
+        let mut wire = match hook_registry
             .run_request_projection_with_drop_context(&policy, &projection_drop_context)
         {
             Ok(value) => value,
@@ -658,6 +658,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
             }
         };
+        let retain_request_cipher = expanded
+            .as_ref()
+            .map(|expanded| {
+                crate::hub_v1::is_v3_retain_response_cipher(
+                    expanded.candidates.len(),
+                    &policy.target.candidate.model_id,
+                )
+            })
+            .unwrap_or(false);
+        routecodex_v3_provider_responses::wire::apply_v3_request_cipher_policy(
+            wire.body_mut(),
+            retain_request_cipher,
+        );
         trace.push("V3Provider12ResponsesWirePayload");
         let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
         let ns_tool_identities = wire.namespace_identities().clone();

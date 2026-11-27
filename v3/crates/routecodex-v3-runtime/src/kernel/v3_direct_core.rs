@@ -465,7 +465,7 @@ where
             manifest.debug.projection_drop_log_file.clone(),
             client_original_body.clone(),
         );
-        let wire =
+        let mut wire =
             match C::run_request_projection(&policy, request_key_catalog, &projection_drop_context)
             {
                 Ok(value) => value,
@@ -478,6 +478,14 @@ where
                     )
                 }
             };
+        let retain_request_cipher = crate::hub_v1::is_v3_retain_response_cipher(
+            expanded.candidates.len(),
+            &C::policy_target(&policy).candidate.model_id,
+        );
+        routecodex_v3_provider_responses::wire::apply_v3_request_cipher_policy(
+            wire.body_mut(),
+            retain_request_cipher,
+        );
         trace.push("V3Provider12ResponsesWirePayload");
         // 客户端声明的响应 transport intent（wire 构建后即固定）。provider 契约
         // 可能强制上游走 SSE（如 OpenCode Zen 免费层），但客户端响应格式仍由
