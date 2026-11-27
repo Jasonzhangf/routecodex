@@ -36,6 +36,7 @@ use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
     validate_openai_metadata,
 };
+use super::responses_openai_codec::responses_tool_output_content;
 use super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION;
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;

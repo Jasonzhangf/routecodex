@@ -6268,12 +6268,15 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
             {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
             {"type":"message","role":"user","content":[{"type":"input_text","text":"between call and result"}]},
             {"type":"reasoning","id":"rs_source","summary":[{"type":"summary_text","text":"reasoning after user"}]},
+            {"type":"tool_search_call","id":"tsc_source","call_id":"call_search","arguments":{"query":"lookup"},"execution":"client","status":"completed"},
+            {"type":"tool_search_output","id":"tso_source","call_id":"call_search","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"execution":"client","status":"completed"},
             {"type":"function_call_output","call_id":"call_x","output":"orphan result"},
             {"type":"function_call_output","call_id":"call_a","output":"paired result"}
         ]),
         json!([{"type":"function_call_output","call_id":"call_literal_image","output":r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#}]),
         json!([{"type":"function_call_output","call_id":"call_literal_text","output":r#"[{"type":"input_text","text":"literal"}]"#}]),
         json!([{"type":"function_call_output","call_id":"call_file","output":[{"type":"input_file","file_id":"file-123"}]}]),
+        json!([{"type":"function_call_output","call_id":"call_mixed","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_file","file_id":"file-123"}]}]),
         json!([
             {"type":"function_call","id":"fc_image","name":"read_image","call_id":"call_image","arguments":"{}"},
             {"type":"function_call_output","call_id":"call_image","output":"data:image/png;base64,AAAA"},
@@ -6290,8 +6293,10 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
             .await;
         let capture = timeout(Duration::from_secs(2), captures.recv()).await;
         let mut expected = input;
-        if index == 4 {
+        if index == 5 {
             expected[1]["output"] = json!("[Image]");
+        } else if index == 4 {
+            expected[0]["output"][0] = json!({"type":"input_text","text":"[Image]"});
         }
         results.push((index, expected, response, capture));
     }

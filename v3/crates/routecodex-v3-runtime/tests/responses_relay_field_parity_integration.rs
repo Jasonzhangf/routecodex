@@ -512,6 +512,8 @@ async fn issue4a0b3aa_responses_interleaved_reasoning_and_message_keep_source_or
         {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
         {"type":"message","role":"user","content":[{"type":"input_text","text":"between call and result"}]},
         {"type":"reasoning","id":"rs_source","summary":[{"type":"summary_text","text":"reasoning after user"}]},
+        {"type":"tool_search_call","id":"tsc_source","call_id":"call_search","arguments":{"query":"lookup"},"execution":"client","status":"completed"},
+        {"type":"tool_search_output","id":"tso_source","call_id":"call_search","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"execution":"client","status":"completed"},
         {"type":"function_call_output","call_id":"call_x","output":"orphan result"},
         {"type":"function_call_output","call_id":"call_a","output":"parent result"}
     ]);
@@ -541,9 +543,13 @@ async fn issue4a0b3aa_responses_interleaved_reasoning_and_message_keep_source_or
     assert_eq!(provider_input[0]["call_id"], "call_a");
     assert_eq!(provider_input[1]["role"], "user");
     assert_eq!(provider_input[2]["id"], "rs_source");
-    assert_eq!(provider_input[3]["call_id"], "call_x");
-    assert_eq!(provider_input[4]["call_id"], "call_a");
-    for index in [3, 4] {
+    assert_eq!(provider_input[3]["type"], "tool_search_call");
+    assert_eq!(provider_input[3]["call_id"], "call_search");
+    assert_eq!(provider_input[4]["type"], "tool_search_output");
+    assert_eq!(provider_input[4]["call_id"], "call_search");
+    assert_eq!(provider_input[5]["call_id"], "call_x");
+    assert_eq!(provider_input[6]["call_id"], "call_a");
+    for index in [5, 6] {
         assert!(provider_input[index].get("id").is_none());
     }
 }
@@ -571,6 +577,42 @@ async fn issue4a0b3aa_orphan_file_array_keeps_exact_first_provider_item() {
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1);
     assert_eq!(provider_projection_body(&captures[0])["input"], input);
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_orphan_mixed_image_file_keeps_structured_file_and_projects_image() {
+    let input = serde_json::json!([{
+        "type":"function_call_output","call_id":"call_mixed",
+        "output":[
+            {"type":"input_image","image_url":"data:image/png;base64,AAAA"},
+            {"type":"input_file","file_id":"file-123"}
+        ]
+    }]);
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-mixed","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input(
+            "req-mixed-image-file-array",
+            serde_json::json!({"input":input,"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("mixed orphan output must reach Provider");
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let output = &provider_projection_body(&captures[0])["input"][0]["output"];
+    assert_eq!(
+        output[0],
+        serde_json::json!({"type":"input_text","text":"[Image]"})
+    );
+    assert_eq!(
+        output[1],
+        serde_json::json!({"type":"input_file","file_id":"file-123"})
+    );
 }
 
 #[tokio::test]

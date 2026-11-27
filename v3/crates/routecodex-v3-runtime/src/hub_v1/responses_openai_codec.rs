@@ -127,11 +127,15 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                 }
             }
             "output_text" => {
+                let mut message = build_v3_openai_chat_assistant_output_text_message(item);
+                if native_responses {
+                    set_v3_responses_tool_input_order(&mut message, input_index);
+                }
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_adjacent_deferred_messages,
-                    build_v3_openai_chat_assistant_output_text_message(item),
+                    message,
                     turn_assistant_tail_index,
                 )?;
                 turn_assistant_tail_index = Some(messages.len() - 1);
@@ -202,11 +206,12 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                     item,
                     input_index,
                     V3OpenAiChatHostedToolHistoryKind::WebSearch,
+                    native_responses,
                 )?;
                 turn_assistant_tail_index = None;
             }
             "tool_search_call" => {
-                let assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
+                let mut assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
                     item,
                     read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
                         "Responses tool_search_call is missing call_id before Chat canonicalization"
@@ -214,6 +219,10 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                     })?,
                     V3OpenAiChatHostedToolHistoryKind::ToolSearch,
                 )?;
+                if native_responses {
+                    assistant["tool_calls"][0]["routecodex_chat_extension"]
+                        ["responses_tool_input_order"] = json!(input_index);
+                }
                 append_v3_openai_chat_tool_call_message(
                     &mut messages,
                     &mut pending_tool_message_index,
@@ -234,6 +243,10 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                     ));
                 }
                 let tool_result = build_v3_openai_chat_tool_search_output_message(item)?;
+                let mut tool_result = tool_result;
+                if native_responses {
+                    set_v3_responses_tool_input_order(&mut tool_result, input_index);
+                }
                 append_v3_openai_chat_tool_result_message(
                     &mut messages,
                     &mut pending_tool_message_index,
@@ -270,11 +283,15 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                         .or(item.get("content"))
                         .or(Some(&Value::Null)),
                 )?;
+                let mut message = json!({"role": "user", "content": content});
+                if native_responses {
+                    set_v3_responses_tool_input_order(&mut message, input_index);
+                }
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_adjacent_deferred_messages,
-                    json!({"role": "user", "content": content}),
+                    message,
                     turn_assistant_tail_index,
                 )?;
                 turn_assistant_tail_index = None;
@@ -1274,12 +1291,20 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
     item: &Map<String, Value>,
     input_index: usize,
     kind: V3OpenAiChatHostedToolHistoryKind,
+    native_responses: bool,
 ) -> Result<(), String> {
     let call_id = build_v3_openai_chat_hosted_tool_history_call_id(item, input_index, kind);
-    let assistant =
+    let mut assistant =
         build_v3_openai_chat_hosted_tool_assistant_tool_call_message(item, call_id.as_str(), kind)?;
-    let tool_result =
+    if native_responses {
+        assistant["tool_calls"][0]["routecodex_chat_extension"]["responses_tool_input_order"] =
+            json!(input_index);
+    }
+    let mut tool_result =
         build_v3_openai_chat_hosted_tool_result_message(item, call_id.as_str(), kind)?;
+    if native_responses {
+        set_v3_responses_tool_input_order(&mut tool_result, input_index);
+    }
     append_v3_openai_chat_tool_call_message(
         messages,
         pending_tool_message_index,

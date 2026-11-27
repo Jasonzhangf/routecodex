@@ -332,6 +332,20 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             },
         ),
     ]);
+    if let Some(native_parts) = extension
+        .and_then(|fields| fields.get("responses_tool_output_content"))
+        .filter(|content| {
+            content.is_array()
+                && super::responses_tool_output_content(content)
+                    .is_ok_and(|canonical| row.get("content") == Some(&canonical))
+        })
+    {
+        // Restore the native Responses parts only while canonical Chat still
+        // matches their declared conversion. A Chat Process transformation
+        // must remain authoritative. Provider Compat can then apply its normal
+        // per-attempt image placeholder while retaining structured file parts.
+        item.insert("output".to_string(), native_parts.clone());
+    }
     if let Some(call_id) = call_id {
         // Responses-derived outputs retain an absent item id through the round trip.
         if responses_item_id_from_chat_extension(row).is_some()

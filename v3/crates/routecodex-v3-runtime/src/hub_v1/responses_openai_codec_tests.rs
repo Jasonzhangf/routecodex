@@ -647,7 +647,11 @@ fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id
     assert_eq!(result["action"], arguments);
     assert_eq!(
         messages[2],
-        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+        json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "继续"}],
+            "routecodex_chat_extension": {"responses_tool_input_order": 1}
+        })
     );
 }
 #[test]
@@ -743,12 +747,17 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
             "responses_output_field": "tools",
             "responses_item_id": "tso_123",
             "responses_status": "completed",
-            "responses_execution": "client"
+            "responses_execution": "client",
+            "responses_tool_input_order": 1
         })
     );
     assert_eq!(
         messages[2],
-        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+        json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "继续"}],
+            "routecodex_chat_extension": {"responses_tool_input_order": 2}
+        })
     );
     assert!(
         messages.iter().all(|message| {
