@@ -76,6 +76,7 @@ pub(crate) use request_outbound_format::{
     build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals,
     build_v3_openai_responses_standard_request_from_chat_canonical,
     normalize_v3_openai_responses_provider_request_payload,
 };

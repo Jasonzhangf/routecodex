@@ -1832,6 +1832,166 @@ async fn refill_responses_dual_pending_assistant_history_survives_in_source_orde
 }
 
 #[tokio::test]
+async fn refill_responses_dual_singleton_text_part_pending_assistant_history_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            source_summary_wire(false, "DUAL_SINGLETON_ROUND_TWO"),
+            EntryOptions {
+                attempt_bodies: vec![refill_round_wire(false, "DUAL_SINGLETON_ROUND_ONE")],
+                refill_max: None,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let request_input = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "dual singleton assistant task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_1",
+                "status": "completed",
+                "content": "assistant msg 1"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dual_singleton",
+                "call_id": "call_dual_singleton",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_2",
+                "status": "incomplete",
+                "content": "assistant msg 2"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_dual_singleton",
+                "output": "matched result"
+            }
+        ]);
+        let expected_prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "dual singleton assistant task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_1",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "assistant msg 1"}]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dual_singleton",
+                "call_id": "call_dual_singleton",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_2",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "assistant msg 2"}]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_dual_singleton",
+                "output": "matched result"
+            }
+        ]);
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "input": request_input,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "dual singleton assistant task"
+                        },
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "assistant msg 1\nassistant msg 2"}
+                            ],
+                            "tool_calls": [{
+                                "id": "call_dual_singleton",
+                                "type": "function",
+                                "function": {"name": "lookup", "arguments": "{}"}
+                            }]
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_dual_singleton",
+                            "content": "matched result"
+                        }
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "dual-singleton-text-part entry ({process}) must run exactly one refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "dual-singleton-text-part entry ({process}) must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("DUAL_SINGLETON_ROUND_ONE")
+                && consumed.body.contains("DUAL_SINGLETON_ROUND_TWO"),
+            "both rounds must reach the responses client ({process}): {consumed:?}"
+        );
+        for (round_idx, request_body) in captured.iter().enumerate() {
+            assert!(
+                request_body.get("messages").is_none(),
+                "provider request {round_idx} ({process}) must not leak stale messages twin: {request_body}"
+            );
+            let input = request_body["input"].as_array().unwrap_or_else(|| {
+                panic!("provider request {round_idx} ({process}) must carry Responses input: {request_body}")
+            });
+            assert!(
+                input.len() >= 5,
+                "provider request {round_idx} ({process}) must retain all 5 history items: {request_body}"
+            );
+            assert_eq!(
+                json!(&input[0..5]),
+                expected_prefix,
+                "provider request {round_idx} ({process}) must preserve exact assistant item boundaries, IDs, status, and order for singleton-text-part twin: {request_body}"
+            );
+        }
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
 async fn refill_responses_native_input_only_preserves_provenance_and_order_public() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");

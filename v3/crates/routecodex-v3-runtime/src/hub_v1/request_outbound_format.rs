@@ -162,14 +162,30 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     preserve_responses_custom_tools: bool,
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    let (projected, drops, _) =
+        build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+            payload,
+            has_web_search_capability,
+            preserve_responses_custom_tools,
+            provenance,
+        )?;
+    Ok((projected, drops))
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+    payload: &Value,
+    has_web_search_capability: bool,
+    preserve_responses_custom_tools: bool,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
                 .to_string(),
         );
     }
-    let (mut projected, drops) =
-        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance(
+    let (mut projected, drops, orphan_tool_output_literals) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
             payload,
             preserve_responses_custom_tools,
             provenance,
@@ -178,7 +194,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
         &mut projected,
         has_web_search_capability,
     );
-    Ok((projected, drops))
+    Ok((projected, drops, orphan_tool_output_literals))
 }
 
 fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
@@ -193,16 +209,18 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
 fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
     payload: &Value,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance(
-        payload, false, None,
-    )
+    let (projected, drops, _) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
+            payload, false, None,
+        )?;
+    Ok((projected, drops))
 }
 
-fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance(
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
     payload: &Value,
     preserve_responses_custom_tools: bool,
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
             "RawPayloadShortcut target_protocol=responses path=$.reasoning; use registered Chat reasoning fields"
@@ -215,7 +233,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_
                 payload,
                 V3OutboundTargetProtocol::OpenAiResponses,
             )?;
-        return build_v3_openai_responses_request_from_projected_chat_canonical(
+        return build_v3_openai_responses_request_from_projected_chat_canonical_with_literals(
             projected_source,
             drops,
             provenance,
@@ -225,18 +243,18 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
-    build_v3_openai_responses_request_from_projected_chat_canonical(
+    build_v3_openai_responses_request_from_projected_chat_canonical_with_literals(
         projected_source,
         drops,
         provenance,
     )
 }
 
-fn build_v3_openai_responses_request_from_projected_chat_canonical(
+fn build_v3_openai_responses_request_from_projected_chat_canonical_with_literals(
     projected_source: Value,
     mut drops: Vec<V3ProjectionDropRecord>,
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     let messages = projected_source
         .get("messages")
         .and_then(Value::as_array)
@@ -245,8 +263,10 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     if let Some(model) = projected_source.get("model") {
         responses_payload.insert("model".to_string(), model.clone());
     }
-    let (input, item_drops) =
-        build_responses_input_from_chat_messages_with_provenance_and_drops(messages, provenance)?;
+    let (input, item_drops, orphan_tool_output_literals) =
+        build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals(
+            messages, provenance,
+        )?;
     drops.extend(item_drops);
     responses_payload.insert("input".to_string(), input);
     for key in [
@@ -295,6 +315,7 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     Ok((
         normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))?,
         drops,
+        orphan_tool_output_literals,
     ))
 }
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
@@ -1230,7 +1251,18 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
     messages: &[Value],
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    let mut output = Vec::new();
+    let (input, drops, _) =
+        build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals(
+            messages, provenance,
+        )?;
+    Ok((input, drops))
+}
+
+pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
+    let mut output: Vec<(Option<u64>, Value, bool)> = Vec::new();
     let mut drops = Vec::new();
     let message_order =
         |msg_idx: usize| provenance.and_then(|provenance| provenance.message_order(msg_idx));
@@ -1254,6 +1286,8 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                 msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
             let restore_responses_hosted_web_search =
                 msg_provenance.is_some_and(|p| p.restore_responses_hosted_web_search);
+            let decoder_captured_tool_output =
+                msg_provenance.and_then(|p| p.decoder_captured_tool_output.as_ref());
             let source_input_index = msg_provenance
                 .and_then(|p| p.message_input_order)
                 .and_then(|order| usize::try_from(order).ok());
@@ -1262,10 +1296,16 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                 omit_tool_output_id,
                 preserve_native_tool_output_id,
                 restore_responses_hosted_web_search,
+                decoder_captured_tool_output,
                 source_input_index,
                 &mut drops,
             )? {
-                output.push((message_order(msg_idx), item));
+                let preserve_literal = matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "custom_tool_call_output")
+                ) && msg_provenance
+                    .is_some_and(|p| p.preserve_orphan_tool_output_literal);
+                output.push((message_order(msg_idx), item, preserve_literal));
             }
             continue;
         }
@@ -1286,7 +1326,7 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                         .or_else(|| raw_orders[index + 1..].iter().flatten().copied().next())
                         .or_else(|| raw_orders[..index].iter().rev().flatten().copied().next())
                         .or_else(|| message_order(msg_idx));
-                    output.push((order, item));
+                    output.push((order, item, false));
                 }
             }
             let tool_calls_present = row
@@ -1304,7 +1344,7 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                     )? {
                         let call_order = provenance
                             .and_then(|provenance| provenance.tool_call_order(msg_idx, call_idx));
-                        output.push((call_order, item));
+                        output.push((call_order, item, false));
                     }
                 }
             }
@@ -1323,8 +1363,20 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                     None
                 };
                 if let Some(entry_contents) = resolved_contents {
+                    let assistant_item_statuses = row
+                        .get("routecodex_chat_extension")
+                        .and_then(|extension| {
+                            extension.get(
+                                super::responses_openai_codec::RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION,
+                            )
+                        })
+                        .and_then(Value::as_array);
                     let mut emitted = false;
-                    for (entry, chat_content) in assistant_items.iter().zip(entry_contents.iter()) {
+                    for (item_idx, (entry, chat_content)) in assistant_items
+                        .iter()
+                        .zip(entry_contents.iter())
+                        .enumerate()
+                    {
                         if tool_calls_present && v3_openai_chat_content_is_empty(chat_content) {
                             continue;
                         }
@@ -1342,11 +1394,13 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                         if let Some(item_id) = entry.id.as_deref() {
                             item.insert("id".to_string(), Value::String(item_id.to_string()));
                         }
-                        if let Some(status) = entry.status.as_ref().filter(|value| !value.is_null())
+                        if let Some(status) = assistant_item_statuses
+                            .and_then(|statuses| statuses.get(item_idx))
+                            .filter(|value| !value.is_null())
                         {
                             item.insert("status".to_string(), status.clone());
                         }
-                        output.push((entry.source_input_order, Value::Object(item)));
+                        output.push((entry.source_input_order, Value::Object(item), false));
                         emitted = true;
                     }
                     if emitted || tool_calls_present {
@@ -1379,16 +1433,28 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                 ),
                 ("content".to_string(), content),
             ])),
+            false,
         ));
     }
     // Canonical Chat groups pending calls, while Responses represents separate
     // items. Restore their source order together with native history messages.
     for group in output.chunk_by_mut(|left, right| left.0.is_some() && right.0.is_some()) {
-        group.sort_by_key(|(order, _)| *order);
+        group.sort_by_key(|(order, _, _)| *order);
     }
+    let orphan_tool_output_literals = output
+        .iter()
+        .filter(|(_, item, _)| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call_output" | "custom_tool_call_output")
+            )
+        })
+        .map(|(_, _, preserve_literal)| *preserve_literal)
+        .collect();
     Ok((
-        Value::Array(output.into_iter().map(|(_, item)| item).collect()),
+        Value::Array(output.into_iter().map(|(_, item, _)| item).collect()),
         drops,
+        orphan_tool_output_literals,
     ))
 }
 
@@ -1423,20 +1489,29 @@ fn resolve_assistant_item_contents(
             V3HubAssistantItemContentRange::TextRange {
                 byte_start,
                 byte_end,
-            } => match actual {
-                Value::String(text)
+            } => {
+                if let Some(text) =
+                    super::req_inbound_02_normalized::comparable_chat_content(actual).as_str()
+                {
                     if byte_start <= byte_end
                         && byte_end <= text.len()
                         && text.is_char_boundary(byte_start)
-                        && text.is_char_boundary(byte_end) =>
-                {
-                    Value::String(text[byte_start..byte_end].to_string())
+                        && text.is_char_boundary(byte_end)
+                    {
+                        Value::String(text[byte_start..byte_end].to_string())
+                    } else {
+                        return None;
+                    }
+                } else if let Value::Array(parts) = actual {
+                    if non_empty_count == 1 && parts.len() == 1 {
+                        Value::Array(parts.clone())
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
                 }
-                Value::Array(parts) if non_empty_count == 1 && parts.len() == 1 => {
-                    Value::Array(parts.clone())
-                }
-                _ => return None,
-            },
+            }
         };
         resolved.push(slice);
     }

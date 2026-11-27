@@ -287,6 +287,7 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
         preserve_native_tool_output_id,
         restore_responses_hosted_web_search,
         None,
+        None,
         &mut unused_drops,
     )
 }
@@ -296,6 +297,7 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
     omit_tool_output_id: bool,
     preserve_native_tool_output_id: bool,
     restore_responses_hosted_web_search: bool,
+    decoder_captured_tool_output: Option<&Value>,
     source_input_index: Option<usize>,
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<Option<Value>, String> {
@@ -375,13 +377,10 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
         ),
         (
             "output".to_string(),
-            if let Some(content) = extension
-                .and_then(|fields| fields.get("responses_tool_output_content"))
-                .filter(|content| {
-                    (content.is_string() && row.get("content") == Some(*content))
-                        || (content.is_array() && output == content.to_string())
-                })
-            {
+            if let Some(content) = decoder_captured_tool_output.filter(|content| {
+                (content.is_string() && row.get("content") == Some(*content))
+                    || (content.is_array() && output == content.to_string())
+            }) {
                 content.clone()
             } else if let Some(content) = row.get("content").filter(|content| {
                 content.as_array().is_some_and(|parts| {
@@ -399,14 +398,11 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
             },
         ),
     ]);
-    if let Some(native_parts) = extension
-        .and_then(|fields| fields.get("responses_tool_output_content"))
-        .filter(|content| {
-            content.is_array()
-                && super::responses_tool_output_content(content)
-                    .is_ok_and(|canonical| row.get("content") == Some(&canonical))
-        })
-    {
+    if let Some(native_parts) = decoder_captured_tool_output.filter(|content| {
+        content.is_array()
+            && super::responses_tool_output_content(content)
+                .is_ok_and(|canonical| row.get("content") == Some(&canonical))
+    }) {
         // Restore the native Responses parts only while canonical Chat still
         // matches their declared conversion. A Chat Process transformation
         // must remain authoritative. Provider Compat can then apply its normal
@@ -538,6 +534,41 @@ fn project_responses_web_search_action(
     };
     let mut projected_action = Map::new();
     for (key, value) in action_object {
+        if action_type == "search" && key == "sources" {
+            let sources = value.as_array().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.sources"
+                    .to_string()
+            })?;
+            let sources_path = super::json_path_child(action_path, key);
+            let mut projected_sources = Vec::with_capacity(sources.len());
+            for (index, source) in sources.iter().enumerate() {
+                let source_object = source.as_object().ok_or_else(|| {
+                    "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.sources[]"
+                        .to_string()
+                })?;
+                let source_path = format!("{sources_path}[{index}]");
+                let mut projected_source = Map::new();
+                for (src_key, src_value) in source_object {
+                    if matches!(src_key.as_str(), "type" | "url") {
+                        projected_source.insert(src_key.clone(), src_value.clone());
+                        continue;
+                    }
+                    if src_key == "routecodex_chat_extension" {
+                        continue;
+                    }
+                    drops.push(V3ProjectionDropRecord::new(
+                        "responses",
+                        super::json_path_child(&source_path, src_key),
+                        "unmapped_target_protocol_field_unrepresentable",
+                        src_value.clone(),
+                        "build_typed_responses_hosted_web_search_call_item",
+                    ));
+                }
+                projected_sources.push(Value::Object(projected_source));
+            }
+            projected_action.insert(key.clone(), Value::Array(projected_sources));
+            continue;
+        }
         if registered_fields.contains(&key.as_str()) {
             projected_action.insert(key.clone(), value.clone());
             continue;

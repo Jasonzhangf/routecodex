@@ -25,7 +25,6 @@ pub(crate) struct V3HubAssistantItemProvenance {
     pub(crate) source_input_order: Option<u64>,
     pub(crate) content_range: V3HubAssistantItemContentRange,
     pub(crate) id: Option<String>,
-    pub(crate) status: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -34,7 +33,7 @@ pub(crate) struct V3HubToolCallHistoryProvenance {
     pub(crate) suppress_responses_hosted_call: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct V3HubMessageHistoryProvenance {
     pub(crate) message_input_order: Option<u64>,
     pub(crate) tool_calls: Vec<V3HubToolCallHistoryProvenance>,
@@ -44,6 +43,7 @@ pub(crate) struct V3HubMessageHistoryProvenance {
     pub(crate) omit_tool_output_id: bool,
     pub(crate) preserve_native_tool_output_id: bool,
     pub(crate) decoder_native_tool_output: bool,
+    pub(crate) decoder_captured_tool_output: Option<Value>,
     pub(crate) preserve_orphan_tool_output_literal: bool,
     pub(crate) restore_responses_hosted_web_search: bool,
 }
@@ -53,7 +53,7 @@ pub(crate) struct V3HubMessageHistoryProvenance {
 /// Populated exclusively from native Responses inbound decoding at `ReqInbound02`.
 /// Un-decoded legacy `messages` rows and non-Responses entries carry empty provenance
 /// so client-supplied extension fields can never control `Req04` pairing or Outbound order.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct V3HubExplicitHistoryProvenance {
     pub(crate) message_entries: Vec<V3HubMessageHistoryProvenance>,
 }
@@ -614,18 +614,23 @@ fn merge_responses_chat_histories(
     // Legacy public hook callers supply preceding Chat calls and current Responses
     // results. Decode the results first; Req04 still owns id/kind pairing.
     if decoded.iter().all(|message| message["role"] == "tool") {
+        let original_source_len = sanitized_source.len();
+        let mut source_matched = vec![false; original_source_len];
         let mut merged = sanitized_source;
-        let mut merged_entries = vec![V3HubMessageHistoryProvenance::default(); merged.len()];
+        let mut merged_entries =
+            vec![V3HubMessageHistoryProvenance::default(); original_source_len];
         for (dec_idx, result) in decoded.iter().enumerate() {
             let result_provenance = decoded_provenance
                 .message_entries
                 .get(dec_idx)
                 .cloned()
                 .unwrap_or_default();
-            if let Some(pos) = merged.iter().position(|message| {
-                message["role"] == "tool"
-                    && message.get("tool_call_id") == result.get("tool_call_id")
+            if let Some(pos) = (0..original_source_len).find(|&idx| {
+                !source_matched[idx]
+                    && merged[idx]["role"] == "tool"
+                    && merged[idx].get("tool_call_id") == result.get("tool_call_id")
             }) {
+                source_matched[pos] = true;
                 let call_id = merged[pos].get("tool_call_id").and_then(Value::as_str);
                 let orphan_tool_in_source = !call_id.is_some_and(|id| {
                     merged[..pos].iter().any(|message| {

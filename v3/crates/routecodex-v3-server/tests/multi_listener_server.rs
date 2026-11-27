@@ -7940,7 +7940,12 @@ async fn issue4a0b3aa_r13_anthropic_orphan_literal_and_hosted_web_search_project
                 "type": "web_search_call",
                 "id": "ws_native_r13",
                 "status": "completed",
-                "action": {"type": "search", "query": "native r13 search", "vendor_extra": {"nested": 42}},
+                "action": {
+                    "type": "search",
+                    "query": "native r13 search",
+                    "sources": [{"type": "url", "url": "https://example.com", "vendor_extra": "drop_me"}],
+                    "vendor_extra": {"nested": 42}
+                },
                 "vendor_extra": {"ticket": 99},
                 "routecodex_chat_extension": {"spoof": true}
             }]
@@ -7959,7 +7964,11 @@ async fn issue4a0b3aa_r13_anthropic_orphan_literal_and_hosted_web_search_project
             "type": "web_search_call",
             "id": "ws_native_r13",
             "status": "completed",
-            "action": {"type": "search", "query": "native r13 search"}
+            "action": {
+                "type": "search",
+                "query": "native r13 search",
+                "sources": [{"type": "url", "url": "https://example.com"}]
+            }
         }]),
         "native web_search_call must project only registered fields without unmapped/reserved keys: {}",
         native_ws_capture.body
@@ -7990,6 +7999,16 @@ async fn issue4a0b3aa_r13_anthropic_orphan_literal_and_hosted_web_search_project
                 && record["source_value"] == json!({"nested": 42})
         }),
         "unmapped web_search_call.action.vendor_extra must record scoped drop diagnostic: {drop_records:?}"
+    );
+    assert!(
+        drop_records.iter().any(|record| {
+            record["target_protocol"] == "responses"
+                && record["json_path"] == "$.input[0].action.sources[0].vendor_extra"
+                && record["reason"] == "unmapped_target_protocol_field_unrepresentable"
+                && record["canonical_value"] == json!("drop_me")
+                && record["source_value"] == json!("drop_me")
+        }),
+        "unmapped web_search_call.action.sources[0].vendor_extra must record scoped drop diagnostic: {drop_records:?}"
     );
 
     let legacy_ws_res = client
@@ -8239,6 +8258,321 @@ async fn issue4a0b3aa_r14_dual_legacy_orphan_and_orphan_tool_search_output_publi
             "rejected tool_search_output must not dispatch upstream"
         );
     }
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r15_dual_alias_and_legacy_json_string_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let legacy_json_string = r#"[{"type":"input_text","text":"legacy"}]"#;
+
+    let responses_provider_body = json!({
+        "id": "resp_r15_alias",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r15-alias-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let dual_alias_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_native_alias_r15",
+                    "content": "actual",
+                    "routecodex_chat_extension": {"responses_tool_output_content": "different"}
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_legacy_json_r15",
+                    "content": legacy_json_string,
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_content": [{"type": "input_text", "text": "legacy"}]
+                    }
+                }
+            ],
+            "input": [
+                {
+                    "type": "tool_result",
+                    "call_id": "call_native_alias_r15",
+                    "output": "actual"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("dual-history alias + legacy json string must succeed");
+    assert_eq!(dual_alias_res.status(), StatusCode::OK);
+    let dual_alias_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history alias capture timeout")
+        .expect("dual-history alias capture");
+    let dual_alias_input = dual_alias_capture.body["input"]
+        .as_array()
+        .expect("dual-history Responses input array");
+    let alias_wire = dual_alias_input
+        .iter()
+        .find(|item| item["call_id"] == "call_native_alias_r15")
+        .expect("native tool_result alias must reach first Provider");
+    assert!(
+        alias_wire["output"].is_string(),
+        "native tool_result alias output must be a JSON string: {}",
+        dual_alias_capture.body
+    );
+    assert_eq!(
+        alias_wire["output"],
+        json!("actual"),
+        "native tool_result alias must keep \"actual\" instead of client \"different\": {}",
+        dual_alias_capture.body
+    );
+    let legacy_json_wire = dual_alias_input
+        .iter()
+        .find(|item| item["call_id"] == "call_legacy_json_r15")
+        .expect("legacy JSON string orphan must reach first Provider");
+    assert!(
+        legacy_json_wire["output"].is_string(),
+        "legacy-only JSON string must stay a string rather than turning into an array: {}",
+        dual_alias_capture.body
+    );
+    assert_eq!(
+        legacy_json_wire["output"],
+        json!(legacy_json_string),
+        "legacy-only JSON string content must stay exact: {}",
+        dual_alias_capture.body
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r15_dual_empty_messages_repeated_tool_search_output_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+
+    let responses_provider_body = json!({
+        "id": "resp_r15_tso",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r15-tso-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let dual_tso_input = json!([
+        {
+            "type": "tool_search_output",
+            "id": "tso_dual_1",
+            "call_id": "call_dual_tso_r15",
+            "execution": "client",
+            "status": "completed",
+            "tools": [{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]
+        },
+        {
+            "type": "tool_search_output",
+            "id": "tso_dual_2",
+            "call_id": "call_dual_tso_r15",
+            "execution": "client",
+            "status": "completed",
+            "tools": [{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]
+        }
+    ]);
+    let dual_tso_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": dual_tso_input,
+            "messages": []
+        }))
+        .send()
+        .await
+        .expect("dual-history repeated orphan tool_search_output must succeed");
+    assert_eq!(dual_tso_res.status(), StatusCode::OK);
+    let dual_tso_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history tso capture timeout")
+        .expect("dual-history tso capture");
+    assert_eq!(
+        dual_tso_capture.body["input"], dual_tso_input,
+        "dual-history repeated orphan tool_search_output with empty messages must reach first Provider in source order: {}",
+        dual_tso_capture.body
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r15_outbound_orphan_literal_and_cross_entry_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+
+    let responses_provider_body = json!({
+        "id": "resp_r15_compat",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r15-compat-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    for server in resp_manifest.servers.values_mut() {
+        server.endpoints = vec!["responses".to_string(), "anthropic".to_string()];
+    }
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+    let anthropic_endpoint = format!("http://{}/v1/messages", resp_handle.listeners[0].addr);
+
+    let resp_mixed_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": [
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_orphan_literal_r15",
+                    "output": encoded_image
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_paired_r15",
+                    "call_id": "call_paired_image_r15",
+                    "name": "read_image",
+                    "arguments": "{}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_paired_image_r15",
+                    "output": encoded_image
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("native Responses mixed orphan + paired image must succeed");
+    assert_eq!(resp_mixed_res.status(), StatusCode::OK);
+    let resp_mixed_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("native Responses mixed capture timeout")
+        .expect("native Responses mixed capture");
+    let mixed_input = resp_mixed_capture.body["input"]
+        .as_array()
+        .expect("mixed Responses input");
+    assert_eq!(
+        mixed_input[0]["output"],
+        json!(encoded_image),
+        "native orphan literal must remain literal on text-only default Provider: {}",
+        resp_mixed_capture.body
+    );
+    assert_eq!(
+        mixed_input[2]["output"],
+        json!([{"type": "input_text", "text": "[Image]"}]),
+        "paired image result must project to [Image] on text-only default Provider: {}",
+        resp_mixed_capture.body
+    );
+
+    let anthropic_entry_res = client
+        .post(&anthropic_endpoint)
+        .json(&json!({
+            "model": "test",
+            "max_tokens": 128,
+            "stream": false,
+            "messages": [
+                {"role": "user", "content": "read image"},
+                {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "call_anth_entry_r15",
+                        "name": "read_image",
+                        "input": {}
+                    }]
+                },
+                {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "call_anth_entry_r15",
+                        "content": "data:image/png;base64,AAAA"
+                    }]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("Anthropic Relay entry against text-only Responses Provider must succeed");
+    assert_eq!(anthropic_entry_res.status(), StatusCode::OK);
+    let anthropic_entry_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("anthropic entry capture timeout")
+        .expect("anthropic entry capture");
+    let anth_tool_output = anthropic_entry_capture.body["input"]
+        .as_array()
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item["type"] == "function_call_output" && item["call_id"] == "call_anth_entry_r15"
+            })
+        })
+        .expect("Anthropic entry tool output must reach first Provider");
+    assert_eq!(
+        anth_tool_output["output"],
+        json!("[Image]"),
+        "non-Responses Relay entry must keep base text-only image placeholder projection: {}",
+        anthropic_entry_capture.body
+    );
 
     resp_handle.shutdown().await;
     let _ = resp_shutdown.send(());

@@ -50,7 +50,7 @@ struct AdjustProviderPrivateRequestOperator {
     side_output: Arc<AdjustProviderPrivateRequestSideOutput>,
     execution_mode: super::V3HubExecutionMode,
     entry_protocol: super::V3HubEntryProtocol,
-    openai_chat_orphan_tool_literals: Vec<bool>,
+    orphan_tool_output_literals: Vec<bool>,
 }
 
 impl Operator for AdjustProviderPrivateRequestOperator {
@@ -76,8 +76,7 @@ impl Operator for AdjustProviderPrivateRequestOperator {
             &self.selected_target,
             self.provider_protocol,
             &self.profile,
-            self.execution_mode == super::V3HubExecutionMode::Relay,
-            &self.openai_chat_orphan_tool_literals,
+            &self.orphan_tool_output_literals,
         )
         .map(|(mut payload, custom_tool_function_binding)| {
             let opencode_zen_tcm_bridge = if self
@@ -157,7 +156,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
             side_output: Arc::clone(&side_output),
             execution_mode: input.previous.previous.execution,
             entry_protocol: input.entry_protocol(),
-            openai_chat_orphan_tool_literals: orphan_tool_output_literals,
+            orphan_tool_output_literals,
         },
     );
     let typed_outcome = side_output
@@ -229,7 +228,6 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         selected,
         provider_protocol,
         profile,
-        false,
         &[],
     )
 }
@@ -239,8 +237,7 @@ fn apply_v3_provider_req_compat_to_provider_payload_with_policy(
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
-    preserve_orphan_responses_json_strings: bool,
-    openai_chat_orphan_tool_literals: &[bool],
+    orphan_tool_output_literals: &[bool],
 ) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let custom_tool_function_binding = (profile
@@ -282,8 +279,7 @@ fn apply_v3_provider_req_compat_to_provider_payload_with_policy(
         image_placeholder::project_default_text_attempt_images_with_tool_policy(
             &mut result,
             provider_protocol,
-            preserve_orphan_responses_json_strings,
-            openai_chat_orphan_tool_literals,
+            orphan_tool_output_literals,
         );
     }
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
@@ -1636,7 +1632,7 @@ mod tests {
                 side_output: Arc::clone(&side_output),
                 execution_mode: req07.previous.previous.execution,
                 entry_protocol: req07.entry_protocol(),
-                openai_chat_orphan_tool_literals: Vec::new(),
+                orphan_tool_output_literals: Vec::new(),
             },
         )
         .expect("canonical private request node must execute");

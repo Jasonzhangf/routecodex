@@ -12,6 +12,8 @@ const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
 const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
 pub(super) const RESPONSES_REASONING_ITEMS_EXTENSION: &str = "responses_reasoning_items";
 pub(super) const RESPONSES_ASSISTANT_ITEMS_EXTENSION: &str = "responses_assistant_items";
+pub(super) const RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION: &str =
+    "responses_assistant_item_statuses";
 pub(super) use tool_output::{
     canonical_content as responses_tool_output_content, image_url as responses_image_url,
 };
@@ -141,11 +143,12 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     .unwrap_or("user")
                     .trim()
                     .eq_ignore_ascii_case("assistant");
-                let message = build_v3_openai_chat_message_from_responses_message(item)?;
+                let mut message = build_v3_openai_chat_message_from_responses_message(item)?;
                 let mut prov = V3HubMessageHistoryProvenance::default();
                 if native_responses {
                     prov.message_input_order = Some(input_index as u64);
                     if is_assistant_message {
+                        attach_v3_responses_assistant_item_status(&mut message, item);
                         prov.assistant_content_digest = Some(chat_content_digest(
                             message.get("content").unwrap_or(&Value::Null),
                         ));
@@ -174,9 +177,10 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                 }
             }
             "output_text" => {
-                let message = build_v3_openai_chat_assistant_output_text_message(item);
+                let mut message = build_v3_openai_chat_assistant_output_text_message(item);
                 let mut prov = V3HubMessageHistoryProvenance::default();
                 if native_responses {
+                    attach_v3_responses_assistant_item_status(&mut message, item);
                     prov.message_input_order = Some(input_index as u64);
                     prov.assistant_content_digest = Some(chat_content_digest(
                         message.get("content").unwrap_or(&Value::Null),
@@ -265,13 +269,15 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
             | "custom_tool_call_output"
             | "tool_result"
             | "tool_message" => {
-                let message = build_v3_openai_chat_tool_result_message(item, native_responses)?;
+                let (message, decoder_captured_tool_output) =
+                    build_v3_openai_chat_tool_result_message(item, native_responses)?;
                 let prov = V3HubMessageHistoryProvenance {
                     message_input_order: native_responses.then_some(input_index as u64),
                     omit_tool_output_id: native_responses
                         && read_v3_non_empty_str(item.get("id")).is_none(),
                     preserve_native_tool_output_id: native_responses,
                     decoder_native_tool_output: native_responses,
+                    decoder_captured_tool_output,
                     ..Default::default()
                 };
                 append_v3_openai_chat_tool_result_message_with_provenance(
@@ -643,6 +649,39 @@ pub(super) fn chat_content_digest(content: &Value) -> u64 {
     state
 }
 
+fn attach_v3_responses_assistant_item_status(message: &mut Value, item: &Map<String, Value>) {
+    let Some(status) = item.get("status").filter(|value| !value.is_null()) else {
+        return;
+    };
+    let Some(message_obj) = message.as_object_mut() else {
+        return;
+    };
+    let extension = message_obj
+        .entry("routecodex_chat_extension".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(extension_obj) = extension.as_object_mut() {
+        extension_obj.insert(
+            RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION.to_string(),
+            Value::Array(vec![status.clone()]),
+        );
+    }
+}
+
+fn extract_v3_responses_assistant_item_statuses(
+    message: &Map<String, Value>,
+    count: usize,
+) -> Vec<Value> {
+    let mut statuses = message
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|ext| ext.get(RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    statuses.resize(count, Value::Null);
+    statuses
+}
+
 fn build_v3_responses_assistant_item_provenance(
     message: &Value,
     item: &Map<String, Value>,
@@ -654,7 +693,6 @@ fn build_v3_responses_assistant_item_provenance(
             message.get("content").unwrap_or(&Value::Null),
         ),
         id: read_v3_non_empty_str(item.get("id")).map(str::to_string),
-        status: item.get("status").filter(|value| !value.is_null()).cloned(),
     }
 }
 
@@ -771,8 +809,10 @@ pub(super) fn resolve_orphan_responses_tool_output_media(
                     .get(msg_idx)
                     .is_some_and(|entry| entry.decoder_native_tool_output);
                 if is_decoder_native {
-                    if let Some(raw_output) = message
-                        .pointer("/routecodex_chat_extension/responses_tool_output_content")
+                    if let Some(raw_output) = provenance
+                        .message_entries
+                        .get(msg_idx)
+                        .and_then(|entry| entry.decoder_captured_tool_output.as_ref())
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                     {
@@ -978,6 +1018,16 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         .ok_or_else(|| {
             "OpenAI Chat provider encoding pending tool message is not an object".to_string()
         })?;
+    let target_assistant_count = message_provenance
+        .get(index)
+        .map_or(0, |prov| prov.assistant_items.len());
+    let source_assistant_count = source_provenance.assistant_items.len();
+    let existing_assistant_statuses =
+        extract_v3_responses_assistant_item_statuses(target, target_assistant_count);
+    let source_assistant_statuses = source
+        .as_object()
+        .map(|obj| extract_v3_responses_assistant_item_statuses(obj, source_assistant_count))
+        .unwrap_or_else(|| vec![Value::Null; source_assistant_count]);
     let target_content_before = target.get("content").cloned().unwrap_or(Value::Null);
     let source_content_val = source.get("content").unwrap_or(&Value::Null);
     let target_empty = v3_openai_chat_content_is_empty(&target_content_before);
@@ -996,6 +1046,10 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         target_prov.preserve_native_tool_output_id |=
             source_provenance.preserve_native_tool_output_id;
         target_prov.decoder_native_tool_output |= source_provenance.decoder_native_tool_output;
+        if target_prov.decoder_captured_tool_output.is_none() {
+            target_prov.decoder_captured_tool_output =
+                source_provenance.decoder_captured_tool_output;
+        }
 
         let mut source_items = source_provenance.assistant_items;
         if source_empty {
@@ -1170,6 +1224,29 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
                     "responses_reasoning_encrypted_content".to_string(),
                     signature,
                 );
+            }
+        }
+    }
+    if target_assistant_count > 0 || source_assistant_count > 0 {
+        let mut merged_statuses = existing_assistant_statuses;
+        merged_statuses.extend(source_assistant_statuses);
+        if merged_statuses.iter().any(|value| !value.is_null()) {
+            let extension = target
+                .entry("routecodex_chat_extension".to_string())
+                .or_insert_with(|| Value::Object(Map::new()));
+            if let Some(extension_obj) = extension.as_object_mut() {
+                extension_obj.insert(
+                    RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION.to_string(),
+                    Value::Array(merged_statuses),
+                );
+            }
+        } else if let Some(extension_obj) = target
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension_obj.remove(RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION);
+            if extension_obj.is_empty() {
+                target.remove("routecodex_chat_extension");
             }
         }
     }
@@ -1688,7 +1765,7 @@ pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
 fn build_v3_openai_chat_tool_result_message(
     item: &Map<String, Value>,
     native_responses: bool,
-) -> Result<Value, String> {
+) -> Result<(Value, Option<Value>), String> {
     let call_id = read_v3_non_empty_str(item.get("tool_call_id"))
         .or_else(|| read_v3_non_empty_str(item.get("call_id")))
         .or_else(|| read_v3_non_empty_str(item.get("tool_use_id")));
@@ -1706,14 +1783,18 @@ fn build_v3_openai_chat_tool_result_message(
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
     }
-    if native_responses
+    let captured_output = (native_responses
         && matches!(
             item_type,
             "function_call_output" | "custom_tool_call_output"
         )
-        && (output.is_string() || output.is_array())
-    {
-        extension.insert("responses_tool_output_content".to_string(), output.clone());
+        && (output.is_string() || output.is_array()))
+    .then(|| output.clone());
+    if let Some(captured) = &captured_output {
+        extension.insert(
+            "responses_tool_output_content".to_string(),
+            captured.clone(),
+        );
     }
     let extra_fields: Map<String, Value> = item
         .iter()
@@ -1755,20 +1836,26 @@ fn build_v3_openai_chat_tool_result_message(
         }
         copy_v3_responses_tool_result_status(item, &mut named_extension)?;
         copy_v3_anthropic_tool_result_is_error(item, &mut named_extension);
-        return Ok(json!({
-            "role":"user",
-            "content":content,
-            "routecodex_chat_extension":Value::Object(named_extension)
-        }));
+        return Ok((
+            json!({
+                "role":"user",
+                "content":content,
+                "routecodex_chat_extension":Value::Object(named_extension)
+            }),
+            captured_output,
+        ));
     };
     copy_v3_responses_tool_result_status(item, &mut extension)?;
     copy_v3_anthropic_tool_result_is_error(item, &mut extension);
-    Ok(json!({
-        "role":"tool",
-        "tool_call_id":call_id,
-        "content":content,
-        "routecodex_chat_extension":Value::Object(extension)
-    }))
+    Ok((
+        json!({
+            "role":"tool",
+            "tool_call_id":call_id,
+            "content":content,
+            "routecodex_chat_extension":Value::Object(extension)
+        }),
+        captured_output,
+    ))
 }
 
 fn copy_v3_responses_tool_result_status(

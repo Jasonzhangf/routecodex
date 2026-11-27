@@ -10,27 +10,13 @@ pub(super) fn project_default_text_attempt_images(
     payload: &mut Value,
     protocol: V3HubProviderWireProtocol,
 ) {
-    project_default_text_attempt_images_with_policy(payload, protocol, false);
-}
-
-pub(super) fn project_default_text_attempt_images_with_policy(
-    payload: &mut Value,
-    protocol: V3HubProviderWireProtocol,
-    preserve_orphan_responses_json_strings: bool,
-) {
-    project_default_text_attempt_images_with_tool_policy(
-        payload,
-        protocol,
-        preserve_orphan_responses_json_strings,
-        &[],
-    );
+    project_default_text_attempt_images_with_tool_policy(payload, protocol, &[]);
 }
 
 pub(super) fn project_default_text_attempt_images_with_tool_policy(
     payload: &mut Value,
     protocol: V3HubProviderWireProtocol,
-    preserve_orphan_responses_json_strings: bool,
-    tool_result_orphan_literals: &[bool],
+    orphan_tool_output_literals: &[bool],
 ) {
     let (messages, content) = match protocol {
         V3HubProviderWireProtocol::Responses => ("input", "content"),
@@ -42,8 +28,6 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
     let Some(messages) = payload.get_mut(messages).and_then(Value::as_array_mut) else {
         return;
     };
-    let mut seen_tool_call_ids: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
     let mut tool_result_index = 0usize;
     for message in messages {
         let text_type = match protocol {
@@ -51,36 +35,24 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
             V3HubProviderWireProtocol::Responses => "input_text",
             _ => "text",
         };
-        if preserve_orphan_responses_json_strings
-            && protocol == V3HubProviderWireProtocol::Responses
+        if protocol == V3HubProviderWireProtocol::Responses
             && matches!(
                 message["type"].as_str(),
-                Some("function_call" | "custom_tool_call")
+                Some("function_call_output" | "custom_tool_call_output")
             )
         {
-            if let Some(call_id) = message["call_id"].as_str() {
-                seen_tool_call_ids.insert(call_id.to_owned());
+            let preserve_literal = orphan_tool_output_literals
+                .get(tool_result_index)
+                .copied()
+                .unwrap_or(false);
+            tool_result_index += 1;
+            if let Some(output) = message.get_mut("output") {
+                project_tool_output(output, text_type, !preserve_literal);
             }
             continue;
         }
-        if matches!(
-            message["type"].as_str(),
-            Some("function_call_output" | "custom_tool_call_output")
-        ) && protocol == V3HubProviderWireProtocol::Responses
-        {
-            // In Relay mode, paired results can carry encoded media parts while
-            // orphan native strings remain literal. Direct continuations lack
-            // upstream call items in wire input and keep base projection.
-            let project_string_parts = !preserve_orphan_responses_json_strings
-                || message["call_id"]
-                    .as_str()
-                    .is_some_and(|id| seen_tool_call_ids.contains(id));
-            if let Some(output) = message.get_mut("output") {
-                project_tool_output(output, text_type, project_string_parts);
-            }
-        }
         if protocol == V3HubProviderWireProtocol::OpenAiChat && message["role"] == "tool" {
-            let preserve_literal = tool_result_orphan_literals
+            let preserve_literal = orphan_tool_output_literals
                 .get(tool_result_index)
                 .copied()
                 .unwrap_or(false);
@@ -98,7 +70,7 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
             for part in parts {
                 if protocol == V3HubProviderWireProtocol::Anthropic && part["type"] == "tool_result"
                 {
-                    let preserve_literal = tool_result_orphan_literals
+                    let preserve_literal = orphan_tool_output_literals
                         .get(tool_result_index)
                         .copied()
                         .unwrap_or(false);
@@ -256,10 +228,10 @@ mod provider_req_compat_06_image_placeholder_tests {
             {"role":"user","content":[{"type":"input_text","text":"later turn"}]}
         ]});
         let original = payload.clone();
-        project_default_text_attempt_images_with_policy(
+        project_default_text_attempt_images_with_tool_policy(
             &mut payload,
             V3HubProviderWireProtocol::Responses,
-            true,
+            &[false, true],
         );
         let mut expected = parts;
         expected[1] = json!({"type":"input_text","text":"[Image]","vendor_image":{"count":7}});
@@ -277,10 +249,10 @@ mod provider_req_compat_06_image_placeholder_tests {
         ] {
             let mut relay_payload = json!({"input":[{"type":"function_call_output","call_id":"orphan","output":literal}]});
             let original = relay_payload.clone();
-            project_default_text_attempt_images_with_policy(
+            project_default_text_attempt_images_with_tool_policy(
                 &mut relay_payload,
                 V3HubProviderWireProtocol::Responses,
-                true,
+                &[true],
             );
             assert_eq!(relay_payload, original);
         }
@@ -301,10 +273,10 @@ mod provider_req_compat_06_image_placeholder_tests {
             {"type":"function_call","call_id":"paired_bare","name":"read_image","arguments":"{}"},
             {"type":"function_call_output","call_id":"paired_bare","output":"data:image/png;base64,AAAA"}
         ]});
-        project_default_text_attempt_images_with_policy(
+        project_default_text_attempt_images_with_tool_policy(
             &mut payload,
             V3HubProviderWireProtocol::Responses,
-            true,
+            &[true, false, false],
         );
         assert_eq!(
             payload["input"][0]["output"], "data:image/png;base64,AAAA",
@@ -337,10 +309,10 @@ mod provider_req_compat_06_image_placeholder_tests {
             {"type":"function_call","call_id":"call_b","name":"read_image","arguments":"{}"},
             {"type":"function_call_output","call_id":"call_b","output":encoded_image}
         ]});
-        project_default_text_attempt_images_with_policy(
+        project_default_text_attempt_images_with_tool_policy(
             &mut same_id_later_call,
             V3HubProviderWireProtocol::Responses,
-            true,
+            &[true, false],
         );
         assert_eq!(
             same_id_later_call["input"][0]["output"],
@@ -366,7 +338,6 @@ mod provider_req_compat_06_image_placeholder_tests {
         project_default_text_attempt_images_with_tool_policy(
             &mut payload,
             V3HubProviderWireProtocol::OpenAiChat,
-            true,
             &[true, false],
         );
         assert_eq!(
@@ -390,7 +361,6 @@ mod provider_req_compat_06_image_placeholder_tests {
         project_default_text_attempt_images_with_tool_policy(
             &mut payload,
             V3HubProviderWireProtocol::Anthropic,
-            true,
             &[true, true, false, false],
         );
         assert_eq!(

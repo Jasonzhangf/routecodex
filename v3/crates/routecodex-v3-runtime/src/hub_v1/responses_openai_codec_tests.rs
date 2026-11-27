@@ -1322,6 +1322,15 @@ fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
         }),
         json!({
             "role": "tool",
+            "tool_call_id": "call_native_alias",
+            "content": "actual",
+            "routecodex_chat_extension": {
+                "responses_tool_output_type": "tool_result",
+                "responses_tool_output_content": "different"
+            }
+        }),
+        json!({
+            "role": "tool",
             "tool_call_id": "call_native",
             "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}],
             "routecodex_chat_extension": {
@@ -1337,6 +1346,16 @@ fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
                 message_input_order: Some(0),
                 preserve_native_tool_output_id: true,
                 decoder_native_tool_output: true,
+                decoder_captured_tool_output: None,
+                ..Default::default()
+            },
+            V3HubMessageHistoryProvenance {
+                message_input_order: Some(1),
+                preserve_native_tool_output_id: true,
+                decoder_native_tool_output: true,
+                decoder_captured_tool_output: Some(json!(
+                    r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#
+                )),
                 ..Default::default()
             },
         ],
@@ -1344,9 +1363,11 @@ fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
     resolve_orphan_responses_tool_output_media(&mut messages, &mut provenance);
     assert_eq!(messages[0]["content"], json!("actual"));
     assert!(!provenance.preserve_orphan_tool_output_literal(0));
+    assert_eq!(messages[1]["content"], json!("actual"));
+    assert!(provenance.preserve_orphan_tool_output_literal(1));
     assert_eq!(
-        messages[1]["content"],
+        messages[2]["content"],
         json!(r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#)
     );
-    assert!(provenance.preserve_orphan_tool_output_literal(1));
+    assert!(provenance.preserve_orphan_tool_output_literal(2));
 }

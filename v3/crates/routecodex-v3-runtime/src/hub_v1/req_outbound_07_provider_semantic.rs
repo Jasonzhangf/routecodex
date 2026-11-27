@@ -5,7 +5,7 @@ use super::request_outbound_format::{
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals,
     classify_v3_provider_compat_error,
     encode_v3_responses_semantic_as_anthropic_request_with_drops_and_provenance,
     provider_protocol_compat_id, V3HubEntryProtocol, V3HubExplicitHistoryProvenance,
@@ -144,27 +144,30 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
         governed_payload,
         &provider_protocol_compat_id(provider_protocol),
     )?;
+    let is_responses_entry = entry_protocol == V3HubEntryProtocol::Responses;
     let mut orphan_tool_output_literals = Vec::new();
     let mut provider_protocol_payload = match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
-            orphan_tool_output_literals = governed_payload
-                .get("messages")
-                .and_then(Value::as_array)
-                .map(|messages| {
-                    messages
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, message)| {
-                            message.get("role").and_then(Value::as_str) == Some("tool")
-                        })
-                        .map(|(msg_idx, _)| {
-                            explicit_history_pairing.is_some_and(|provenance| {
-                                provenance.preserve_orphan_tool_output_literal(msg_idx)
+            if is_responses_entry {
+                orphan_tool_output_literals = governed_payload
+                    .get("messages")
+                    .and_then(Value::as_array)
+                    .map(|messages| {
+                        messages
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, message)| {
+                                message.get("role").and_then(Value::as_str) == Some("tool")
                             })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                            .map(|(msg_idx, _)| {
+                                explicit_history_pairing.is_some_and(|provenance| {
+                                    provenance.preserve_orphan_tool_output_literal(msg_idx)
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
             let (payload, openai_chat_drops) =
                 build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
                     governed_payload,
@@ -186,8 +189,8 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
                 .compatibility_profile
                 .as_deref()
                 .is_some_and(|profile| profile.eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE));
-            let (payload, responses_drops) =
-                build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            let (payload, responses_drops, responses_orphan_literals) =
+                build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
                     governed_payload,
                     selected
                         .model_capabilities
@@ -196,6 +199,9 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
                     preserve_responses_custom_tools,
                     explicit_history_pairing,
                 )?;
+            if is_responses_entry {
+                orphan_tool_output_literals = responses_orphan_literals;
+            }
             drops.extend(responses_drops);
             payload
         }
@@ -211,7 +217,9 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
                     explicit_history_pairing,
                 )
                 .map_err(|error| error.to_string())?;
-            orphan_tool_output_literals = anthropic_orphan_literals;
+            if is_responses_entry {
+                orphan_tool_output_literals = anthropic_orphan_literals;
+            }
             anthropic_drops.extend(semantic_drops);
             drops.extend(anthropic_drops);
             payload
