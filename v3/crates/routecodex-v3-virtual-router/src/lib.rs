@@ -20,6 +20,8 @@ pub struct V3RouterRequestFacts {
     /// value, so completed history cannot push a request into a
     /// min/max-bounded pool. It is not the full request capacity.
     pub current_turn_input_tokens: u64,
+    /// Observable history only. Compact requests leave this unset.
+    pub estimated_history_turns: Option<u64>,
     pub route_classification: RouteClassification,
 }
 
@@ -31,6 +33,7 @@ impl V3RouterRequestFacts {
             capabilities: BTreeSet::new(),
             input_tokens: 0,
             current_turn_input_tokens: 0,
+            estimated_history_turns: None,
             route_classification: RouteClassification::default(),
         }
     }
@@ -88,6 +91,7 @@ pub struct V3Router07OpaqueTargetHitOnce {
     pub request_client_model: Option<String>,
     pub request_capabilities: BTreeSet<String>,
     pub request_input_tokens: u64,
+    pub estimated_history_turns: Option<u64>,
     pub hit_count: u8,
 }
 
@@ -456,6 +460,7 @@ impl V3VirtualRouter {
             request_client_model: plan.facts.client_model,
             request_capabilities: plan.facts.capabilities,
             request_input_tokens: plan.facts.input_tokens,
+            estimated_history_turns: plan.facts.estimated_history_turns,
             hit_count: 1,
         })
     }
@@ -607,10 +612,12 @@ fn ordered_target_indices(
             .into_iter()
             .flatten()
             .collect(),
-        V3SelectionStrategy::Sticky => priority_tier_indices(targets, |target| target.priority)
-            .into_iter()
-            .flatten()
-            .collect(),
+        V3SelectionStrategy::Sticky | V3SelectionStrategy::ActiveQueue => {
+            priority_tier_indices(targets, |target| target.priority)
+                .into_iter()
+                .flatten()
+                .collect()
+        }
         V3SelectionStrategy::Weighted => {
             let mut state = selection_state.lock().expect("router selection state lock");
             let mut order = Vec::with_capacity(targets.len());

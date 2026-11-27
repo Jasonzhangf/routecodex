@@ -18,6 +18,7 @@ pub struct V3ProviderCooldownProbeKey {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 pub struct V3ProviderCooldownProbeState {
     /// Cause of this cooldown, independent of subsequent failure history. A
     /// `RateLimit` cause marks a bounded 429 hold: the identity auto-releases

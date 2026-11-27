@@ -166,6 +166,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_default_transport_provider_hea
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         Some(handoff),
+        None,
     )
     .await
 }
@@ -197,6 +198,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_provider_health<T: ResponsesTr
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         None,
+        None,
     )
     .await
 }
@@ -208,6 +210,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3GeminiRelayCodec；Chat Process 有界续杯循环在骨架之上的
@@ -231,6 +234,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
             provider_health,
             retry_policy,
             initial_handoff,
+            active_keys,
         )
         .await
         .map_err(|(error, _)| match error {
@@ -251,6 +255,24 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
             }
         })?;
     Ok(output)
+}
+
+pub async fn execute_v3_gemini_relay_runtime_with_active_keys(
+    manifest: &V3Config05ManifestPublished,
+    input: V3GeminiRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
+    execute_v3_gemini_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        None,
+        active_keys,
+    )
+    .await
 }
 
 /// Gemini relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
@@ -1073,6 +1095,7 @@ mod tests {
                     provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
+                    attempt_source: None,
                     terminal_projection: None,
                     terminal_disposition,
                     error_operator_fault: Some(fault.clone()),

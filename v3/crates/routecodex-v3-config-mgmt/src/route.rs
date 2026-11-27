@@ -66,7 +66,26 @@ pub struct UserRouteGroupView {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UserRoutePoolView {
     pub name: String,
+    /// Missing preserves the current policy; null explicitly removes it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "policy_patch"
+    )]
+    pub selection: Option<serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "policy_patch"
+    )]
+    pub active_keys: Option<serde_json::Value>,
     pub tiers: Vec<UserRouteTierView>,
+}
+
+fn policy_patch<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,6 +114,16 @@ pub fn user_route_groups_from_selection(
                 .iter()
                 .map(|(name, pool)| UserRoutePoolView {
                     name: name.clone(),
+                    selection: Some(
+                        serde_json::to_value(&pool.selection).expect("selection serialization"),
+                    ),
+                    active_keys: Some(
+                        serde_json::to_value(pool)
+                            .expect("pool serialization")
+                            .get("active_keys")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                    ),
                     tiers: pool
                         .tiers
                         .iter()
@@ -133,6 +162,21 @@ pub fn apply_user_route_group_view(
             .routes
             .entry(pool.name.clone())
             .or_insert_with(new_default_user_route_pool);
+        // Patch the existing authoring object so fields omitted by older clients survive.
+        let mut policy = serde_json::to_value(&*target).map_err(|error| error.to_string())?;
+        for (name, patch) in [
+            ("selection", &pool.selection),
+            ("active_keys", &pool.active_keys),
+        ] {
+            if let Some(value) = patch {
+                if value.is_null() {
+                    policy.as_object_mut().expect("pool object").remove(name);
+                } else {
+                    policy[name] = value.clone();
+                }
+            }
+        }
+        *target = serde_json::from_value(policy).map_err(|error| error.to_string())?;
         target.tiers = pool
             .tiers
             .iter()
@@ -157,6 +201,96 @@ pub fn apply_user_route_group_view(
 /// 这是 user routing 侧 default pool 的唯一构造点。
 fn new_default_user_route_pool() -> V3UserRoutePool {
     V3UserRoutePool::default()
+}
+
+#[cfg(test)]
+mod user_policy_tests {
+    use super::*;
+
+    #[test]
+    fn user_route_policy_roundtrip_and_partial_edit() {
+        let mut selection: V3UserConfig02RoutingSelectionParsed = serde_json::from_value(serde_json::json!({
+            "version": 3, "servers": {"test": {"bind": "127.0.0.1", "port": 18080,
+                "routes": {"default": {"selection": {"strategy": "sticky"}, "tiers": [[{"use": "p/m"}]]}}}}
+        })).unwrap();
+        let view = user_route_groups_from_selection(&selection);
+        let wire = serde_json::to_value(&view[0]).unwrap();
+        assert_eq!(wire["pools"][0]["selection"]["strategy"], "sticky");
+        let partial: UserRouteGroupView = serde_json::from_value(serde_json::json!({
+            "server_id": "test", "port": 18080,
+            "pools": [{"name": "default", "tiers": [{"members": [{"use": "p/m", "weight": 7}]}]}]
+        }))
+        .unwrap();
+        apply_user_route_group_view(&mut selection, &partial).unwrap();
+        assert_eq!(
+            selection.servers["test"].routes["default"]
+                .selection
+                .strategy,
+            V3SelectionStrategy::Sticky
+        );
+        let clear: UserRouteGroupView = serde_json::from_value(serde_json::json!({
+            "server_id": "test", "port": 18080,
+            "pools": [{"name": "default", "selection": null, "tiers": [{"members": [{"use": "p/m"}]}]}]
+        })).unwrap();
+        apply_user_route_group_view(&mut selection, &clear).unwrap();
+        assert_eq!(
+            selection.servers["test"].routes["default"]
+                .selection
+                .strategy,
+            V3SelectionStrategy::Priority
+        );
+    }
+
+    #[test]
+    fn active_key_view_preserves_omitted_policy_and_clears_explicitly() {
+        let policy = serde_json::json!({"members": [{"provider": "p", "alias": "a"}], "retries": 2, "on_failure": "tail"});
+        let mut selection: V3UserConfig02RoutingSelectionParsed = serde_json::from_value(serde_json::json!({
+            "version": 3, "servers": {"test": {"bind": "127.0.0.1", "port": 18080,
+                "routes": {"default": {"selection": {"strategy": "active_queue"}, "active_keys": policy, "tiers": [[{"use": "p/m"}]]},
+                    "coding": {"selection": {"strategy": "sticky"}, "tiers": [[{"use": "p/m"}]]}}}}
+        })).unwrap();
+        let original = selection.servers["test"].routes["coding"].clone();
+        let view = user_route_groups_from_selection(&selection);
+        let pool = view[0]
+            .pools
+            .iter()
+            .find(|pool| pool.name == "default")
+            .unwrap();
+        assert_eq!(pool.active_keys.as_ref().unwrap(), &policy);
+        let mut partial = serde_json::json!({"server_id": "test", "port": 18080, "pools": [{"name": "default", "tiers": [{"members": [{"use": "p/m", "weight": 7}]}]}]});
+        apply_user_route_group_view(
+            &mut selection,
+            &serde_json::from_value(partial.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&selection.servers["test"].routes["default"]).unwrap()
+                ["active_keys"],
+            policy
+        );
+        assert_eq!(selection.servers["test"].routes["coding"], original);
+        partial["pools"][0]["active_keys"] = serde_json::Value::Null;
+        partial["pools"][0]["selection"] = serde_json::Value::Null;
+        apply_user_route_group_view(
+            &mut selection,
+            &serde_json::from_value(partial.clone()).unwrap(),
+        )
+        .unwrap();
+        assert!(selection.servers["test"].routes["default"]
+            .active_keys
+            .is_none());
+        partial["pools"][0]["selection"] = serde_json::json!({"strategy": "round_robin"});
+        partial["pools"][0]["active_keys"] =
+            serde_json::json!({"members": [], "retries": 3, "on_failure": "hold"});
+        apply_user_route_group_view(&mut selection, &serde_json::from_value(partial).unwrap())
+            .unwrap();
+        assert!(selection.servers["test"].routes["default"]
+            .active_keys
+            .as_ref()
+            .unwrap()
+            .members
+            .is_empty());
+    }
 }
 
 /// 一次 user routing 成员绑定的结果；所有字段反映写入后的最终状态。
@@ -342,6 +476,7 @@ pub fn apply_route_group_view_to_authoring(
                 .pools
                 .entry(pool.name.clone())
                 .or_insert_with(|| V3RoutePoolAuthoringConfig {
+                    active_keys: None,
                     selection: V3SelectionPolicy {
                         strategy: V3SelectionStrategy::Priority,
                     },

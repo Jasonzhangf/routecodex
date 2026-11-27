@@ -1,186 +1,261 @@
 use super::*;
 
-pub(crate) fn reap_inactive_runtime_files(
-    instance_dir: &Path,
+enum ReapState {
+    Fresh,
+    Terminal,
+    Dead {
+        terminal: bool,
+        socket: bool,
+        control: bool,
+        plan: bool,
+        nonce: String,
+    },
+    Unverified,
+}
+
+fn classify_inactive_runtime(
+    dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
-) -> Result<(), V3LifecycleError> {
-    let status_path = instance_dir.join("status.json");
-    let status = if status_path.exists() {
-        let status: V3ManagedStatusRecord = read_json(&status_path)?;
-        if status.instance_id != expected.instance_id {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap status for a different instance".to_string(),
-            ));
+) -> Result<ReapState, V3LifecycleError> {
+    use std::os::unix::fs::FileTypeExt;
+    for name in [
+        FRONT_HANDOFF_FILE,
+        PROVIDER_HANDOFF_FILE,
+        EXEC_RESTART_DECLARATION_FILE,
+        exec_restart::PREVIOUS_RELEASE_RESTART_FILE,
+    ] {
+        if regular_handoff_exists(&dir.join(name))? {
+            return Ok(ReapState::Unverified);
+        }
+    }
+    let declaration = if regular_handoff_exists(&dir.join("instance.json"))? {
+        let published = read_json(&dir.join("instance.json"))?;
+        if !same_instance_declaration_except_executable_path(&published, expected) {
+            return Ok(ReapState::Unverified);
+        }
+        Some(published)
+    } else {
+        None
+    };
+    let status = if regular_handoff_exists(&dir.join("status.json"))? {
+        let status: V3ManagedStatusRecord = read_json(&dir.join("status.json"))?;
+        if status.schema_version != SCHEMA_VERSION
+            || status.instance_id != expected.instance_id
+            || declaration.is_none()
+        {
+            return Ok(ReapState::Unverified);
         }
         Some(status)
     } else {
         None
     };
-    // Hooks are optional at every lifecycle boundary. Reaping never signals
-    // the sidecar; preserve its record whenever a live or unverifiable group
-    // may remain so cleanup is not silently discarded.
-    let hooks_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
-    let hooks_record_uncertain = hooks_record_path.exists()
-        && !matches!(
-            hooks_sidecar_process_group_is_alive(instance_dir),
-            Ok(false)
-        );
-    let terminal_status = status.as_ref().is_some_and(|status| {
+    let terminal = status.as_ref().is_some_and(|s| {
         matches!(
-            status.state,
+            s.state,
             V3ManagedRunState::Stopped | V3ManagedRunState::Failed
         )
     });
-    let stale_unreachable_runtime_status = if status.as_ref().is_some_and(|status| {
-        !matches!(
-            status.state,
-            V3ManagedRunState::Stopped | V3ManagedRunState::Failed
-        )
-    }) {
-        owned_unreachable_runtime_state_is_reapable(instance_dir, expected)?
-    } else {
-        false
+    let socket = match fs::symlink_metadata(managed_control_socket_path(&expected.instance_id)) {
+        Ok(meta) if meta.file_type().is_socket() => true,
+        Ok(_) => return Ok(ReapState::Unverified),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e.into()),
     };
-    let declaration_path = instance_dir.join("instance.json");
-    if declaration_path.exists() {
-        let declaration: V3ManagedInstanceDeclaration = read_json(&declaration_path)?;
-        if declaration != *expected
-            && !((terminal_status || stale_unreachable_runtime_status)
-                && same_instance_declaration_except_executable_path(&declaration, expected))
-        {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap state for a different instance declaration".to_string(),
-            ));
-        }
+    let control = regular_handoff_exists(&dir.join("control.json"))?;
+    if !regular_handoff_exists(&dir.join("pid.cache"))? {
+        return Ok(
+            if control || socket || regular_handoff_exists(&dir.join(RESTART_PLAN_FILE))? {
+                ReapState::Unverified
+            } else if terminal {
+                ReapState::Terminal
+            } else if status.is_none() && declaration.as_ref().is_none_or(|d| d == expected) {
+                ReapState::Fresh
+            } else {
+                ReapState::Unverified
+            },
+        );
     }
-    if let Some(status) = status {
-        if !matches!(
-            status.state,
-            V3ManagedRunState::Stopped | V3ManagedRunState::Failed
-        ) && !stale_unreachable_runtime_status
-        {
-            return Err(V3LifecycleError::IdentityMismatch(format!(
-                "refusing to reap non-terminal managed state {:?}",
-                status.state
-            )));
-        }
-    } else if instance_dir.join("pid.cache").exists() || instance_dir.join("control.json").exists()
+    let Some(published) = declaration else {
+        return Ok(ReapState::Unverified);
+    };
+    let cache: V3ManagedPidCache = read_json(&dir.join("pid.cache"))?;
+    if status.is_none()
+        || cache.instance_id != published.instance_id
+        || cache
+            .retained_control
+            .as_ref()
+            .is_some_and(|link| link.target != published)
+        || !managed_generation_has_exited(&cache)?
+        || !listener_set_is_available(&published.listeners)
     {
-        return Err(V3LifecycleError::IdentityMismatch(
-            "refusing to reap runtime caches without a terminal status record".to_string(),
-        ));
+        return Ok(ReapState::Unverified);
     }
-    let control_path = instance_dir.join("control.json");
-    if control_path.exists() {
-        let control: V3ManagedControlRecord = read_json(&control_path)?;
-        if control.instance_id != expected.instance_id {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap control record for a different instance".to_string(),
-            ));
+    if control {
+        let record = read_json(&dir.join("control.json"))?;
+        if !managed_control_matches_generation(&published, &cache, &record) {
+            return Ok(ReapState::Unverified);
         }
-        let socket_path = PathBuf::from(control.socket_path);
-        if socket_path != managed_control_socket_path(&expected.instance_id) {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap non-canonical managed control socket path".to_string(),
-            ));
-        }
-        if socket_path.exists() {
-            fs::remove_file(socket_path)?;
+    } else if socket || !terminal {
+        return Ok(ReapState::Unverified);
+    }
+    let plan = verify_generation_restart_plan(dir, &cache, expected)?;
+    if socket {
+        match std::os::unix::net::UnixStream::connect(managed_control_socket_path(
+            &expected.instance_id,
+        )) {
+            Ok(_) => return Ok(ReapState::Unverified),
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => (),
+            Err(e) => return Err(e.into()),
         }
     }
-    reap_unowned_managed_control_socket(instance_dir, expected)?;
-    for file in ["pid.cache", "control.json", HOOKS_SIDECAR_PROCESS_FILE] {
-        if file == HOOKS_SIDECAR_PROCESS_FILE && hooks_record_uncertain {
-            // Preserve the uncertain hooks process record: the main runtime can
-            // be reaped and restarted, but the sidecar record stays for an
-            // explicit operator/next-start cleanup decision.
-            continue;
+    Ok(ReapState::Dead {
+        terminal,
+        socket,
+        control,
+        plan,
+        nonce: cache.start_nonce,
+    })
+}
+
+pub(crate) fn reap_inactive_runtime_files(
+    instance_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    match classify_inactive_runtime(instance_dir, expected)? {
+        ReapState::Fresh | ReapState::Terminal => remove_exited_hooks_record(instance_dir),
+        ReapState::Unverified => Err(V3LifecycleError::IdentityMismatch(
+            "refusing to reap an unverified managed generation".into(),
+        )),
+        ReapState::Dead {
+            terminal,
+            socket,
+            control,
+            plan,
+            nonce,
+        } => {
+            if !terminal {
+                write_status(
+                    instance_dir,
+                    &expected.instance_id,
+                    V3ManagedRunState::Stopped,
+                    None,
+                )?;
+            }
+            if socket {
+                fs::remove_file(managed_control_socket_path(&expected.instance_id))?;
+            }
+            if control {
+                fs::remove_file(instance_dir.join("control.json"))?;
+            }
+            if plan {
+                fs::remove_file(instance_dir.join(RESTART_PLAN_FILE))?;
+            }
+            remove_exited_hooks_record(instance_dir)?;
+            if !matches!(classify_inactive_runtime(instance_dir, expected)?,
+                ReapState::Dead { terminal: true, control: false, socket: false, plan: false, nonce: remaining } if remaining == nonce)
+            {
+                return Err(V3LifecycleError::IdentityMismatch(
+                    "managed proof changed before cache retirement".into(),
+                ));
+            }
+            fs::remove_file(instance_dir.join("pid.cache"))?;
+            Ok(())
         }
-        let path = instance_dir.join(file);
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
+    }
+}
+
+fn remove_exited_hooks_record(dir: &Path) -> Result<(), V3LifecycleError> {
+    let path = dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    if matches!(regular_handoff_exists(&path), Ok(true))
+        && matches!(hooks_sidecar_process_group_is_alive(dir), Ok(false))
+    {
+        fs::remove_file(path)?;
     }
     Ok(())
+}
+
+pub(super) fn restart_can_select_previous_owner(
+    dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    Ok(matches!(
+        classify_inactive_runtime(dir, expected)?,
+        ReapState::Fresh | ReapState::Terminal
+    ))
+}
+
+pub(super) fn restart_terminal_bootstrap_is_verified(
+    dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    Ok(match classify_inactive_runtime(dir, declaration)? {
+        ReapState::Terminal => listener_set_is_available(&declaration.listeners),
+        ReapState::Dead {
+            terminal: true,
+            control: false,
+            ..
+        } => true,
+        _ => false,
+    })
 }
 
 pub(crate) fn restart_recovery_state_is_stale_owned_unreachable(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<bool, V3LifecycleError> {
-    let status_path = instance_dir.join("status.json");
-    if !status_path.exists() {
-        return Ok(false);
-    }
-    let status: V3ManagedStatusRecord = read_json(&status_path)?;
-    if status.instance_id != expected.instance_id {
-        return Err(V3LifecycleError::IdentityMismatch(
-            "refusing restart recovery for a different instance status".to_string(),
-        ));
-    }
-    if status.state == V3ManagedRunState::Stopped {
-        return Ok(false);
-    }
-    owned_unreachable_runtime_state_is_reapable(instance_dir, expected)
+    Ok(matches!(
+        classify_inactive_runtime(instance_dir, expected)?,
+        ReapState::Dead { .. }
+    ))
 }
 
-pub(crate) fn owned_unreachable_runtime_state_is_reapable(
-    instance_dir: &Path,
+pub(crate) fn managed_control_matches_declaration(
     expected: &V3ManagedInstanceDeclaration,
+    published: &V3ManagedInstanceDeclaration,
+    cache: &V3ManagedPidCache,
+    control: &V3ManagedControlRecord,
+) -> bool {
+    published == expected && managed_control_matches_generation(published, cache, control)
+}
+
+pub(super) fn managed_control_matches_generation(
+    expected: &V3ManagedInstanceDeclaration,
+    cache: &V3ManagedPidCache,
+    control: &V3ManagedControlRecord,
+) -> bool {
+    cache.schema_version == SCHEMA_VERSION
+        && control.schema_version == SCHEMA_VERSION
+        && cache.instance_id == expected.instance_id
+        && control.instance_id == expected.instance_id
+        && cache.start_nonce == control.start_nonce
+        && Path::new(&control.socket_path) == managed_control_socket_path(&expected.instance_id)
+}
+
+pub(crate) fn managed_generation_has_exited(
+    cache: &V3ManagedPidCache,
 ) -> Result<bool, V3LifecycleError> {
-    // This predicate decides only whether the *main runtime* state is safely
-    // reapable. Hooks are optional and their process record is preserved by
-    // `reap_inactive_runtime_files`; a live or unverifiable hooks group must
-    // never make startup wait on, or fail because of, the optional sidecar.
-    let pid_path = instance_dir.join("pid.cache");
-    let cached_pid = if pid_path.exists() {
-        let pid: V3ManagedPidCache = read_json(&pid_path)?;
-        if pid.instance_id != expected.instance_id {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap pid cache for a different instance".to_string(),
-            ));
-        }
-        Some(pid)
-    } else {
-        None
+    let Ok(pid) = libc::pid_t::try_from(cache.pid) else {
+        return Ok(false);
     };
-
-    let control_path = instance_dir.join("control.json");
-    if control_path.exists() {
-        let control: V3ManagedControlRecord = read_json(&control_path)?;
-        if control.instance_id != expected.instance_id {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap control record for a different instance".to_string(),
-            ));
-        }
-        let socket_path = PathBuf::from(&control.socket_path);
-        if socket_path != managed_control_socket_path(&expected.instance_id) {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap non-canonical managed control socket path".to_string(),
-            ));
-        }
-        if socket_path.exists() && cached_pid.as_ref().is_some_and(|pid| pid_is_alive(pid.pid)) {
-            return Ok(false);
-        }
-        if let Some(pid) = cached_pid.as_ref() {
-            if pid.start_nonce != control.start_nonce {
-                return Err(V3LifecycleError::IdentityMismatch(
-                    "refusing to reap pid/control cache with mismatched nonce".to_string(),
-                ));
-            }
-        }
-    }
-
-    for listener in expected
-        .listeners
-        .iter()
-        .filter(|listener| is_business_listener_declaration(listener))
+    if cache.schema_version != SCHEMA_VERSION
+        || pid <= 0
+        || cache.start_nonce.is_empty()
+        || cache
+            .process_start_token
+            .as_deref()
+            .is_none_or(str::is_empty)
     {
-        if !listener_address_is_available(&listener.bind, listener.port) {
-            return Ok(false);
-        }
+        return Ok(false);
     }
-    Ok(true)
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return Ok(false);
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::EPERM) => Ok(false),
+        Some(libc::ESRCH) => Ok(process_start_token(cache.pid)?.is_none()),
+        _ => Err(error.into()),
+    }
 }
 
 pub(crate) fn listener_address_is_available(bind: &str, port: u16) -> bool {
@@ -213,7 +288,7 @@ pub(crate) fn managed_control_socket_path(instance_id: &str) -> PathBuf {
 /// cleanup`, permanently blocking the instance.
 ///
 /// Only a provably unowned socket is removed: a cached pid that is still alive
-/// keeps the socket, exactly like `owned_unreachable_runtime_state_is_reapable`.
+/// keeps the socket. Only exact recovery and forced stop call this helper.
 /// A socket recorded in an existing `control.json` is already handled by that
 /// record's own identity and nonce checks, so this is a no-op there.
 pub(crate) fn reap_unowned_managed_control_socket(

@@ -13,3 +13,5 @@ routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }
 routecodex-v3-virtual-router = { path = "../routecodex-v3-virtual-router" }
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true

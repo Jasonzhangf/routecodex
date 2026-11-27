@@ -151,8 +151,15 @@ pub fn default_v3_config_path(home: impl AsRef<Path>) -> PathBuf {
     home.as_ref().join(".rcc").join("config.toml")
 }
 
-/// Canonical per-listener request-records store. Server and Admin must derive
-/// the same path; the debug log file is the live path truth when configured.
+pub fn v3_active_key_control_paths(
+    config_path: impl AsRef<Path>,
+    server_id: &str,
+) -> std::io::Result<crate::V3ActiveKeyControlPaths> {
+    crate::V3ActiveKeyControlPaths::new(config_path.as_ref(), server_id)
+}
+
+/// Canonical per-listener request-records store. The configured debug log
+/// determines its parent directory.
 pub fn v3_webui_observability_store_path(
     config_path: impl AsRef<Path>,
     debug_log_path: Option<&str>,
@@ -171,5 +178,89 @@ pub fn v3_webui_observability_store_path(
     match log_path.parent() {
         Some(parent) => parent.join(store_name),
         None => PathBuf::from(store_name),
+    }
+}
+
+#[cfg(test)]
+mod active_key_control_path_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_basename_and_chunked_listener_are_lossless_and_bounded() {
+        let directory = std::env::temp_dir().join(format!(
+            "active-control-path-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let basename = format!("a{}.toml", "-".repeat(80));
+        let config = directory.join(&basename);
+        std::fs::write(&config, b"").unwrap();
+        let listener = format!("{}a%2Db雪", "-".repeat(80));
+        let paths = v3_active_key_control_paths(&config, &listener).unwrap();
+        assert!(!paths.root.exists(), "path discovery must create nothing");
+        assert_eq!(
+            paths.read().unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        let lock = directory.join(".active-key-control.lock");
+        assert!(!lock.exists(), "read discovery must create nothing");
+        let tail = paths
+            .record
+            .strip_prefix(&paths.root)
+            .unwrap()
+            .components()
+            .map(|part| part.as_os_str().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(tail[0], std::ffi::OsStr::new(&basename));
+        assert_eq!(tail[1], "listener");
+        assert_eq!(tail.last().unwrap(), "endpoint.json");
+        assert!(tail[2..tail.len() - 1]
+            .iter()
+            .all(|part| part.as_encoded_bytes().len() <= 122));
+        let encoded = tail[2..tail.len() - 1]
+            .iter()
+            .map(|part| part.to_str().unwrap().strip_prefix("s-").unwrap())
+            .collect::<String>();
+        assert_eq!(encoded, format!("{}6125324462e99baa", "2d".repeat(80)));
+        let prefix = v3_active_key_control_paths(&config, &"x".repeat(60)).unwrap();
+        let continuation = v3_active_key_control_paths(&config, &"x".repeat(61)).unwrap();
+        assert_ne!(prefix.record, continuation.record);
+        #[cfg(unix)]
+        {
+            let alias = directory.join("config.toml");
+            std::os::unix::fs::symlink(&config, &alias).unwrap();
+            assert_eq!(
+                v3_active_key_control_paths(&alias, &listener)
+                    .unwrap()
+                    .record,
+                paths.record
+            );
+        }
+        prefix
+            .with_write(|transaction| transaction.publish(b"prefix", || {}))
+            .unwrap();
+        continuation
+            .with_write(|transaction| transaction.publish(b"continuation", || {}))
+            .unwrap();
+        continuation
+            .with_write(|transaction| {
+                transaction.remove()?;
+                transaction.prune_empty()
+            })
+            .unwrap();
+        assert_eq!(prefix.read().unwrap(), b"prefix");
+        prefix
+            .with_write(|transaction| {
+                transaction.remove()?;
+                transaction.prune_empty()
+            })
+            .unwrap();
+        assert!(!paths.root.exists());
+        assert!(lock.is_file());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

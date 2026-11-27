@@ -57,6 +57,13 @@ protocol nests them under one object.
 
 ## Owner boundaries
 
+The public regression
+`issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400`
+locks Responses Relay orphan-output fidelity. The first sole Provider must receive the
+submitted item exactly, including absent `id` and exact string values. Req04 owns the
+absence-only pass-through rule. A complete actual final Provider HTTP 400 is projected
+under requirement v9; this does not assume that a Provider accepts orphan history.
+
 | Edge | V3 owner | Allowed action |
 | --- | --- | --- |
 | Responses request -> OpenAI Chat provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs` + `v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs` | Adjacent Req02/Req07 Chat canonical -> provider standard mapping only |

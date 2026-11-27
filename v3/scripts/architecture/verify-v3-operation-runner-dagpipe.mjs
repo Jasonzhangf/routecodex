@@ -1546,8 +1546,18 @@ const expectedErrorResources = {
     writes: ['v3.error.chain'],
   },
   error_err03_target_local_action: {
-    reads: ['v3.error.chain', 'v3.target.candidate_set', 'v3.provider.availability_projection'],
-    writes: ['v3.error.chain', 'v3.error.action_plan'],
+    reads: [
+      'v3.error.chain',
+      'v3.target.candidate_set',
+      'v3.target.active_key_attempt',
+      'v3.target.active_key_state',
+      'v3.provider.availability_projection',
+    ],
+    writes: [
+      'v3.error.chain',
+      'v3.error.action_plan',
+      'v3.target.active_key_state',
+    ],
   },
   error_err04_target_exhaustion: {
     reads: ['v3.error.chain', 'v3.error.action_plan'],

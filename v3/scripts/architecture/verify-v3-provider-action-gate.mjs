@@ -193,6 +193,24 @@ function findMatchingDelimiter(source, startIndex) {
   return -1;
 }
 
+function callArguments(source, open, close) {
+  if (close < 0) return [];
+  const args = [];
+  let start = open + 1;
+  for (let index = start; index < close; index += 1) {
+    if ('{(['.includes(source[index])) {
+      index = findMatchingDelimiter(source, index);
+      if (index < 0) return [];
+    } else if (source[index] === ',') {
+      args.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  const trailing = source.slice(start, close).trim();
+  if (trailing) args.push(trailing);
+  return args;
+}
+
 function parseRustMatchArms(block) {
   const arms = [];
   let start = 1;
@@ -231,7 +249,7 @@ function parseRustMatchArms(block) {
 }
 
 function assertAnthropicPolicyBindingAndActionMatch(sharedBody) {
-  const initializerPattern = /\blet\s+mut\s+result\s*=\s*match\s+run_v3_relay_provider_failure_policy_with_response_source\s*\(/gu;
+  const initializerPattern = /\blet\s+mut\s+result\s*=\s*match\s+crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys\s*\(/gu;
   const initializers = [...sharedBody.matchAll(initializerPattern)]
     .filter((match) => braceDepthAt(sharedBody, match.index) === 1);
   if (initializers.length !== 1) {
@@ -246,6 +264,9 @@ function assertAnthropicPolicyBindingAndActionMatch(sharedBody) {
   if (callClose < 0) {
     failures.push(`${files.relayShared}: cannot balance the top-level policy call`);
     return;
+  }
+  if (callArguments(sharedBody, callOpen, callClose)[8] !== 'response_processing_code') {
+    failures.push(`${files.relayShared}: policy call must forward response_processing_code`);
   }
   const matchOpen = sharedBody.slice(callClose + 1).search(/^\s*\.await\s*\{/u);
   if (matchOpen < 0) {
@@ -284,7 +305,7 @@ function assertAnthropicPolicyBindingAndActionMatch(sharedBody) {
     return;
   }
   const between = sharedBody.slice(policyBlockClose + 1, actionMatch.index);
-  const forbiddenBindingChange = /\b(?:let|const|var)\b[^;=]*\b(?:result|decision|action)\b[^;=]*=|\bresult\s*(?:\.\s*(?:decision|action))?\s*=(?!=)|\b(?:decision|action)\s*=(?!=)/u;
+  const forbiddenBindingChange = /\b(?:let|const|var)\b[^;=]*\b(?:result|decision|action)\b[^;=]*=|\bresult\s*(?:\.\s*decision(?:\s*\.\s*action)?)?\s*=(?!=)|(?<![.\w])(?:decision|action)\s*=(?!=)/u;
   if (forbiddenBindingChange.test(between)) {
     failures.push(`${files.relayShared}: policy result must reach the action match unchanged`);
   }
@@ -343,75 +364,80 @@ function assertAnthropicPolicyBindingAndActionMatch(sharedBody) {
 }
 
 function assertAnthropicTypedError05Binding() {
-  for (const [suffix, helper] of [
-    ['failure', 'handle_provider_failure'],
-    ['response-code', 'handle_provider_failure_with_response_code'],
-  ]) {
-    assertCallerInvokesCallee({
-      step_id: `v3-provider-action-gate-anthropic-${suffix}`,
-      caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
-      caller_file: files.anthropic,
-      callee_symbol: helper,
-      callee_file: files.relayShared,
-      call_witness: helper === 'handle_provider_failure'
-        ? /\bhandle_provider_failure\s*\(/u
-        : /\bhandle_provider_failure_with_response_code\s*\(/u,
-    });
-  }
   const callerBody = findFunctionBody(
     text.anthropic,
     'execute_v3_anthropic_relay_runtime_inner',
     files.anthropic,
   );
-  const responseCodeCalls = [...callerBody.matchAll(/\bhandle_provider_failure_with_response_code\s*\(/gu)];
+  const macroStart = callerBody.indexOf('macro_rules! active_failure');
+  const macroOpen = callerBody.indexOf('{', macroStart);
+  const macroClose = findMatchingDelimiter(callerBody, macroOpen);
+  const macroBody = macroStart < 0 || macroClose < 0 ? '' : callerBody.slice(macroOpen + 1, macroClose);
+  const expectedMacro = `
+    ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr $(,)?) => {
+      active_failure!($context, $selected, $failure, $state, $retry, $events, None)
+    };
+    ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr, $code:expr $(,)?) => {
+      super::relay_runtime_shared::handle_provider_failure_with_response_code_and_active_keys(
+        $context, $selected, $failure, $state, $retry, $events, $code,
+        active_keys.as_deref(), active_episode.as_mut(), active_attempt_dispatched,
+      )
+    };
+  `;
+  if (macroBody.replace(/\s+/gu, '') !== expectedMacro.replace(/\s+/gu, '')) {
+    failures.push(`${files.anthropic}: active_failure macro must delegate all arguments and typed code to the active-keys shared owner`);
+  }
+  const executionBody = callerBody.slice(macroClose + 1);
+  const allCalls = [...executionBody.matchAll(/\bactive_failure\s*!\s*\(/gu)];
+  const responseCodeCalls = allCalls.filter((call) => {
+    const open = call.index + call[0].lastIndexOf('(');
+    const close = findMatchingDelimiter(executionBody, open);
+    return callArguments(executionBody, open, close).length === 7;
+  });
+  if (allCalls.length !== 8) {
+    failures.push(`${files.anthropic}: expected eight live active_failure calls`);
+  }
   if (responseCodeCalls.length !== 2) {
     failures.push(`${files.anthropic}: expected two response-code calls in the execution body`);
   }
   for (const [index, call] of responseCodeCalls.entries()) {
     const callOpen = call.index + call[0].lastIndexOf('(');
-    const callClose = findMatchingDelimiter(callerBody, callOpen);
+    const callClose = findMatchingDelimiter(executionBody, callOpen);
     if (callClose < 0) {
       failures.push(`${files.anthropic}: cannot balance response-code call ${index + 1}`);
       continue;
     }
-    if (!/^\s*\.\s*await\s*\?/u.test(callerBody.slice(callClose + 1))) {
+    const suffix = executionBody.slice(callClose + 1);
+    if (!/^\s*\.\s*await\s*\?/u.test(suffix)) {
       failures.push(`${files.anthropic}: response-code call ${index + 1} must be awaited with error propagation`);
     }
-    let argumentStart = callOpen + 1;
-    let finalArgument = '';
-    for (let cursor = argumentStart; cursor < callClose; cursor += 1) {
-      if ('{(['.includes(callerBody[cursor])) {
-        cursor = findMatchingDelimiter(callerBody, cursor);
-        if (cursor < 0) break;
-      } else if (callerBody[cursor] === ',') {
-        finalArgument = callerBody.slice(argumentStart, cursor).trim();
-        argumentStart = cursor + 1;
-      }
+    if (!/\bif\s+let\s+Some\(failure\)\s*=\s*$/u.test(executionBody.slice(0, call.index))
+      || !/^\s*\.\s*await\s*\?\s*\{/u.test(suffix)) {
+      failures.push(`${files.anthropic}: response-code call ${index + 1} must directly drive the failure branch`);
     }
-    const trailingArgument = callerBody.slice(argumentStart, callClose).trim();
-    if ((trailingArgument || finalArgument) !== 'response_processing_code') {
+    if (callArguments(executionBody, callOpen, callClose)[6] !== 'response_processing_code') {
       failures.push(`${files.anthropic}: response-code call ${index + 1} must forward response_processing_code as its final argument`);
     }
   }
   assertCallerInvokesCallee({
     step_id: 'v3-provider-action-gate-anthropic-shared-delegation',
-    caller_symbol: 'handle_provider_failure',
+    caller_symbol: 'handle_provider_failure_with_response_code',
     caller_file: files.relayShared,
-    callee_symbol: 'handle_provider_failure_with_response_code',
+    callee_symbol: 'handle_provider_failure_with_response_code_and_active_keys',
     callee_file: files.relayShared,
-    call_witness: /\bhandle_provider_failure_with_response_code\s*\(/u,
+    call_witness: /\bhandle_provider_failure_with_response_code_and_active_keys\s*\(/u,
   });
   assertCallerInvokesCallee({
     step_id: 'v3-provider-action-gate-anthropic-typed-policy',
-    caller_symbol: 'handle_provider_failure_with_response_code',
+    caller_symbol: 'handle_provider_failure_with_response_code_and_active_keys',
     caller_file: files.relayShared,
-    callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source',
+    callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys',
     callee_file: files.policy,
-    call_witness: /\brun_v3_relay_provider_failure_policy_with_response_source\s*\(/u,
+    call_witness: /\brun_v3_relay_provider_failure_policy_with_response_source_and_active_keys\s*\(/u,
   });
   const sharedBody = findFunctionBody(
     text.relayShared,
-    'handle_provider_failure_with_response_code',
+    'handle_provider_failure_with_response_code_and_active_keys',
     files.relayShared,
   );
   assertAnthropicPolicyBindingAndActionMatch(sharedBody);
@@ -445,7 +471,7 @@ assertCallerInvokesCallee({
   step_id: 'v3-provider-action-gate-responses-policy-ingress',
   caller_symbol: 'handle_v3_responses_relay_provider_failure',
   caller_file: files.responses,
-  callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source',
+  callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys',
   callee_file: files.policy,
 });
 for (const token of [
@@ -608,7 +634,7 @@ if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
 const relayFailurePolicy = findFunctionBody(
   text.policy,
-  'run_v3_relay_provider_failure_policy_with_response_source',
+  'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys',
   files.policy,
 );
 const targetResolutionFailure = relayFailurePolicy.match(

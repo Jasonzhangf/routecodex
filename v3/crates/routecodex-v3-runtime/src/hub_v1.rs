@@ -37,7 +37,7 @@ pub(crate) use relay_runtime_shared::{
     build_v3_runtime_provider_failed_attempt_evidence_from_response,
     build_v3_runtime_provider_failure_observation_from_policy_event, error_output,
     external_http_witness_from_provider_error, external_http_witness_head,
-    extract_error_type_style, extract_message_type_style, handle_provider_failure,
+    extract_error_type_style, extract_message_type_style,
     provider_pool_exhausted_source, provider_request_failure, provider_runtime_failure,
     provider_target, push_sse_response_chain_trace, server_routing_group,
     terminalize_provider_failure, wrap_v3_relay_client_sse_usage_observation,
@@ -101,6 +101,7 @@ pub use provider_resp_inbound_01_raw::*;
 mod provider_resp_compat_02_provider_compat;
 pub use provider_resp_compat_02_provider_compat::*;
 mod provider_sse_json_codec;
+pub use provider_sse_json_codec::v3_direct_responses_finish_reason;
 pub(crate) use provider_sse_json_codec::*;
 mod provider_attempt_business_content;
 pub(crate) use provider_attempt_business_content::*;

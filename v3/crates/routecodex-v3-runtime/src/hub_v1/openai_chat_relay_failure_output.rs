@@ -255,6 +255,7 @@ mod tests {
                     provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
+                    attempt_source: None,
                     terminal_projection: None,
                     terminal_disposition: None,
                     error_operator_fault: Some(fault.clone()),
@@ -272,6 +273,7 @@ mod tests {
                     provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
+                    attempt_source: None,
                     terminal_projection: None,
                     terminal_disposition: Some(
                         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(

@@ -8,7 +8,7 @@ use axum::{
     routing::post,
     Router,
 };
-use futures_util::{future::join_all, SinkExt, StreamExt};
+use futures_util::{future::join_all, FutureExt, SinkExt, StreamExt};
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, parse_v3_config_02_authoring, V3EntryProtocolExecutionMode,
 };
@@ -187,6 +187,1220 @@ async fn responses_latest_tool_batch_selects_tools_instead_of_stale_search() {
 
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
+
+#[tokio::test]
+async fn estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_role() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("estimated-turn-cross-protocol");
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "estimated-turn-fixture");
+    let (upstream, mut captures, shutdown) = start_controlled_snapall_upstream().await;
+    let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Direct);
+    for (provider, model) in [("chat_ok", "chat-wire"), ("gemini_ok", "gemini-wire")] {
+        manifest
+            .providers
+            .get_mut(provider)
+            .unwrap()
+            .models
+            .get_mut(model)
+            .unwrap()
+            .exclude_at_estimated_turns = std::num::NonZeroU64::new(99);
+    }
+    let (limited_url, mut limited, limited_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::BAD_REQUEST,
+            "application/json",
+            br#"{"error":{"code":"session_turn_limit_exceeded","message":"105 model turns"}}"#
+                .to_vec(),
+        )
+        .await;
+    let mut limited_provider = manifest.providers["chat_ok"].clone();
+    limited_provider.id = "chat_limited".into();
+    limited_provider.base_url = limited_url.clone();
+    limited_provider
+        .interfaces
+        .get_mut("default")
+        .unwrap()
+        .base_url = limited_url;
+    manifest
+        .providers
+        .insert(limited_provider.id.clone(), limited_provider);
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    let mut compact = group.pools["default"].clone();
+    compact.id = "compact".into();
+    compact.route_object = Some("compact".into());
+    compact.targets[0].provider = Some("chat_ok".into());
+    compact.targets[0].model = Some("chat-wire".into());
+    group.compact_route_object = compact.route_object.clone();
+    group.pools.insert(compact.id.clone(), compact);
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", server.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let chat_history: Vec<_> = (0..100).map(|index| {
+        json!({"role": if index % 2 == 0 { "assistant" } else { "user" }, "content": format!("chat {index}")})
+    }).collect();
+    let chat_body = json!({"model":"chat_ok.chat-wire","messages":chat_history,"stream":false});
+    let chat_url = format!("{base}/v1/chat/completions");
+    assert!(client
+        .post(&chat_url)
+        .json(&chat_body)
+        .send()
+        .await
+        .is_err());
+    assert!(captures.try_recv().is_err());
+    let compact = client
+        .post(&chat_url)
+        .header("x-routecodex-request-purpose", "compaction")
+        .json(&chat_body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(compact.status(), StatusCode::OK);
+    assert!(compact
+        .text()
+        .await
+        .unwrap()
+        .contains("controlled chat JSON"));
+    let capture = captures
+        .try_recv()
+        .expect("Chat compact must reach its provider");
+    assert_eq!(
+        capture.body["messages"].as_array().unwrap().len(),
+        chat_history.len()
+    );
+    let limited_request = json!({
+        "model":"chat_limited.chat-wire",
+        "messages":[{"role":"user","content":"ordinary limited chat request"}],"stream":false
+    });
+    let ordinary = || {
+        client
+            .post(&chat_url)
+            .header("x-session-id", "aux-compact-fixture")
+            .json(&limited_request)
+    };
+    assert_eq!(
+        ordinary().send().await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(limited.try_recv().is_ok());
+    for (current, expected_dispatch) in [
+        ("turn-limit-content-filter", false),
+        ("turn-limit-good-summary", true),
+    ] {
+        let response = client.post(&chat_url)
+            .header("x-session-id", "aux-compact-fixture")
+            .header("x-routecodex-request-purpose", "compaction")
+            .json(&json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":current}],"stream":false}))
+            .send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = response.json::<Value>().await.unwrap();
+        let expected_reason = if expected_dispatch {
+            "stop"
+        } else {
+            "content_filter"
+        };
+        assert_eq!(response["choices"][0]["finish_reason"], expected_reason);
+        assert!(captures.try_recv().is_ok());
+        let ordinary_response = ordinary().send().await;
+        if expected_dispatch {
+            assert_eq!(ordinary_response.unwrap().status(), StatusCode::BAD_REQUEST);
+            assert!(limited.try_recv().is_ok());
+        } else {
+            assert!(ordinary_response.is_err());
+            assert!(limited.try_recv().is_err());
+        }
+    }
+
+    let gemini_url = format!("{base}/v1beta/models/gemini_ok.gemini-wire:generateContent");
+    for explicit_user_role in [false, true] {
+        for count in [98, 99] {
+            let mut contents: Vec<_> = (0..count)
+                .map(|index| {
+                    let mut message = json!({"parts":[{"text":format!("gemini {index}")}]});
+                    if index % 2 == 0 {
+                        if explicit_user_role {
+                            message["role"] = json!("user");
+                        }
+                    } else {
+                        message["role"] = json!("model");
+                    }
+                    message
+                })
+                .collect();
+            contents.push(json!({"role":"user","parts":[{"text":"current user turn"}]}));
+            let response = client
+                .post(&gemini_url)
+                .json(&json!({"contents":contents}))
+                .send()
+                .await;
+            if count == 98 {
+                assert_eq!(response.unwrap().status(), StatusCode::OK);
+                assert!(captures.try_recv().is_ok());
+            } else {
+                assert!(response.is_err(), "roleless input bypassed the turn limit");
+                assert!(captures.try_recv().is_err());
+            }
+        }
+    }
+    server.shutdown().await;
+    let _ = shutdown.send(());
+    let _ = limited_shutdown.send(());
+}
+
+#[tokio::test]
+async fn responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("nonmatching-turn-limit");
+    std::env::set_var("V3_P6_TEST_KEY", "nonmatching-turn-limit-fixture");
+    for relay in [false, true] {
+        for (status, body) in [
+            (
+                StatusCode::BAD_REQUEST,
+                r#"{"error":{"code":"another_code","message":"session_turn_limit_exceeded"}}"#,
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                r#"{"error":{"code":"session_turn_limit_exceeded""#,
+            ),
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"error":{"code":"session_turn_limit_exceeded"}}"#,
+            ),
+            (
+                StatusCode::OK,
+                r#"{"id":"resp_content","status":"completed","output_text":"session_turn_limit_exceeded","output":[{"type":"output_text","text":"session_turn_limit_exceeded"}]}"#,
+            ),
+        ] {
+            let (primary_url, mut primary, primary_shutdown) =
+                start_controlled_terminal_upstream_with_body(
+                    status,
+                    "application/json",
+                    body.as_bytes().to_vec(),
+                )
+                .await;
+            let (fallback_url, mut fallback, fallback_shutdown) =
+                start_controlled_responses_relay_upstream().await;
+            let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+                free_port(),
+                free_port(),
+                &primary_url,
+                "responses",
+                Some(&fallback_url),
+                "",
+                relay,
+            );
+            let provider = manifest.providers.get_mut("test").unwrap();
+            provider.health.as_mut().unwrap().enabled = true;
+            if let Some(responses) = &mut provider.responses {
+                responses.streaming = routecodex_v3_config::V3StreamingPolicy::Client;
+                provider.interfaces.get_mut("default").unwrap().responses = Some(responses.clone());
+            }
+            let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+            let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap();
+            for _ in 0..2 {
+                let result = client
+                    .post(&endpoint)
+                    .header("x-session-id", "nonmatching-witness")
+                    .json(&json!({"model":"client-test","input":"ordinary","stream":false}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(result.status(), StatusCode::OK);
+                assert!(primary.try_recv().is_ok(), "relay={relay} status={status}");
+                assert_eq!(fallback.try_recv().is_ok(), status != StatusCode::OK);
+            }
+            server.shutdown().await;
+            let _ = primary_shutdown.send(());
+            let _ = fallback_shutdown.send(());
+        }
+    }
+}
+
+#[tokio::test]
+async fn responses_session_turn_limit_skips_every_key_until_compact() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("session-turn-limit");
+    std::env::set_var("V3_P6_TEST_KEY", "session-turn-limit-fixture");
+    for relay in [false, true] {
+        let (primary_url, mut primary, primary_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                br#"{"error":{"code":"session_turn_limit_exceeded","message":"105 model turns"}}"#
+                    .to_vec(),
+            )
+            .await;
+        let (fallback_url, mut fallback, fallback_shutdown) =
+            start_controlled_responses_relay_upstream().await;
+        let (compact_url, mut compact_upstream, compact_shutdown) =
+            start_controlled_terminal_upstream_with_body_when(
+                StatusCode::OK,
+                "application/json",
+                br#"{"id":"cmp_fixture","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque-fixture-summary"}]}"#.to_vec(),
+                |body| body.to_string().contains("compact-success"),
+            ).await;
+        let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+            free_port(),
+            free_port(),
+            &primary_url,
+            "responses",
+            Some(&fallback_url),
+            "exclude_at_estimated_turns = 99",
+            relay,
+        );
+        let auth = &mut manifest.providers.get_mut("test").unwrap().auth;
+        let mut sibling = auth.entries[0].clone();
+        sibling.alias = "sibling".into();
+        auth.entries.push(sibling);
+        manifest
+            .providers
+            .get_mut("test")
+            .unwrap()
+            .health
+            .as_mut()
+            .unwrap()
+            .enabled = true;
+        let mut compact_provider = manifest.providers["fallback"].clone();
+        compact_provider.id = "compact_fixture".into();
+        compact_provider.base_url = compact_url.clone();
+        compact_provider
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .base_url = compact_url;
+        compact_provider.responses = manifest.providers["test"].responses.clone();
+        if let Some(responses) = &mut compact_provider.responses {
+            responses.streaming = routecodex_v3_config::V3StreamingPolicy::Client;
+        }
+        compact_provider
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .responses = compact_provider.responses.clone();
+        manifest
+            .providers
+            .insert(compact_provider.id.clone(), compact_provider);
+        let group = manifest.route_groups.get_mut("default").unwrap();
+        for pool in group.pools.values_mut() {
+            let mut sibling = pool.targets[0].clone();
+            sibling.key = Some("sibling".into());
+            pool.targets.insert(1, sibling);
+        }
+        let mut compact_pool = group.pools["client_test"].clone();
+        compact_pool.id = "compact".into();
+        compact_pool.route_object = Some("fixture-compact".into());
+        let mut compact_target = compact_pool.targets.pop().unwrap();
+        compact_target.provider = Some("compact_fixture".into());
+        compact_pool.targets = vec![compact_target];
+        group.compact_route_object = compact_pool.route_object.clone();
+        group.pools.insert(compact_pool.id.clone(), compact_pool);
+        let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let final_pin =
+            || {
+                client.post(&endpoint)
+            .header("x-session-id", "final-turn-limit")
+            .json(&json!({"model":"test.test","input":"ordinary pinned request","stream":false}))
+            };
+        let final_error = final_pin().send().await.unwrap();
+        assert_eq!(final_error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            final_error.json::<Value>().await.unwrap()["error"]["code"],
+            "session_turn_limit_exceeded"
+        );
+        assert!(primary.try_recv().is_ok());
+        assert!(
+            primary.try_recv().is_err(),
+            "final provider retried a sibling key"
+        );
+        assert!(
+            final_pin().send().await.is_err(),
+            "pre-dispatch exhaustion reused an old witness"
+        );
+        assert!(primary.try_recv().is_err());
+        assert!(fallback.try_recv().is_err());
+        for (session, expected_primary) in [
+            ("blocked-turn-limit", true),
+            ("blocked-turn-limit", false),
+            ("independent-turn-limit", true),
+        ] {
+            let body = client
+                .post(&endpoint)
+                .header("x-session-id", session)
+                .json(&json!({"model":"client-test","input":"short request","stream":false}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                body.status(),
+                StatusCode::OK,
+                "relay={relay} session={session}"
+            );
+            assert_eq!(body.json::<Value>().await.unwrap()["status"], "completed");
+            assert!(fallback.try_recv().is_ok());
+            assert_eq!(
+                primary.try_recv().is_ok(),
+                expected_primary,
+                "relay={relay} session={session}"
+            );
+            assert!(
+                primary.try_recv().is_err(),
+                "sibling key was tried for {session}"
+            );
+        }
+        let pin = client
+            .post(&endpoint)
+            .header("x-session-id", "blocked-turn-limit")
+            .json(&json!({"model":"test.test","input":"short request","stream":false}))
+            .send()
+            .await;
+        assert!(
+            pin.is_err(),
+            "a blocked explicit pin must never send: {pin:?}"
+        );
+        assert!(primary.try_recv().is_err());
+        assert!(fallback.try_recv().is_err());
+        for (marker, expected_status, expected_primary) in [
+            ("compact-failure", StatusCode::BAD_REQUEST, false),
+            ("compact-success", StatusCode::OK, true),
+        ] {
+            let compact = client
+                .post(format!("{endpoint}/compact"))
+                .header("x-session-id", "blocked-turn-limit")
+                .json(&json!({"model":"client-test","input":marker,"stream":false}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                compact.status(),
+                expected_status,
+                "relay={relay} purpose={marker}"
+            );
+            if expected_primary {
+                let compact_body = compact.json::<Value>().await.unwrap();
+                assert_eq!(
+                    compact_body["output"][0]["encrypted_content"], "opaque-fixture-summary",
+                    "relay={relay} compact body={compact_body}"
+                );
+            }
+            let compact_capture = compact_upstream
+                .try_recv()
+                .expect("compact did not reach its declared upstream");
+            assert_eq!(
+                compact_capture.request_path.as_deref(),
+                Some("/v1/responses/compact")
+            );
+            let ordinary = client
+                .post(&endpoint)
+                .header("x-session-id", "blocked-turn-limit")
+                .json(&json!({"model":"client-test","input":"after compact","stream":false}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(ordinary.status(), StatusCode::OK);
+            assert!(fallback.try_recv().is_ok());
+            assert_eq!(
+                primary.try_recv().is_ok(),
+                expected_primary,
+                "relay={relay} purpose={marker}"
+            );
+            assert!(primary.try_recv().is_err());
+        }
+        for stream in [false, true] {
+            let session_id = format!("auxiliary-responses-conversation-{stream}");
+            let auxiliary_pin = || {
+                client.post(&endpoint)
+                .header("x-session-id", &session_id)
+                .json(&json!({"model":"test.test","input":"limited auxiliary session","stream":false}))
+            };
+            assert_eq!(
+                auxiliary_pin().send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(primary.try_recv().is_ok());
+            for marker in [
+                "turn-limit-refusal-summary",
+                "turn-limit-invisible-summary",
+                "turn-limit-good-responses-summary",
+            ] {
+                let compact = client
+                    .post(&endpoint)
+                    .header("x-session-id", &session_id)
+                    .header("x-routecodex-request-purpose", "compaction")
+                    .json(&json!({"model":"client-test","input":marker,"stream":stream,
+                        "tools":[{"type":"function","name":"lookup_weather","parameters":{"type":"object"}}]
+                    }))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(compact.status(), StatusCode::OK);
+                let compact_body = if stream {
+                    compact
+                        .text()
+                        .await
+                        .unwrap()
+                        .lines()
+                        .filter_map(|line| line.strip_prefix("data: "))
+                        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                        .find(|event| event["type"] == "response.completed")
+                        .expect("compaction SSE must deliver its terminal response")["response"]
+                        .clone()
+                } else {
+                    compact.json().await.unwrap()
+                };
+                assert_eq!(compact_body["status"], "completed");
+                let output = compact_body["output"].as_array().unwrap();
+                let parts: Vec<_> = output
+                    .iter()
+                    .flat_map(|item| item["content"].as_array().into_iter().flatten())
+                    .collect();
+                match marker {
+                    "turn-limit-refusal-summary" => {
+                        assert!(
+                            parts.iter().any(|part| part["type"] == "refusal"
+                                && part["refusal"] == "No usable summary"),
+                            "{compact_body}"
+                        );
+                        assert!(
+                            parts
+                                .iter()
+                                .any(|part| part["type"] == "output_text"
+                                    && part["text"] == "Some text"),
+                            "{compact_body}"
+                        );
+                    }
+                    "turn-limit-invisible-summary" => {
+                        assert!(
+                            output.iter().any(|item| item["type"] == "function_call"
+                                && item["call_id"] == "invisible_summary_call"),
+                            "{compact_body}"
+                        );
+                    }
+                    _ => assert!(
+                        parts.iter().any(|part| part["type"] == "output_text"
+                            && part["text"] == "Completed compact summary"),
+                        "{compact_body}"
+                    ),
+                }
+                let dispatched = compact_upstream.try_recv().unwrap();
+                assert_eq!(dispatched.request_path.as_deref(), Some("/v1/responses"));
+                assert_eq!(dispatched.body["stream"], stream);
+                let next = auxiliary_pin().send().await;
+                if marker == "turn-limit-good-responses-summary" {
+                    assert_eq!(
+                        next.unwrap().status(),
+                        StatusCode::BAD_REQUEST,
+                        "relay={relay}"
+                    );
+                    assert!(primary.try_recv().is_ok());
+                } else {
+                    assert!(next.is_err(), "invalid compact result cleared the block: relay={relay} stream={stream} purpose={marker}");
+                    assert!(primary.try_recv().is_err());
+                }
+            }
+        }
+        // There are two keys. These independent failures exceed the normal
+        // cooldown threshold for both keys if exact turn-limit failures are
+        // recorded as ordinary provider failures.
+        for i in 0..24 {
+            let pinned = client.post(&endpoint)
+                .header("x-session-id", format!("health-final-{i}"))
+                .json(&json!({"model":"test.test","input":"final error health control","stream":false}))
+                .send().await.unwrap();
+            assert_eq!(pinned.status(), StatusCode::BAD_REQUEST);
+            assert!(primary.try_recv().is_ok());
+            assert!(primary.try_recv().is_err());
+            let recovered = client.post(&endpoint)
+                .header("x-session-id", format!("health-successor-{i}"))
+                .json(&json!({"model":"client-test","input":"successor health control","stream":false}))
+                .send().await.unwrap();
+            assert_eq!(recovered.status(), StatusCode::OK);
+            assert!(
+                primary.try_recv().is_ok(),
+                "an exact rejection affected provider health"
+            );
+            assert!(primary.try_recv().is_err());
+            assert!(fallback.try_recv().is_ok());
+        }
+        server.shutdown().await;
+        let _ = primary_shutdown.send(());
+        let _ = fallback_shutdown.send(());
+        let _ = compact_shutdown.send(());
+    }
+}
+
+#[tokio::test]
+async fn responses_active_key_turn_limit_preserves_failure_and_compact_boundaries() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    #[derive(Debug)]
+    struct Clock(AtomicU64);
+    impl routecodex_v3_runtime::V3ProviderHealthObservationClock for Clock {
+        fn now_epoch_ms(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("active-session-turn-limit");
+    std::env::set_var("V3_P6_TEST_KEY", "active-turn-primary");
+    std::env::set_var("V3_TURN_SIBLING_KEY", "active-turn-sibling");
+    std::env::set_var("V3_TURN_INACTIVE_KEY", "active-turn-inactive");
+    for relay in [false, true] {
+        let (primary_url, mut primary, primary_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                br#"{"error":{"code":"session_turn_limit_exceeded"}}"#.to_vec(),
+            )
+            .await;
+        let (fallback_url, mut fallback, fallback_shutdown) =
+            start_controlled_responses_relay_upstream().await;
+        let (compact_url, mut compact_upstream, compact_shutdown) =
+            start_controlled_terminal_upstream_with_body_when(
+                StatusCode::OK, "application/json",
+                br#"{"id":"cmp_active","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"active-summary"}]}"#.to_vec(),
+                |body| body.to_string().contains("compact-success"),
+            ).await;
+        let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+            free_port(),
+            free_port(),
+            &primary_url,
+            "responses",
+            Some(&fallback_url),
+            "exclude_at_estimated_turns = 99",
+            relay,
+        );
+        enable_turn_limit_active_keys(&mut manifest);
+        let health = manifest
+            .providers
+            .get_mut("test")
+            .unwrap()
+            .health
+            .as_mut()
+            .unwrap();
+        health.enabled = true;
+        let health = health.clone();
+        manifest.providers.get_mut("fallback").unwrap().health = Some(health);
+        let mut compact_provider = manifest.providers["fallback"].clone();
+        compact_provider.id = "compact_fixture".into();
+        compact_provider.base_url = compact_url.clone();
+        compact_provider
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .base_url = compact_url;
+        manifest
+            .providers
+            .insert(compact_provider.id.clone(), compact_provider);
+        let group = manifest.route_groups.get_mut("default").unwrap();
+        let mut compact_pool = group.pools["client_test"].clone();
+        compact_pool.id = "compact".into();
+        compact_pool.route_object = Some("active-compact".into());
+        let mut compact_target = compact_pool.targets.last().unwrap().clone();
+        compact_target.provider = Some("compact_fixture".into());
+        compact_pool.targets = vec![compact_target];
+        compact_pool.active_keys.as_mut().unwrap().members =
+            vec![routecodex_v3_config::V3ActiveKeyMember {
+                provider: "compact_fixture".into(),
+                alias: "key".into(),
+            }];
+        group.compact_route_object = compact_pool.route_object.clone();
+        group.pools.insert(compact_pool.id.clone(), compact_pool);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let clock = Arc::new(Clock(AtomicU64::new(now)));
+        let server = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+            manifest,
+            clock.clone(),
+        )
+        .await
+        .unwrap();
+        let base = format!("http://{}", server.listeners[0].addr);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        for provider in ["test", "fallback"] {
+            client
+                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+                .json(
+                    &json!({"provider_id":provider,"interface_id":"default","auth_alias":"key",
+                    "model_id":"test","kind":"probe","duration_ms":3600000}),
+                )
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        let health_status = || client.get(format!("{base}/_routecodex/health/cooldown-pool"));
+        let health: Value = health_status().send().await.unwrap().json().await.unwrap();
+        let due = health["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["until_ms"].as_u64().unwrap())
+            .max()
+            .unwrap();
+        clock.0.store(due, Ordering::SeqCst);
+        let health: Value = health_status().send().await.unwrap().json().await.unwrap();
+        let primary_health = health["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["provider_id"] == "test")
+            .unwrap()
+            .clone();
+        let ordinary = |session: String| {
+            client.post(format!("{base}/v1/responses"))
+            .header("x-session-id", session)
+            .json(&json!({"model":"client-test","input":"ordinary active request","stream":false}))
+        };
+        let compact = |marker: &str| {
+            client
+                .post(format!("{base}/v1/responses/compact"))
+                .header("x-session-id", "active-limit-0")
+                .json(&json!({"model":"client-test","input":marker,"stream":false}))
+        };
+        // Four distinct actual failures, interleaved with filtered requests.
+        // A duplicate charge or same-key retry would hold A before the fourth.
+        for index in 0..4 {
+            let response = ordinary(format!("active-limit-{index}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "relay={relay}");
+            response.bytes().await.unwrap();
+            let sent = primary.try_recv().expect("one real primary failure");
+            assert_eq!(
+                sent.authorization.as_deref(),
+                Some("Bearer active-turn-primary")
+            );
+            assert!(
+                primary.try_recv().is_err(),
+                "same key, sibling or inactive key retried"
+            );
+            assert!(fallback.try_recv().is_ok());
+            let health: Value = health_status().send().await.unwrap().json().await.unwrap();
+            let entries = health["entries"].as_array().unwrap();
+            let retained = entries
+                .iter()
+                .find(|entry| entry["provider_id"] == "test")
+                .unwrap();
+            for field in [
+                "until_ms",
+                "failure_count",
+                "probe_failure_count",
+                "next_probe_at_ms",
+                "state",
+                "kind",
+                "reason",
+            ] {
+                assert_eq!(
+                    retained[field], primary_health[field],
+                    "exact400 changed health {field}: {health}"
+                );
+            }
+            assert!(
+                !entries
+                    .iter()
+                    .any(|entry| entry["provider_id"] == "fallback"),
+                "successor must complete its own business trial: {health}"
+            );
+            for _ in 0..4 {
+                let response = ordinary("active-limit-0".into()).send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                response.bytes().await.unwrap();
+                assert!(
+                    primary.try_recv().is_err(),
+                    "restricted Provider dispatched"
+                );
+                assert!(fallback.try_recv().is_ok());
+            }
+            let status: Value = client
+                .get(format!("{base}/_routecodex/selection/active-keys"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let pool = status["pools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|pool| pool["pool_id"] == "default")
+                .unwrap();
+            assert_eq!(
+                pool["held"].as_array().unwrap().len(),
+                usize::from(index == 3),
+                "{status}"
+            );
+            if index == 3 {
+                assert_eq!(pool["held"][0]["auth_alias"], "key");
+            }
+        }
+        // Compact failures each charge its own episode; a genuine compact
+        // success must reset that streak without releasing the ordinary hold.
+        for _ in 0..3 {
+            assert_eq!(
+                compact("compact-failure").send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(compact_upstream.try_recv().is_ok());
+            assert!(compact_upstream.try_recv().is_err());
+        }
+        let completed: Value = compact("compact-success")
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            completed["output"][0]["encrypted_content"],
+            "active-summary"
+        );
+        let sent = compact_upstream.try_recv().unwrap();
+        assert_eq!(sent.request_path.as_deref(), Some("/v1/responses/compact"));
+        let response = ordinary("active-limit-0".into()).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.bytes().await.unwrap();
+        let sent = primary
+            .try_recv()
+            .expect("compact restored Provider eligibility");
+        assert_eq!(
+            sent.authorization.as_deref(),
+            Some("Bearer active-turn-sibling"),
+            "compact released the held key"
+        );
+        assert!(primary.try_recv().is_err());
+        assert!(fallback.try_recv().is_ok());
+        let released: Value = client
+            .post(format!("{base}/_routecodex/selection/active-keys/release"))
+            .json(
+                &json!({"routing_group_id":"default","pool_id":"default","provider_id":"test",
+                "interface_id":"default","model_id":"test","auth_alias":"key"}),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(released["released"], true);
+        let response = ordinary("active-limit-0".into()).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.bytes().await.unwrap();
+        assert!(
+            primary.try_recv().is_err(),
+            "release cleared the conversation restriction"
+        );
+        assert!(fallback.try_recv().is_ok());
+        for _ in 0..3 {
+            assert_eq!(
+                compact("compact-failure").send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(compact_upstream.try_recv().is_ok());
+            assert!(compact_upstream.try_recv().is_err());
+        }
+        let status: Value = client
+            .get(format!("{base}/_routecodex/selection/active-keys"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let compact_pool = status["pools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pool| pool["pool_id"] == "compact")
+            .unwrap();
+        assert_eq!(
+            compact_pool["held"],
+            json!([]),
+            "compact success did not reset active failure feedback"
+        );
+        server.shutdown().await;
+        let _ = primary_shutdown.send(());
+        let _ = fallback_shutdown.send(());
+        let _ = compact_shutdown.send(());
+    }
+}
+
+fn enable_turn_limit_active_keys(manifest: &mut routecodex_v3_config::V3Config05ManifestPublished) {
+    use routecodex_v3_config::{
+        V3ActiveKeyFailureAction, V3ActiveKeyMember, V3ActiveKeyPolicy, V3SelectionStrategy,
+    };
+    let auth = &mut manifest.providers.get_mut("test").unwrap().auth;
+    for (alias, env) in [
+        ("sibling", "V3_TURN_SIBLING_KEY"),
+        ("inactive", "V3_TURN_INACTIVE_KEY"),
+    ] {
+        let mut entry = auth.entries[0].clone();
+        entry.alias = alias.into();
+        entry.env = Some(env.into());
+        auth.entries.push(entry);
+    }
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        let primary = pool.targets[0].clone();
+        for alias in ["sibling", "inactive"] {
+            let mut target = primary.clone();
+            target.key = Some(alias.into());
+            pool.targets.insert(1, target);
+        }
+        pool.selection.strategy = V3SelectionStrategy::ActiveQueue;
+        pool.active_keys = Some(V3ActiveKeyPolicy {
+            members: [("test", "key"), ("test", "sibling"), ("fallback", "key")]
+                .into_iter()
+                .map(|(provider, alias)| V3ActiveKeyMember {
+                    provider: provider.into(),
+                    alias: alias.into(),
+                })
+                .collect(),
+            retries: 3,
+            on_failure: V3ActiveKeyFailureAction::Hold,
+        });
+    }
+}
+
+#[tokio::test]
+async fn responses_estimated_turn_filter_applies_per_request() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("estimated-turn-filter");
+    std::env::set_var("V3_P6_TEST_KEY", "estimated-turn-filter-fixture");
+    std::env::set_var("V3_TURN_SIBLING_KEY", "estimated-turn-sibling");
+    std::env::set_var("V3_TURN_INACTIVE_KEY", "estimated-turn-inactive");
+    for relay in [false, true] {
+        for active in [false, true] {
+            assert_estimated_turn_filter_through_responses(relay, active).await;
+        }
+        assert_estimated_turn_filter_on_real_tool_followup(relay).await;
+    }
+}
+
+async fn assert_estimated_turn_filter_on_real_tool_followup(relay: bool) {
+    let (primary_url, mut primary, primary_shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    let (fallback_url, mut fallback, fallback_shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+        free_port(),
+        free_port(),
+        &primary_url,
+        "responses",
+        Some(&fallback_url),
+        "exclude_at_estimated_turns = 99",
+        relay,
+    );
+    if relay {
+        let primary_responses = manifest.providers.get_mut("test").unwrap();
+        primary_responses.responses.as_mut().unwrap().streaming =
+            routecodex_v3_config::V3StreamingPolicy::Client;
+        primary_responses
+            .interfaces
+            .get_mut("default")
+            .unwrap()
+            .responses = primary_responses.responses.clone();
+    }
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let mut history: Vec<_> = (0..97).map(|i| {
+        json!({"role": if i % 2 == 0 { "user" } else { "assistant" }, "content": format!("history {i}")})
+    }).collect();
+    history.push(json!({"role":"user","content":"Get the weather for Paris."}));
+    let tools = json!([{"type":"function","name":"lookup_weather","parameters":{
+        "type":"object","properties":{"city":{"type":"string"}},"required":["city"]
+    }}]);
+    let first = client
+        .post(&endpoint)
+        .header("x-session-id", "turn-limit-tool-followup")
+        .json(&json!({"model":"client-test","input":history,"tools":tools,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: Value = first.json().await.unwrap();
+    let call = first["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap();
+    assert_eq!(call["name"], "lookup_weather");
+    let args: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+    assert_eq!(args, json!({"city":"Paris"}));
+    assert!(primary.try_recv().is_ok());
+    assert!(fallback.try_recv().is_err());
+
+    let call_id = call["call_id"].as_str().unwrap();
+    let result = execute_turn_limit_fixture_tool(call["name"].as_str().unwrap(), &args);
+    history.push(call.clone());
+    history.push(json!({"type":"function_call_output","call_id":call_id,"output":result}));
+    let followup = client
+        .post(&endpoint)
+        .header("x-session-id", "turn-limit-tool-followup")
+        .json(&json!({"model":"client-test","input":history,"tools":tools,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(followup.status(), StatusCode::OK);
+    let followup: Value = followup.json().await.unwrap();
+    assert_eq!(followup["output_text"], "RCCV3_BODY_METADATA_TURN2_OK");
+    assert!(
+        primary.try_recv().is_err(),
+        "estimated limit must exclude the first provider"
+    );
+    let wire = fallback
+        .try_recv()
+        .expect("follow-up must reach the eligible provider");
+    let input = wire.body["input"].as_array().unwrap();
+    let forwarded = input
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["call_id"] == call_id)
+        .unwrap();
+    assert_eq!(forwarded["name"], call["name"]);
+    assert_eq!(forwarded["arguments"], call["arguments"]);
+    let forwarded_result = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output" && item["call_id"] == call_id)
+        .unwrap();
+    assert_eq!(forwarded_result["output"], result);
+    server.shutdown().await;
+    let _ = primary_shutdown.send(());
+    let _ = fallback_shutdown.send(());
+}
+
+fn execute_turn_limit_fixture_tool(name: &str, args: &Value) -> String {
+    let readings = [("Paris", 18), ("London", 15)];
+    match (name, args["city"].as_str()) {
+        ("lookup_weather", Some(city)) => {
+            let (_, degrees) = readings
+                .iter()
+                .find(|(known_city, _)| *known_city == city)
+                .expect("fixture weather lookup must receive a known city");
+            format!("{city}: {degrees} C")
+        }
+        _ => panic!("unexpected fixture tool call {name}"),
+    }
+}
+
+async fn assert_estimated_turn_filter_through_responses(relay: bool, active: bool) {
+    let (primary_url, mut primary, primary_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    let (fallback_url, mut fallback, fallback_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    let mut manifest = responses_provider_protocol_manifest_with_primary_options(
+        free_port(),
+        free_port(),
+        &primary_url,
+        "responses",
+        Some(&fallback_url),
+        "exclude_at_estimated_turns = 99",
+        relay,
+    );
+    manifest.debug.snapshots = false;
+    if active {
+        enable_turn_limit_active_keys(&mut manifest);
+    }
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    let mut compact_pool = group.pools["client_test"].clone();
+    compact_pool.id = "compact".into();
+    compact_pool.route_object = Some("estimated-turn-compact".into());
+    compact_pool.targets.truncate(1);
+    if let Some(policy) = &mut compact_pool.active_keys {
+        policy
+            .members
+            .retain(|member| member.provider == "test" && member.alias == "key");
+    }
+    group.compact_route_object = compact_pool.route_object.clone();
+    group.pools.insert(compact_pool.id.clone(), compact_pool);
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let history = |count| {
+        let mut input: Vec<_> = (0..count)
+            .map(|index| {
+                let role = if index % 2 == 0 { "user" } else { "assistant" };
+                json!({"role":role,"content":format!("fixture history {index}")})
+            })
+            .collect();
+        input.push(json!({"role":"user","content":"fixture current user input"}));
+        input
+    };
+    for count in [98, 99, 99, 99, 99, 98] {
+        let input = history(count);
+        let response = client
+            .post(&endpoint)
+            .header("x-session-id", "estimated-turn-fixture")
+            .json(&json!({"model":"client-test","input":input,"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "relay={relay}, estimated turns {count}"
+        );
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["status"], "completed");
+        let (expected, excluded) = if count == 99 {
+            (&mut fallback, &mut primary)
+        } else {
+            (&mut primary, &mut fallback)
+        };
+        let capture = tokio::time::timeout(std::time::Duration::from_secs(2), expected.recv())
+            .await
+            .expect("expected provider was not called")
+            .unwrap();
+        let wire = capture.body.to_string();
+        if active && count == 98 {
+            assert_eq!(
+                capture.authorization.as_deref(),
+                Some("Bearer estimated-turn-filter-fixture"),
+                "pre-send filtering changed active-key failure state"
+            );
+        }
+        assert!(wire.contains("fixture history 0"));
+        assert!(wire.contains(&format!("fixture history {}", count - 1)));
+        assert!(wire.contains("fixture current user input"));
+        assert!(
+            excluded.try_recv().is_err(),
+            "excluded provider received traffic"
+        );
+    }
+    let pinned = client
+        .post(&endpoint)
+        .json(&json!({"model":"test.test","input":history(99),"stream":false}))
+        .send()
+        .await;
+    assert!(
+        pinned.is_err(),
+        "a filtered explicit pin must not fabricate a provider response: {pinned:?}"
+    );
+    assert!(primary.try_recv().is_err());
+    assert!(fallback.try_recv().is_err());
+    // Dry-run has no live active selection state. The active compact consumer
+    // above uses the real native compact endpoint and accepted result.
+    if !active {
+        let compact: Value = client
+        .post(format!(
+            "http://{}/_routecodex/diagnostics/virtual-router/dry-run",
+            server.listeners[0].addr
+        ))
+        .json(&json!({
+            "request":{"model":"client-test","input":history(99),"stream":false},
+            "metadata":{"requestId":"estimated-turn-compact","entryEndpoint":"/v1/responses/compact"}
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(
+            compact["diagnostics"]["decision"]["selectedProviderKey"], "test:default:key:test",
+            "the long history must retain access to the compact model: {compact}"
+        );
+        assert!(
+            primary.try_recv().is_err(),
+            "dry-run contacted the provider"
+        );
+    }
+    if relay {
+        let mut request = format!("ws://{}/v1/responses", server.listeners[0].addr)
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            "openai-beta",
+            HeaderValue::from_static("responses_websockets=2026-02-06"),
+        );
+        let (mut socket, _) = connect_async(request).await.unwrap();
+        let mut history = history(97);
+        let current = history.pop().unwrap();
+        history.extend([
+            json!({"type":"function_call","name":"lookup","call_id":"call_turn",
+                "arguments":"{\"query\":\"fixture\"}"}),
+            json!({"type":"function_call_output","call_id":"call_turn","output":"fixture result"}),
+            current,
+        ]);
+        socket
+            .send(Message::Text(
+                json!({
+                    "type":"response.create","model":"client-test","input":history,"stream":false
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let completion = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let message = socket.next().await.unwrap().unwrap();
+                let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                if event["type"] == "response.completed" {
+                    break event;
+                }
+                assert_ne!(event["type"], "error", "{event}");
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(completion["response"]["status"], "completed");
+        let capture = primary
+            .try_recv()
+            .expect("original 98-turn WebSocket request was filtered");
+        let input = capture.body["input"].as_array().unwrap();
+        assert!(input
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["call_id"] == "call_turn"));
+        assert!(input
+            .iter()
+            .any(|item| item["type"] == "function_call_output"
+                && item["call_id"] == "call_turn"
+                && item["output"] == "fixture result"));
+        assert!(fallback.try_recv().is_err());
+        let _ = socket.close(None).await;
+    }
+    server.shutdown().await;
+    let _ = primary_shutdown.send(());
+    let _ = fallback_shutdown.send(());
+}
 
 #[tokio::test]
 async fn responses_same_session_routes_only_current_shell_operation() {
@@ -1391,6 +2605,61 @@ fn p6_manifest(
     p6_manifest_with_context_window(port_a, port_b, provider_base_url, 128_000)
 }
 
+fn target_origin_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    provider_enabled: bool,
+    debug_log: &std::path::Path,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let debug_log = serde_json::to_string(&debug_log.to_string_lossy()).unwrap();
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+enabled = {provider_enabled}
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools", "vision"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+log_file = {debug_log}
+snapshots = false
+dry_run = false
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 /// `max_context_tokens` bounds every candidate in the p6 route pools, so a
 /// window too small for the request forces a selection-time pool exhaustion
 /// with no provider attempt at all.
@@ -1572,9 +2841,36 @@ fn responses_relay_provider_protocol_manifest(
     provider_type: &str,
     fallback_base_url: Option<&str>,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_provider_protocol_manifest_with_primary_options(
+        port_a,
+        port_b,
+        provider_base_url,
+        provider_type,
+        fallback_base_url,
+        "",
+        true,
+    )
+}
+
+fn responses_provider_protocol_manifest_with_primary_options(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    provider_type: &str,
+    fallback_base_url: Option<&str>,
+    primary_model_options: &str,
+    relay: bool,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
     let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
-    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let (hub_v1_declaration, responses_options) = if relay {
+        (
+            HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding),
+            r#"responses = { process = "chat", streaming = "always" }"#,
+        )
+    } else {
+        (HUB_V1_TEST_DECLARATION.to_owned(), "")
+    };
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
     let fallback_provider = fallback_base_url.map_or(String::new(), |base_url| {
         format!(
@@ -1607,7 +2903,7 @@ base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "chat", streaming = "always" }}
+{responses_options}
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
@@ -1617,6 +2913,7 @@ supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
 max_context_tokens = 128000
+{primary_model_options}
 {fallback_provider}
 [debug]
 log_console = false
@@ -2250,6 +3547,7 @@ targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropi
 
 #[derive(Debug)]
 struct ProviderCapture {
+    request_path: Option<String>,
     authorization: Option<String>,
     accept: Option<String>,
     session_id: Option<String>,
@@ -2263,6 +3561,7 @@ struct ProviderCapture {
 impl ProviderCapture {
     fn from_http(headers: &HeaderMap, body: Value) -> Self {
         Self {
+            request_path: None,
             authorization: header_text(headers, "authorization"),
             accept: header_text(headers, "accept"),
             session_id: header_text(headers, "session-id"),
@@ -2276,6 +3575,7 @@ impl ProviderCapture {
 
     fn from_websocket_handshake(request: &Request) -> Self {
         Self {
+            request_path: None,
             authorization: request
                 .headers()
                 .get("authorization")
@@ -2293,6 +3593,7 @@ impl ProviderCapture {
 
     fn from_body(body: Value) -> Self {
         Self {
+            request_path: None,
             authorization: None,
             accept: None,
             session_id: None,
@@ -2408,6 +3709,15 @@ async fn controlled_responses_upstream(
             ))
             .unwrap()
     }
+}
+
+async fn target_origin_provider_ingress(
+    State(ingress): State<Arc<std::sync::atomic::AtomicUsize>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response<Body> {
+    ingress.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    next.run(request).await
 }
 
 async fn controlled_responses_relay_upstream(
@@ -2532,6 +3842,46 @@ async fn start_controlled_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_target_origin_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<std::sync::atomic::AtomicUsize>,
+    oneshot::Sender<()>,
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let ingress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_responses_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&ingress),
+            target_origin_provider_ingress,
+        ));
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        ingress,
+        shutdown_tx,
+        task,
+        address,
+    )
 }
 
 #[derive(Clone)]
@@ -2920,14 +4270,49 @@ struct ControlledTerminalState {
 
 async fn controlled_terminal_upstream(
     State(state): State<Arc<ControlledTerminalState>>,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    let compact_reply = if uri.path() == "/v1/responses" {
+        let text = body.to_string();
+        if text.contains("turn-limit-refusal-summary") {
+            Some(
+                r#"{"id":"resp_compact_refusal","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Some text"},{"type":"refusal","refusal":"No usable summary"}]}]}"#,
+            )
+        } else if text.contains("turn-limit-invisible-summary") {
+            Some(
+                r#"{"id":"resp_invisible_summary","status":"completed","output_text":"\u200b","output":[{"type":"output_text","text":"\u200b"},{"type":"function_call","call_id":"invisible_summary_call","name":"lookup_weather","arguments":"{}"}]}"#,
+            )
+        } else if text.contains("turn-limit-good-responses-summary") {
+            Some(
+                r#"{"id":"resp_compact_summary","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Completed compact summary"}]}]}"#,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let compact_stream = body["stream"].as_bool() == Some(true);
     let accepted = (state.accepts)(&body);
-    state
-        .captures
-        .send(ProviderCapture::from_http(&headers, body))
-        .unwrap();
+    let mut capture = ProviderCapture::from_http(&headers, body);
+    capture.request_path = Some(uri.path().to_owned());
+    state.captures.send(capture).unwrap();
+    if let Some(reply) = compact_reply {
+        let (content_type, body) = if compact_stream {
+            ("text/event-stream", format!(
+                "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{reply}}}\n\ndata: [DONE]\n\n"
+            ))
+        } else {
+            ("application/json", reply.to_owned())
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+    }
     if !accepted {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -3201,6 +4586,20 @@ async fn controlled_snapall_upstream(
     uri: Uri,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    if uri.path().ends_with("/chat/completions")
+        && body.pointer("/messages/0/content").and_then(Value::as_str)
+            == Some("turn-limit-content-filter")
+    {
+        state
+            .captures
+            .send(ProviderCapture::from_http(&headers, body))
+            .unwrap();
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"id":"chatcmpl_filtered","object":"chat.completion","model":"chat-wire","choices":[{"index":0,"message":{"role":"assistant","content":null},"finish_reason":"content_filter"}]}"#))
+            .unwrap();
+    }
     state
         .captures
         .send(ProviderCapture::from_http(&headers, body.clone()))
@@ -4544,6 +5943,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         max_tokens: Some(8192),
                         max_context_tokens: Some(262144),
                         context_token_estimate_scale_bps: 10_000,
+                        exclude_at_estimated_turns: None,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
@@ -4569,6 +5969,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         max_tokens: Some(8192),
                         max_context_tokens: Some(262144),
                         context_token_estimate_scale_bps: 10_000,
+                        exclude_at_estimated_turns: None,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
@@ -4703,7 +6104,85 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
 }
 
 #[tokio::test]
-async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_parent_call() {
+async fn issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("issue4a0b3aa-orphan");
+    let provider_error = json!({"error": {
+        "message":"issue4a0b3aa_actual_provider_400",
+        "type":"invalid_request_error",
+        "code":"issue4a0b3aa_orphan_rejected"
+    }});
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::BAD_REQUEST,
+        "application/json",
+        serde_json::to_vec(&provider_error).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-fixture");
+    let manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    assert_eq!(manifest.providers.len(), 1);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let port = handle.listeners[0].addr.port();
+    let input = json!([{
+        "type":"function_call_output",
+        "call_id":"call_4a0b3aa_orphan",
+        "output":"tool failure remains data\r\nexact output"
+    }]);
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test", "input":input, "stream":false}))
+        .send()
+        .await;
+    let capture = timeout(Duration::from_secs(2), captures.recv()).await;
+    eprintln!("issue4a0b3aa client={response:?}; first_provider={capture:?}");
+    // Shut down test-owned listeners even when the baseline forwarding assertion fails.
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let capture = capture
+        .expect("Req04 must forward the orphan to the first Provider")
+        .expect("Provider capture must remain available");
+    assert_eq!(capture.request_path.as_deref(), Some("/v1/responses"));
+    assert_eq!(
+        capture.body["input"], input,
+        "first Provider item must stay exact"
+    );
+    assert!(capture.body["input"][0].get("id").is_none());
+    assert!(
+        captures.try_recv().is_err(),
+        "sole Provider must receive one attempt"
+    );
+    let response = response.expect("actual final Provider HTTP 400 must reach the client");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.json::<Value>().await.unwrap(), provider_error);
+    let samples = home_guard.codex_samples_root(port);
+    let terminal = wait_for_v3_provider_terminal_evidence(&samples).await;
+    assert_eq!(terminal["kind"], "external_http", "{terminal}");
+    assert_eq!(terminal["status"], 400, "{terminal}");
+    assert_eq!(
+        terminal["body"],
+        json!(serde_json::to_vec(&provider_error).unwrap())
+    );
+    let failures = wait_for_concurrency_failure_source(&samples).await;
+    let attempts = failures["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 1, "{failures}");
+    assert_eq!(attempts[0]["provider_id"], "test", "{failures}");
+    assert_eq!(
+        attempts[0]["provider_key"], "test:default:key:test",
+        "{failures}"
+    );
+    assert_eq!(attempts[0]["provider_status"], 400, "{failures}");
+    assert_eq!(
+        attempts[0]["diagnostic_source"]["code"], "provider_http_400",
+        "{failures}"
+    );
+    eprintln!(
+        "issue4a0b3aa exact_input={input}; client_error={provider_error}; typed_error={failures}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -4751,10 +6230,7 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
         }))
         .send()
         .await;
-    assert!(
-        second.is_err(),
-        "orphan tool output must fail without client error response"
-    );
+    assert_eq!(second.unwrap().status(), StatusCode::OK);
 
     let first_capture = timeout(Duration::from_secs(2), captures.recv())
         .await
@@ -4763,7 +6239,14 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
     assert_eq!(first_capture.body["model"], "wire-test");
     assert!(first_capture.body.get("client_metadata").is_none());
     assert!(first_capture.body.get("metadata").is_none());
-    assert_no_remote_continuation_provider_send(&mut captures).await;
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        second_capture.body["input"][0]["call_id"],
+        "call_body_metadata"
+    );
+    assert!(second_capture.body.get("client_metadata").is_none());
+    assert!(second_capture.body.get("metadata").is_none());
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -4771,7 +6254,7 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
 }
 
 #[tokio::test]
-async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_output() {
+async fn responses_relay_different_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -4820,17 +6303,12 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
         }))
         .send()
         .await;
-    assert!(
-        second.is_err(),
-        "wrong scope must fail without client error response"
-    );
+    assert_eq!(second.unwrap().status(), StatusCode::OK);
     let _first_capture = captures.recv().await.unwrap();
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "payload metadata must fail before the second provider send"
-    );
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(second_capture.body["input"][0]["output"], "wrong scope");
+    assert!(second_capture.body.get("client_metadata").is_none());
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -4838,7 +6316,7 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
 }
 
 #[tokio::test]
-async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
+async fn responses_relay_orphan_tool_output_without_client_scope_reaches_provider() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -4884,16 +6362,10 @@ async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
         }))
         .send()
         .await;
-    assert!(
-        response.is_err(),
-        "missing scope must fail without client error response"
-    );
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "missing continuation scope must fail before provider send"
-    );
+    assert_eq!(response.unwrap().status(), StatusCode::OK);
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(second_capture.body["input"][0]["output"], "missing scope");
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -11474,10 +12946,20 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
                 let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
                 assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
-                assert!(
-                    captures.try_recv().is_ok(),
-                    "{endpoint} must exercise actual provider transport"
-                );
+                let capture = captures.try_recv().unwrap_or_else(|_| {
+                    panic!("{endpoint} must exercise actual provider transport")
+                });
+                if endpoint == "/v1/responses/compact" && streaming {
+                    assert_eq!(
+                        capture.body,
+                        json!({
+                            "model":"wire-test",
+                            "input":"hello",
+                            "max_output_tokens":4096
+                        }),
+                        "native compact must omit the client stream field from its provider body"
+                    );
+                }
                 assert!(
                     received.is_ok(),
                     "{endpoint} failed to reach a terminal transport outcome"
@@ -11695,111 +13177,825 @@ async fn p6_provider_503_reaches_a_streaming_client() {
     failure_shutdown.send(()).unwrap();
 }
 
-#[tokio::test]
-async fn responses_selection_exhaustion_never_reaches_the_client() {
-    let _test_guard = TEST_LOCK.lock().await;
-    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-selection-exhaustion");
-    let handle = spawn_v3_server_aggregate(p6_manifest_with_context_window(
-        free_port(),
-        free_port(),
-        &success_base_url,
-        2_000,
-    ))
-    .await
-    .unwrap();
-    let client = reqwest::Client::new();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+const TARGET_ORIGIN_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);
 
-    // Positive control: the same upstream serves real business content while
-    // its provider is enabled.
-    let served = client
-        .post(&endpoint)
-        .json(&json!({"model":"client-test","input":"hello"}))
-        .send()
-        .await
-        .expect("an enabled provider must serve the control request");
-    assert_eq!(served.status(), StatusCode::OK);
-    let served_body: Value = served.json().await.unwrap();
-    assert_eq!(served_body["output_text"], "ok");
-    assert_eq!(served_body["status"], "completed");
-    let control_capture = captures.recv().await.unwrap();
-    assert_eq!(
-        control_capture.body["input"],
-        json!([{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}])
-    );
-    assert!(captures.try_recv().is_err());
-    handle.shutdown().await;
+struct TargetOriginEnvGuard {
+    previous: Vec<(&'static str, Option<OsString>)>,
+}
 
-    // A separate declared manifest disables every candidate provider. This
-    // causes genuine selection exhaustion without rejecting context estimates.
-    let mut manifest =
-        p6_manifest_with_context_window(free_port(), free_port(), &success_base_url, 2_000);
-    for provider in manifest.providers.values_mut() {
-        provider.enabled = false;
+impl TargetOriginEnvGuard {
+    fn new(key_value: Option<&str>, cooldown_state: Option<&str>) -> Self {
+        let previous = vec![
+            ("V3_P6_TEST_KEY", std::env::var_os("V3_P6_TEST_KEY")),
+            (
+                "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+                std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE"),
+            ),
+        ];
+        for (name, value) in [
+            ("V3_P6_TEST_KEY", key_value),
+            ("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE", cooldown_state),
+        ] {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        Self { previous }
     }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let addr = handle.listeners[0].addr;
-    let endpoint = format!("http://{addr}/v1/responses");
-    let long_input = "context window exhaustion probe ".repeat(600);
-    let mut streaming = client
-        .post(&endpoint)
-        .json(&json!({"model":"client-test","input":long_input,"stream":true}))
-        .send()
-        .await
-        .expect("a streaming client must receive the SSE response head");
-    assert_eq!(streaming.status(), StatusCode::OK);
-    assert_eq!(streaming.headers()["content-type"], "text/event-stream");
-    let mut stream_bytes = Vec::new();
-    loop {
-        match streaming.chunk().await {
-            Ok(Some(chunk)) => stream_bytes.extend_from_slice(&chunk),
-            Err(_) => break,
-            Ok(None) => panic!("an exhausted selection must abort the streaming body"),
+}
+
+impl Drop for TargetOriginEnvGuard {
+    fn drop(&mut self) {
+        for (name, value) in &self.previous {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
         }
     }
-    let stream_text = String::from_utf8(stream_bytes).unwrap();
-    assert!(
-        stream_text.starts_with(":"),
-        "SSE must emit a transport comment: {stream_text}"
-    );
-    assert!(
-        stream_text
-            .lines()
-            .all(|line| line.is_empty() || line.starts_with(':')),
-        "SSE exhaustion must emit only comments, no business/error/DONE events: {stream_text}"
-    );
+}
 
-    let nonstreaming = client
-        .post(&endpoint)
-        .json(&json!({"model":"client-test","input":long_input}))
-        .send()
-        .await;
+struct TargetOriginHttpResponse {
+    status: StatusCode,
+    body: Vec<u8>,
+}
+
+async fn target_origin_http(
+    client: &reqwest::Client,
+    request: reqwest::Request,
+    context: &str,
+) -> TargetOriginHttpResponse {
+    timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, async {
+        let response = client
+            .execute(request)
+            .await
+            .unwrap_or_else(|error| panic!("{context} request failed: {error}"));
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .unwrap_or_else(|error| panic!("{context} body failed: {error}"))
+            .to_vec();
+        TargetOriginHttpResponse { status, body }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context} exchange must not time out"))
+}
+
+async fn target_origin_raw_request(
+    addr: std::net::SocketAddr,
+    head: String,
+    body: &[u8],
+    context: &str,
+) -> Vec<u8> {
+    timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, async {
+        let mut socket = TcpStream::connect(addr)
+            .await
+            .unwrap_or_else(|error| panic!("{context} connect failed: {error}"));
+        socket
+            .write_all(head.as_bytes())
+            .await
+            .unwrap_or_else(|error| panic!("{context} head write failed: {error}"));
+        socket
+            .write_all(body)
+            .await
+            .unwrap_or_else(|error| panic!("{context} body write failed: {error}"));
+        let mut wire = Vec::new();
+        socket
+            .read_to_end(&mut wire)
+            .await
+            .unwrap_or_else(|error| panic!("{context} close failed: {error}"));
+        wire
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context} must complete without a transport timeout"))
+}
+
+async fn target_origin_raw_json(addr: std::net::SocketAddr, context: &str) -> Vec<u8> {
+    let body = serde_json::to_vec(&json!({"model":"client-test","input":"hello"})).unwrap();
+    target_origin_raw_request(
+        addr,
+        format!(
+            "POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        ),
+        &body,
+        context,
+    )
+    .await
+}
+
+async fn assert_target_origin_listener_healthy(
+    client: &reqwest::Client,
+    addr: std::net::SocketAddr,
+    context: &str,
+) {
+    let health = client.get(format!("http://{addr}/health")).build().unwrap();
+    let health = target_origin_http(client, health, &format!("{context} health")).await;
     assert!(
-        nonstreaming.is_err(),
-        "an exhausted selection must close the nonstreaming client without a payload"
+        health.status.is_success(),
+        "{context} health returned {}: {:?}",
+        health.status,
+        String::from_utf8_lossy(&health.body)
     );
-    let body = serde_json::to_vec(&json!({"model":"client-test","input":long_input})).unwrap();
-    let mut socket = TcpStream::connect(addr).await.unwrap();
-    socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
-    socket.write_all(&body).await.unwrap();
-    let mut wire = Vec::new();
-    timeout(Duration::from_secs(5), socket.read_to_end(&mut wire))
-        .await
-        .expect("JSON exhaustion must terminate promptly")
+    let cooldown = client
+        .get(format!("http://{addr}/_routecodex/health/cooldown-pool"))
+        .build()
         .unwrap();
+    let cooldown = target_origin_http(client, cooldown, &format!("{context} cooldown")).await;
     assert!(
-        wire.is_empty(),
-        "JSON exhaustion must send zero response bytes: {wire:?}"
+        cooldown.status.is_success(),
+        "{context} cooldown returned {}: {:?}",
+        cooldown.status,
+        String::from_utf8_lossy(&cooldown.body)
     );
-    assert!(
-        captures.try_recv().is_err(),
-        "disabled providers must receive no requests after control"
-    );
+    let cooldown: Value = serde_json::from_slice(&cooldown.body)
+        .unwrap_or_else(|error| panic!("{context} cooldown body is not JSON: {error}"));
+    assert_eq!(cooldown["entries"], json!([]), "{context}");
+}
 
-    std::env::remove_var("V3_P6_TEST_KEY");
-    handle.shutdown().await;
-    success_shutdown.send(()).unwrap();
+async fn close_target_origin_upstream(
+    shutdown: oneshot::Sender<()>,
+    mut task: tokio::task::JoinHandle<()>,
+    address: std::net::SocketAddr,
+    context: &str,
+) {
+    let mut errors = Vec::new();
+    if shutdown.send(()).is_err() {
+        errors.push(format!("{context} upstream shutdown receiver was lost"));
+    }
+    match timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, &mut task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => errors.push(format!("{context} upstream task failed: {error}")),
+        Err(_) => {
+            task.abort();
+            let joined = timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, task).await;
+            errors.push(format!(
+                "{context} upstream shutdown timed out; aborted task join: {joined:?}"
+            ));
+        }
+    }
+    errors.extend(wait_for_target_origin_addresses_released(&[address], context).await);
+    assert!(
+        errors.is_empty(),
+        "{context} upstream closeout failed: {errors:?}"
+    );
+}
+
+async fn wait_for_target_origin_addresses_released(
+    addresses: &[std::net::SocketAddr],
+    context: &str,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    for address in addresses {
+        let release = timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, async {
+            loop {
+                match tokio::net::TcpListener::bind(address).await {
+                    Ok(listener) => {
+                        drop(listener);
+                        return Ok(());
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+        })
+        .await;
+        match release {
+            Ok(Ok(())) => eprintln!("{context} address={address} released=true"),
+            Ok(Err(error)) => errors.push(format!(
+                "{context} address {address} release check failed: {error}"
+            )),
+            Err(_) => errors.push(format!(
+                "{context} address {address} was not released within {TARGET_ORIGIN_EXCHANGE_TIMEOUT:?}"
+            )),
+        }
+    }
+    errors
+}
+
+struct TargetOriginAggregatePhaseOutcome {
+    phase: Result<(), Box<dyn std::any::Any + Send>>,
+    closeout_errors: Vec<String>,
+}
+
+struct TargetOriginPublicPhases {
+    enabled: TargetOriginAggregatePhaseOutcome,
+    disabled: TargetOriginAggregatePhaseOutcome,
+}
+
+struct TargetOriginPublicFixtureOutcome {
+    execution: Result<TargetOriginPublicPhases, Box<dyn std::any::Any + Send>>,
+    upstream_cleanup: Result<(), Box<dyn std::any::Any + Send>>,
+    ingress_after_upstream: usize,
+    capture_after_upstream_empty: bool,
+    env_restored: bool,
+    home_removed: bool,
+}
+
+fn target_origin_panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            panic
+                .downcast_ref::<&str>()
+                .map(|message| message.to_string())
+        })
+        .unwrap_or_else(|| "non-string panic payload".to_string())
+}
+
+fn assert_target_origin_aggregate_phase_succeeded(
+    outcome: &TargetOriginAggregatePhaseOutcome,
+    context: &str,
+) {
+    assert!(
+        outcome.phase.is_ok(),
+        "{context} phase failed: {}",
+        outcome
+            .phase
+            .as_ref()
+            .err()
+            .map(|panic| target_origin_panic_message(panic.as_ref()))
+            .unwrap_or_default()
+    );
+    assert!(
+        outcome.closeout_errors.is_empty(),
+        "{context} closeout failed: {:?}",
+        outcome.closeout_errors
+    );
+}
+
+async fn run_target_origin_aggregate_phase(
+    handle: routecodex_v3_server::V3ServerAggregateHandle,
+    addresses: Vec<std::net::SocketAddr>,
+    phase: impl std::future::Future<Output = ()>,
+    context: &str,
+) -> TargetOriginAggregatePhaseOutcome {
+    let phase = std::panic::AssertUnwindSafe(phase).catch_unwind().await;
+    let mut closeout_errors = Vec::new();
+    let closeout = timeout(
+        TARGET_ORIGIN_EXCHANGE_TIMEOUT,
+        std::panic::AssertUnwindSafe(handle.shutdown()).catch_unwind(),
+    )
+    .await;
+    match closeout {
+        Ok(Ok(report)) => {
+            if !report.is_empty() || report.pending_controls.is_some() {
+                closeout_errors.push(format!("{context} aggregate shutdown failure: {report:?}"));
+            }
+        }
+        Ok(Err(panic)) => closeout_errors.push(format!(
+            "{context} aggregate shutdown panicked while preserving later assertion ownership: {}",
+            panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| {
+                    panic
+                        .downcast_ref::<&str>()
+                        .map(|message| message.to_string())
+                })
+                .unwrap_or_else(|| "non-string panic payload".to_string())
+        )),
+        Err(_) => closeout_errors.push(format!(
+            "{context} aggregate shutdown exceeded {TARGET_ORIGIN_EXCHANGE_TIMEOUT:?}"
+        )),
+    }
+    closeout_errors.extend(
+        wait_for_target_origin_addresses_released(&addresses, &format!("{context} closeout")).await,
+    );
+    if phase.is_err() && !closeout_errors.is_empty() {
+        eprintln!(
+            "{context} aggregate closeout failed while preserving the original phase assertion: {closeout_errors:?}"
+        );
+    }
+    TargetOriginAggregatePhaseOutcome {
+        phase,
+        closeout_errors,
+    }
+}
+
+#[tokio::test]
+async fn responses_selection_exhaustion_never_reaches_the_client() {
+    let outcome = run_target_origin_public_fixture(false).await;
+    let phases = outcome.execution.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "legal public fixture execution failed before cleanup: {}",
+            target_origin_panic_message(panic.as_ref())
+        )
+    });
+    assert_target_origin_aggregate_phase_succeeded(&phases.enabled, "enabled provider control");
+    assert_target_origin_aggregate_phase_succeeded(&phases.disabled, "disabled provider Target09");
+    assert_eq!(
+        outcome.ingress_after_upstream, 1,
+        "legal fixture must retain exactly the enabled control ingress after the upstream join"
+    );
+    assert!(
+        outcome.capture_after_upstream_empty,
+        "legal fixture must leave no parsed capture after the upstream join"
+    );
+    outcome.upstream_cleanup.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "upstream cleanup failed after the legal fixture: {}",
+            target_origin_panic_message(panic.as_ref())
+        )
+    });
+    assert!(
+        outcome.env_restored,
+        "fixture environment variables must be restored"
+    );
+    assert!(
+        outcome.home_removed,
+        "isolated fixture directory must be removed"
+    );
+}
+
+#[tokio::test]
+async fn target_origin_disabled_phase_rejects_pre_handler_ingress() {
+    let outcome = run_target_origin_public_fixture(true).await;
+    let preserved_phase_message = outcome
+        .execution
+        .as_ref()
+        .ok()
+        .and_then(|phases| phases.disabled.phase.as_ref().err())
+        .map(|panic| target_origin_panic_message(panic.as_ref()))
+        .unwrap_or_else(|| "<disabled phase did not panic>".to_string());
+    assert!(
+        outcome.capture_after_upstream_empty,
+        "the negative control must not accept any parsed capture"
+    );
+    assert_eq!(
+        outcome.ingress_after_upstream, 2,
+        "negative control must observe exactly one enabled request plus one injected pre-handler request through the upstream join"
+    );
+    outcome.upstream_cleanup.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "upstream cleanup failed after the negative control: {}; preserved disabled phase: {preserved_phase_message}",
+            target_origin_panic_message(panic.as_ref()),
+        )
+    });
+    assert!(
+        outcome.env_restored,
+        "fixture environment variables must be restored"
+    );
+    assert!(
+        outcome.home_removed,
+        "isolated fixture directory must be removed"
+    );
+    let phases = outcome.execution.as_ref().unwrap_or_else(|panic| {
+        panic!(
+            "negative control execution failed before cleanup: {}",
+            target_origin_panic_message(panic.as_ref())
+        )
+    });
+    assert_target_origin_aggregate_phase_succeeded(
+        &phases.enabled,
+        "negative-control enabled provider phase",
+    );
+    assert!(
+        phases.disabled.closeout_errors.is_empty(),
+        "negative-control disabled-phase closeout failed: {:?}; preserved disabled phase: {preserved_phase_message}",
+        phases.disabled.closeout_errors,
+    );
+    let disabled_panic = phases.disabled.phase.as_ref().unwrap_err();
+    let message = target_origin_panic_message(disabled_panic.as_ref());
+    assert!(
+        message.contains("disabled pre-handler ingress must retain the enabled total"),
+        "shared pre-request guard was not preserved: {message}"
+    );
+    eprintln!(
+        "pre-handler counterexample: original ingress assertion preserved after fixture cleanup; ingress_after_upstream=2 capture_empty=true"
+    );
+}
+
+async fn run_target_origin_public_fixture(
+    inject_pre_handler_ingress: bool,
+) -> TargetOriginPublicFixtureOutcome {
+    let _test_guard = TEST_LOCK.lock().await;
+    let original_home = std::env::var_os("HOME");
+    let fixture_home = TestHomeGuard::new("target-origin-public");
+    let debug_log = fixture_home.path.join("target-origin-debug.log");
+    let original_key = std::env::var_os("V3_P6_TEST_KEY");
+    let original_state = std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE");
+    let env_guard = TargetOriginEnvGuard::new(Some("secret-selection-exhaustion"), None);
+    let (success_base_url, mut captures, ingress, success_shutdown, upstream_task, upstream_addr) =
+        start_target_origin_upstream().await;
+    let client = reqwest::Client::new();
+    let execution = std::panic::AssertUnwindSafe(async {
+        let handle = spawn_v3_server_aggregate(target_origin_manifest(
+            free_port(),
+            free_port(),
+            &success_base_url,
+            true,
+            &debug_log,
+        ))
+        .await
+        .unwrap();
+        let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+        let enabled_listener_addresses = handle
+            .listeners
+            .iter()
+            .map(|listener| listener.addr)
+            .collect::<Vec<_>>();
+        let enabled = run_target_origin_aggregate_phase(
+            handle,
+            enabled_listener_addresses,
+            async {
+                let request = client
+                    .post(&endpoint)
+                    .json(&json!({"model":"client-test","input":"hello"}))
+                    .build()
+                    .unwrap();
+                let served = target_origin_http(&client, request, "enabled provider control").await;
+                assert_eq!(served.status, StatusCode::OK);
+                let served_body: Value = serde_json::from_slice(&served.body).unwrap();
+                assert_eq!(served_body["output_text"], "ok");
+                assert_eq!(served_body["status"], "completed");
+                let control_capture = timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, captures.recv())
+                    .await
+                    .expect("enabled provider capture must not time out")
+                    .expect("enabled provider must capture the control request");
+                assert_eq!(control_capture.body["model"], "wire-test");
+                assert_eq!(
+                    control_capture.body["input"],
+                    json!([{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}])
+                );
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    1,
+                    "the enabled control must reach the controlled origin once"
+                );
+            },
+            "enabled provider control",
+        )
+        .await;
+        assert_target_origin_aggregate_phase_succeeded(&enabled, "enabled provider control");
+        let enabled_control_ingress = ingress.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            enabled_control_ingress, 1,
+            "the enabled control total must remain one after aggregate release"
+        );
+        let disabled_ingress_expected = enabled_control_ingress;
+
+        let handle = spawn_v3_server_aggregate(target_origin_manifest(
+            free_port(),
+            free_port(),
+            &success_base_url,
+            false,
+            &debug_log,
+        ))
+        .await
+        .unwrap();
+        let listeners = handle
+            .listeners
+            .iter()
+            .map(|listener| listener.addr)
+            .collect::<Vec<_>>();
+        let addr = listeners[0];
+        let disabled = run_target_origin_aggregate_phase(
+            handle,
+            listeners.clone(),
+            async {
+                let endpoint = format!("http://{addr}/v1/responses");
+                let mut diagnostic_offset =
+                    fs::read_to_string(&debug_log).unwrap_or_default().len();
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    enabled_control_ingress,
+                    "disabled startup must not replace the enabled ingress total"
+                );
+                let expected_terminal = format!(
+                    "[{}] v3 model transport terminal source_kind=RuntimeFailure source_stage=V3Target09CandidateSetExpanded code=target_resolution_candidate_expansion_failed message=provider test is absent or disabled",
+                    addr.port()
+                );
+                let assert_target09 = |fresh: &str| {
+                    let terminals = fresh
+                        .lines()
+                        .filter(|line| line.contains("v3 model transport terminal"))
+                        .collect::<Vec<_>>();
+                    assert_eq!(terminals.len(), 1, "{fresh}");
+                    assert_eq!(terminals[0], expected_terminal, "{fresh}");
+                };
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "disabled baseline",
+                    )
+                    .await;
+                }
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    enabled_control_ingress,
+                    "disabled baseline must not reach the controlled origin"
+                );
+
+                if inject_pre_handler_ingress {
+                    let malformed = b"{\"model\":";
+                    let malformed_wire = target_origin_raw_request(
+                        upstream_addr,
+                        format!(
+                            "POST /v1/responses HTTP/1.1\r\nHost: {upstream_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            malformed.len()
+                        ),
+                        malformed,
+                        "disabled pre-handler counterexample",
+                    )
+                    .await;
+                    assert!(
+                        !malformed_wire.is_empty(),
+                        "the pre-handler counterexample must receive a rejected HTTP response"
+                    );
+                    let malformed_status = String::from_utf8_lossy(&malformed_wire)
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .to_string();
+                    assert!(
+                        malformed_status.contains(" 400 "),
+                        "malformed pre-handler JSON must be rejected: {malformed_status}"
+                    );
+                }
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    enabled_control_ingress,
+                    "disabled pre-handler ingress must retain the enabled total"
+                );
+                let request = client
+                    .post(&endpoint)
+                    .json(&json!({"model":"client-test","input":"hello","stream":true}))
+                    .build()
+                    .unwrap();
+                let deadline = tokio::time::Instant::now() + TARGET_ORIGIN_EXCHANGE_TIMEOUT;
+                let mut streaming =
+                    tokio::time::timeout_at(deadline, client.execute(request))
+                        .await
+                        .expect("SSE response head must not time out")
+                        .expect("a streaming client must receive the SSE response head");
+                assert_eq!(streaming.status(), StatusCode::OK);
+                assert_eq!(streaming.headers()["content-type"], "text/event-stream");
+                let mut stream_bytes = Vec::new();
+                let mut ended_with_transport_error = false;
+                loop {
+                    match tokio::time::timeout_at(deadline, streaming.chunk())
+                        .await
+                        .expect("SSE Target09 termination must not time out")
+                    {
+                        Ok(Some(chunk)) => stream_bytes.extend_from_slice(&chunk),
+                        Err(_) => {
+                            ended_with_transport_error = true;
+                            break;
+                        }
+                        Ok(None) => break,
+                    }
+                }
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    disabled_ingress_expected,
+                    "SSE Target09 must not reach the controlled origin"
+                );
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                let diagnostic = fs::read_to_string(&debug_log).unwrap_or_default();
+                assert_target09(&diagnostic[diagnostic_offset..]);
+                diagnostic_offset = diagnostic.len();
+                let stream_text = String::from_utf8(stream_bytes).unwrap();
+                assert!(
+                    stream_text.starts_with(":"),
+                    "SSE must emit a transport comment: {stream_text}"
+                );
+                assert!(
+                    stream_text
+                        .lines()
+                        .all(|line| line.is_empty() || line.starts_with(':')),
+                    "Target09 SSE must emit only comments, no business/error/DONE events: {stream_text}"
+                );
+                assert!(
+                    ended_with_transport_error,
+                    "Target09 SSE must abort instead of reaching clean EOF"
+                );
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "after SSE Target09",
+                    )
+                    .await;
+                }
+
+                let request = client
+                    .post(&endpoint)
+                    .json(&json!({"model":"client-test","input":"hello"}))
+                    .build()
+                    .unwrap();
+                let nonstreaming =
+                    timeout(TARGET_ORIGIN_EXCHANGE_TIMEOUT, client.execute(request))
+                        .await
+                        .expect("JSON Target09 termination must not time out");
+                let nonstreaming = nonstreaming.expect_err(
+                    "a Target09 failure must close the nonstreaming client without a payload",
+                );
+                assert!(!nonstreaming.is_timeout(), "{nonstreaming}");
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    disabled_ingress_expected,
+                    "JSON Target09 must not reach the controlled origin"
+                );
+                let diagnostic = fs::read_to_string(&debug_log).unwrap_or_default();
+                assert_target09(&diagnostic[diagnostic_offset..]);
+                diagnostic_offset = diagnostic.len();
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "after JSON Target09",
+                    )
+                    .await;
+                }
+
+                let wire = target_origin_raw_json(addr, "raw JSON Target09").await;
+                assert!(
+                    wire.is_empty(),
+                    "JSON Target09 failure must send zero response bytes: {wire:?}"
+                );
+                let diagnostic = fs::read_to_string(&debug_log).unwrap_or_default();
+                assert_target09(&diagnostic[diagnostic_offset..]);
+                assert!(matches!(
+                    captures.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert_eq!(
+                    ingress.load(std::sync::atomic::Ordering::SeqCst),
+                    disabled_ingress_expected,
+                    "raw JSON Target09 must not reach the controlled origin"
+                );
+                for &listener in &listeners {
+                    assert_target_origin_listener_healthy(
+                        &client,
+                        listener,
+                        "after raw JSON Target09",
+                    )
+                    .await;
+                }
+            },
+            "disabled provider Target09",
+        )
+        .await;
+        TargetOriginPublicPhases { enabled, disabled }
+    })
+    .catch_unwind()
+    .await;
+
+    let upstream_cleanup = std::panic::AssertUnwindSafe(close_target_origin_upstream(
+        success_shutdown,
+        upstream_task,
+        upstream_addr,
+        "target-origin",
+    ))
+    .catch_unwind()
+    .await;
+    drop(env_guard);
+    let ingress_after_upstream = ingress.load(std::sync::atomic::Ordering::SeqCst);
+    let capture_after_upstream_empty = captures.try_recv().is_err();
+    let fixture_path = fixture_home.path.clone();
+    drop(fixture_home);
+    let env_restored = std::env::var_os("V3_P6_TEST_KEY") == original_key
+        && std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") == original_state
+        && std::env::var_os("HOME") == original_home;
+    let home_removed = !fixture_path.exists();
+    eprintln!(
+        "target-origin cleanup: upstream_released={} env_restored={env_restored} home_removed={home_removed} ingress_after_upstream={ingress_after_upstream} capture_empty={capture_after_upstream_empty} execution_failed={}",
+        upstream_cleanup.is_ok(),
+        execution.is_err()
+    );
+    TargetOriginPublicFixtureOutcome {
+        execution,
+        upstream_cleanup,
+        ingress_after_upstream,
+        capture_after_upstream_empty,
+        env_restored,
+        home_removed,
+    }
+}
+
+#[tokio::test]
+async fn target_origin_ingress_counter_observes_requests_before_provider_capture() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (_, mut captures, ingress, shutdown, task, address) = start_target_origin_upstream().await;
+    let malformed = b"{\"model\":";
+    let malformed_wire = target_origin_raw_request(
+        address,
+        format!(
+            "POST /v1/responses HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            malformed.len()
+        ),
+        malformed,
+        "malformed provider JSON proof",
+    )
+    .await;
+    assert!(
+        !malformed_wire.is_empty(),
+        "the rejected JSON must receive an HTTP response"
+    );
+    assert_eq!(
+        ingress.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "ingress must count malformed JSON before the handler parses it"
+    );
+    assert!(matches!(
+        captures.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+
+    let wrong_path_wire = target_origin_raw_request(
+        address,
+        format!(
+            "POST /v1/unmatched HTTP/1.1\r\nHost: {address}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ),
+        b"",
+        "unmatched provider route proof",
+    )
+    .await;
+    assert!(
+        !wrong_path_wire.is_empty(),
+        "the unmatched route must receive an HTTP response"
+    );
+    assert_eq!(
+        ingress.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "ingress must count an unmatched route before route matching"
+    );
+    assert!(matches!(
+        captures.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+    close_target_origin_upstream(shutdown, task, address, "ingress proof").await;
+}
+
+#[tokio::test]
+async fn target_origin_stalled_body_times_out_and_releases_owned_upstream() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from_stream(futures_util::stream::pending::<
+                    Result<Vec<u8>, std::io::Error>,
+                >()))
+                .unwrap()
+        }),
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::new();
+    let request = client
+        .post(format!("http://{address}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .build()
+        .unwrap();
+    let result = std::panic::AssertUnwindSafe(target_origin_http(
+        &client,
+        request,
+        "intentional stalled response body",
+    ))
+    .catch_unwind()
+    .await;
+    drop(client);
+    close_target_origin_upstream(shutdown, task, address, "stalled body proof").await;
+    let panic = result.err().expect("a stalled body must fail the exchange");
+    let message = panic.downcast_ref::<String>().unwrap();
+    assert!(
+        message.contains("intentional stalled response body exchange must not time out"),
+        "{message}"
+    );
+    eprintln!("stalled body counterexample: timeout detected; owned upstream released");
 }
 
 #[tokio::test]
@@ -14073,13 +16269,16 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
     let persist_failures = handle.shutdown().await;
     assert!(
         persist_failures
+            .codex_sample_persist_failures
             .iter()
             .any(|failure| failure.file_name == "request.json"),
         "aggregate shutdown must return the residual request sample failure"
     );
     assert!(persist_failures
+        .codex_sample_persist_failures
         .iter()
         .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    assert!(persist_failures.control_cleanup_failures.is_empty());
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
@@ -16686,4 +18885,277 @@ async fn v3_listener_survives_real_accept_error_child_blackbox() {
     println!("V3_ACCEPT_ERROR_KEEPS_SERVING=ok");
 
     handle.shutdown().await;
+}
+
+/// Regression for sample openai-responses-router-gpt-6-luna-...-2981185-369:
+/// xingchiapi/gpt-6.1-sol returned HTTP 200
+/// "Encrypted function output content could not be decrypted or decoded" because
+/// a Responses Beta `agent_message` content part of type `encrypted_content`
+/// (Fernet host session ciphertext) leaked onto the Responses provider wire.
+/// Real public entry: client request -> responses direct provider projection ->
+/// controlled upstream captures the outgoing body. The ciphertext part must be
+/// stripped before provider wire while the visible `input_text` part survives.
+#[tokio::test]
+async fn responses_direct_agent_message_encrypted_content_never_reaches_provider_wire() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("agent-message-cipher-direct");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "agent-message-cipher-key");
+    let provider_body = serde_json::to_vec(&json!({
+        "id": "resp_am",
+        "object": "response",
+        "status": "completed",
+        "model": "wire-protocol",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "ok"}]
+        }]
+    }))
+    .unwrap();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &provider_base_url,
+        r#""direct""#,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = client
+        .post(&endpoint)
+        .header("accept", "application/json")
+        .json(&json!({
+            "model": "client-test",
+            "stream": false,
+            "input": [
+                {"type": "agent_message", "author": "/root", "recipient": "/worker",
+                 "content": [
+                    {"type": "input_text", "text": "Message Type: NEW_TASK"},
+                    {"type": "encrypted_content", "encrypted_content": "gAAAA_FERNET_HOST_CIPHER"}
+                 ]},
+                {"role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+            ]
+        }))
+        .send()
+        .await
+        .expect("public Responses request must reach provider");
+    assert_eq!(response.status(), StatusCode::OK);
+    let client_response: Value = response.json().await.unwrap();
+    assert_eq!(client_response["status"], "completed", "{client_response}");
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("provider attempt must reach controlled upstream")
+        .expect("controlled upstream must capture request");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider wire input must be an array");
+    let agent = input
+        .iter()
+        .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("agent_message"))
+        .expect("agent_message must be forwarded to the provider wire");
+    let parts = agent["content"]
+        .as_array()
+        .expect("agent_message content array");
+    assert!(
+        parts
+            .iter()
+            .all(|part| part.get("type").and_then(|v| v.as_str()) != Some("encrypted_content")),
+        "Fernet ciphertext part must be stripped before provider wire: {}",
+        capture.body
+    );
+    assert!(
+        parts
+            .iter()
+            .any(|part| part.get("text").and_then(|v| v.as_str()) == Some("Message Type: NEW_TASK")),
+        "visible input_text part must be preserved: {}",
+        capture.body
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// Defense-in-depth for non-single-provider routes: even when the selected
+/// model is in the `gpt-*` family, a multi-provider route must strip
+/// `reasoning.encrypted_content` on the request side without injecting a
+/// synthetic `text` field, while a single-provider `gpt-*` route retains it.
+#[tokio::test]
+async fn responses_direct_multi_provider_gpt_strips_request_reasoning_encrypted_content() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("multi-provider-request-cipher-defense");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "multi-provider-cipher-key");
+    let provider_body = serde_json::to_vec(&json!({
+        "id": "resp_mp",
+        "object": "response",
+        "status": "completed",
+        "model": "gpt-6.1-sol",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "ok"}]
+        }]
+    }))
+    .unwrap();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
+    let port_multi = free_port();
+    let port_single = free_port();
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.multi]
+bind = "127.0.0.1"
+port = {port_multi}
+routing_group = "multi"
+endpoints = ["responses"]
+[servers.multi.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[servers.single]
+bind = "127.0.0.1"
+port = {port_single}
+routing_group = "single"
+endpoints = ["responses"]
+[servers.single.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[providers.primary]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "gpt-6.1-sol"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_PROTOCOL_DECISION_KEY" }}] }}
+[providers.primary.models."gpt-6.1-sol"]
+wire_name = "gpt-6.1-sol"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.secondary]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "gpt-6.1-sol"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_PROTOCOL_DECISION_KEY" }}] }}
+[providers.secondary.models."gpt-6.1-sol"]
+wire_name = "gpt-6.1-sol"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+
+[route_groups.multi.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+    {{ kind = "provider_model", provider = "primary", model = "gpt-6.1-sol", key = "key", priority = 1 }},
+    {{ kind = "provider_model", provider = "secondary", model = "gpt-6.1-sol", key = "key", priority = 2 }},
+]
+
+[route_groups.single.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+    {{ kind = "provider_model", provider = "primary", model = "gpt-6.1-sol", key = "key", priority = 1 }},
+]
+"#
+    );
+    let authored = routecodex_v3_config::parse_v3_config_02_authoring(&source).unwrap();
+    let manifest = routecodex_v3_config::compile_v3_config_05_manifest(authored).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let payload = json!({
+        "model": "gpt-6.1-sol",
+        "stream": false,
+        "input": [
+            {
+                "type": "reasoning",
+                "id": "rs_hist",
+                "summary": [{"type": "summary_text", "text": "visible"}],
+                "encrypted_content": "rsn_foreign_cipher"
+            },
+            {"role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+        ]
+    });
+
+    // 1. Multi-provider gpt route must strip reasoning.encrypted_content on request side.
+    let multi_res = client
+        .post(format!("http://127.0.0.1:{port_multi}/v1/responses"))
+        .header("accept", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .expect("multi-provider request must succeed");
+    assert_eq!(multi_res.status(), StatusCode::OK);
+    let multi_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("multi-provider attempt must reach upstream")
+        .expect("capture");
+    let multi_reasoning = &multi_capture.body["input"][0];
+    assert!(
+        multi_reasoning.get("encrypted_content").is_none(),
+        "multi-provider request must strip reasoning.encrypted_content: {}",
+        multi_capture.body
+    );
+    assert!(
+        multi_reasoning.get("text").is_none(),
+        "OpenAI Responses reasoning must not inject synthetic text field: {}",
+        multi_capture.body
+    );
+    assert_eq!(multi_reasoning["summary"][0]["text"], "visible");
+
+    // 2. Single-provider gpt route must retain reasoning.encrypted_content.
+    let single_res = client
+        .post(format!("http://127.0.0.1:{port_single}/v1/responses"))
+        .header("accept", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .expect("single-provider request must succeed");
+    assert_eq!(single_res.status(), StatusCode::OK);
+    let single_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("single-provider attempt must reach upstream")
+        .expect("capture");
+    assert_eq!(
+        single_capture.body["input"][0]["encrypted_content"], "rsn_foreign_cipher",
+        "single-provider gpt route must retain reasoning.encrypted_content"
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
 }

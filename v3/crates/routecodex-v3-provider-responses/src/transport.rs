@@ -33,6 +33,17 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+pub const V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES: &[&str] = &[
+    "user-agent",
+    "originator",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "x-codex-window-id",
+    "x-codex-parent-thread-id",
+    "x-openai-subagent",
+];
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_tungstenite::{
@@ -75,6 +86,7 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
 const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 900;
 const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
 const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
+const V3_PROVIDER_REDIRECT_LIMIT: usize = 10;
 const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
     "V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw";
 #[derive(Debug)]
@@ -134,6 +146,7 @@ pub struct V3Transport13ResponsesRequest {
     pre_acquired_admission: V3PreAcquiredProviderAdmission,
     auth_carrier: V3ProviderHttpAuthCarrier,
     identity_scope: Option<V3ConcurrencyIdentityScope>,
+    client_identity_headers_forwarded: bool,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
@@ -202,21 +215,25 @@ impl V3Transport13ResponsesRequest {
 
 impl V3Transport13ResponsesRequest {
     pub fn with_client_identity_headers(mut self, headers: &[(String, String)]) -> Self {
+        let mut forwarded = false;
         if let V3Transport13ResponsesRequestKind::Http {
             provider_headers, ..
         } = &mut self.kind
         {
             for (name, value) in headers {
-                if (name.eq_ignore_ascii_case("user-agent")
-                    || name.eq_ignore_ascii_case("originator"))
+                if V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(name))
                     && !provider_headers
                         .iter()
                         .any(|header| header.name().eq_ignore_ascii_case(name))
                 {
                     provider_headers.push(V3ProviderRequestHeader::new(name, value));
+                    forwarded = true;
                 }
             }
         }
+        self.client_identity_headers_forwarded |= forwarded;
         self
     }
 
@@ -427,6 +444,7 @@ pub(crate) fn v3_transport_13_request(
         pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
         auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
         identity_scope: None,
+        client_identity_headers_forwarded: false,
     }
 }
 
@@ -713,6 +731,7 @@ pub trait ResponsesTransport: Send + Sync {
 #[derive(Clone)]
 pub struct ProviderResponsesTransport {
     client: reqwest::Client,
+    same_origin_client: reqwest::Client,
     websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
     handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker,
 }
@@ -734,12 +753,27 @@ impl Default for ProviderResponsesTransport {
 impl ProviderResponsesTransport {
     fn with_http_read_timeout(timeout: Duration) -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .read_timeout(timeout)
-                .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
-                .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
-                .build()
-                .expect("valid V3 provider HTTP client read timeout"),
+            client: build_v3_provider_http_client(timeout, reqwest::redirect::Policy::default()),
+            same_origin_client: build_v3_provider_http_client(
+                timeout,
+                reqwest::redirect::Policy::custom(|attempt| {
+                    if attempt.previous().len() > V3_PROVIDER_REDIRECT_LIMIT {
+                        return attempt.error(std::io::Error::other("too many redirects"));
+                    }
+                    if attempt
+                        .previous()
+                        .first()
+                        .is_some_and(|initial| initial.origin() == attempt.url().origin())
+                    {
+                        attempt.follow()
+                    } else {
+                        attempt.error(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "provider redirect left the selected origin while carrying client identity headers",
+                        ))
+                    }
+                }),
+            ),
             websocket_sessions: Arc::new(Mutex::new(BTreeMap::new())),
             handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker::default(),
         }
@@ -782,6 +816,19 @@ impl ProviderResponsesTransport {
             key,
         )))
     }
+}
+
+fn build_v3_provider_http_client(
+    timeout: Duration,
+    redirect: reqwest::redirect::Policy,
+) -> reqwest::Client {
+    reqwest::Client::builder()
+        .read_timeout(timeout)
+        .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
+        .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
+        .redirect(redirect)
+        .build()
+        .expect("valid V3 provider HTTP client configuration")
 }
 
 #[async_trait]
@@ -872,6 +919,11 @@ impl ResponsesTransport for ProviderResponsesTransport {
         )
         .await?;
         let auth_carrier = request.auth_carrier;
+        let client = if request.client_identity_headers_forwarded {
+            &self.same_origin_client
+        } else {
+            &self.client
+        };
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
@@ -889,6 +941,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 compatibility_profile,
             } => {
                 self.send_http(
+                    client,
                     request_id,
                     provider_id,
                     url,
@@ -1082,6 +1135,7 @@ impl ProviderResponsesTransport {
     #[allow(clippy::too_many_arguments)]
     async fn send_http_headers(
         &self,
+        client: &reqwest::Client,
         request_id: &str,
         provider_id: &str,
         url: reqwest::Url,
@@ -1112,10 +1166,7 @@ impl ProviderResponsesTransport {
             V3ResponsesStreamIntent::Sse => "text/event-stream",
         };
         let anthropic_messages = is_anthropic_messages_url(&url);
-        let mut request = self
-            .client
-            .post(url)
-            .header(reqwest::header::ACCEPT, accept);
+        let mut request = client.post(url).header(reqwest::header::ACCEPT, accept);
         request = match auth_carrier {
             V3ProviderHttpAuthCarrier::ExistingBearer => request.bearer_auth(&secret),
             V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
@@ -1168,6 +1219,7 @@ impl ProviderResponsesTransport {
     #[allow(clippy::too_many_arguments)]
     async fn send_http(
         &self,
+        client: &reqwest::Client,
         request_id: String,
         provider_id: String,
         url: reqwest::Url,
@@ -1185,6 +1237,7 @@ impl ProviderResponsesTransport {
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
         let response = self
             .send_http_headers(
+                client,
                 &request_id,
                 &provider_id,
                 url,

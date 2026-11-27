@@ -29,6 +29,7 @@ pub struct V3RouteActionManifest {
 pub struct V3RoutePoolManifest {
     pub id: String,
     pub selection: V3SelectionPolicy,
+    pub active_keys: Option<crate::V3ActiveKeyPolicy>,
     pub route_object: Option<String>,
     pub match_rule: Option<V3RoutePoolMatchManifest>,
     pub targets: Vec<V3RoutePoolTargetManifest>,

@@ -97,15 +97,41 @@ function removeEdge(document, chainId, stepId) {
 }
 const positiveCases = [
   {
+    name: 'typed macro calls accept an omitted optional trailing comma',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source.replace(/response_processing_code,(\s*\)\s*\.await\?)/gu, 'response_processing_code$1'),
+  },
+  {
     name: 'cleaned Anthropic owner passes through the live shared typed-action relation',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
     mutate: (source) => source.replace(
-      'use super::relay_runtime_shared::{',
-      '// Positive fixture: this owner relies on the shared typed-action consumer.\nuse super::relay_runtime_shared::{',
+      'use super::relay_runtime_shared::provider_response_governance_failure;',
+      '// Positive fixture: this owner relies on the shared typed-action consumer.\nuse super::relay_runtime_shared::provider_response_governance_failure;',
     ),
   },
 ];
 const cases = [
+  {
+    name: 'shared policy drops only its typed response code argument',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+    mutate: (source) => source.replace('        state,\n        response_processing_code,\n        active_source,', '        state,\n        None,\n        active_source,'),
+    diagnostic: /policy call must forward response_processing_code/u,
+  },
+  {
+    name: 'typed macro invocation survives only in a dead expression arm',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    mutate: (source) => source.replace(
+      /if let Some\(failure\) = (active_failure!\((?:(?!active_failure!)[\s\S])*?response_processing_code,\s*\)\s*\.await\?)/u,
+      'if let Some(failure) = if false { $1 } else { Some(failure) }',
+    ),
+    diagnostic: /response-code call .* must directly drive the failure branch/u,
+  },
+  {
+    name: 'Direct inner policy bypasses the owning failure recorder',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+    mutate: (source) => source.replace('match record_v3_direct_provider_failure_record(', 'match bypassed_direct_failure_record('),
+    diagnostic: /v3-provider-action-gate-36:.*does not call record_v3_direct_provider_failure_record/u,
+  },
   {
     name: 'Direct provider action gate revives the removed handoff-budget executor',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
@@ -547,6 +573,24 @@ const cases = [
     diagnostic: /target-resolution source errors must not be swallowed as provider-pool exhaustion/u,
   },
   {
+    name: 'Direct failure ingress bypasses active-key outcome custody',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    mutate: (source) => source.replaceAll(
+      'run_v3_direct_provider_failure_policy_with_active_keys(',
+      'run_v3_direct_provider_failure_policy(',
+    ),
+    diagnostic: /does not call run_v3_direct_provider_failure_policy_with_active_keys/u,
+  },
+  {
+    name: 'Responses Relay failure ingress bypasses active-key outcome custody',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    mutate: (source) => source.replaceAll(
+      'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(',
+      'run_v3_relay_provider_failure_policy_with_response_source(',
+    ),
+    diagnostic: /does not call run_v3_relay_provider_failure_policy_with_response_source_and_active_keys/u,
+  },
+  {
     name: 'Recovery ticket exact-key wait is removed',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replaceAll('wait_for_recovery_ticket', 'wait_for_latest_group_lane'),
@@ -598,21 +642,18 @@ const cases = [
           + '// V3Error05ExecutionAction decoy\n'
           + 'use super::relay_runtime_shared::{',
       )
-      .replaceAll('handle_provider_failure(', 'bypass_provider_failure(')
+      .replaceAll('active_failure!(', 'bypass_provider_failure!(')
       .replaceAll(
-        'handle_provider_failure_with_response_code(',
+        'handle_provider_failure_with_response_code_and_active_keys(',
         'bypass_provider_failure_with_response_code(',
       ),
-    diagnostic: /does not call handle_provider_failure/u,
+    diagnostic: /active_failure macro must delegate|expected eight live active_failure calls/u,
   },
   {
     name: 'Anthropic response-code caller disappears while ordinary caller remains',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    mutate: (source) => source.replaceAll(
-      'handle_provider_failure_with_response_code(',
-      'bypass_provider_failure_with_response_code(',
-    ),
-    diagnostic: /does not call handle_provider_failure_with_response_code/u,
+    mutate: (source) => source.replaceAll('response_processing_code,', ''),
+    diagnostic: /expected two response-code calls/u,
   },
   ...['both', 'first', 'second'].map((site) => ({
     name: `Anthropic ${site} response-code caller loses its final typed code`,
@@ -635,8 +676,8 @@ const cases = [
     name: 'Shared policy output is disconnected behind a dead nested policy call',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
     mutate: (source) => source.replace(
-      'let mut result = match run_v3_relay_provider_failure_policy_with_response_source(',
-      'if false { run_v3_relay_provider_failure_policy_with_response_source(); }\n'
+      'let mut result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(',
+      'if false { crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(); }\n'
         + '    let mut result = match unrelated_policy(',
     ),
     diagnostic: /must bind the top-level policy result/u,
@@ -675,11 +716,11 @@ const cases = [
   {
     name: 'Anthropic shared failure delegation is disconnected',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
-    mutate: (source) => source.replace(
-      '    handle_provider_failure_with_response_code(\n',
+    mutate: (source) => source.replaceAll(
+      '    handle_provider_failure_with_response_code_and_active_keys(\n',
       '    bypass_provider_failure_with_response_code(\n',
     ),
-    diagnostic: /does not call handle_provider_failure_with_response_code/u,
+    diagnostic: /does not call handle_provider_failure_with_response_code_and_active_keys/u,
   },
   {
     name: 'Shared typed action variants survive outside the required match',

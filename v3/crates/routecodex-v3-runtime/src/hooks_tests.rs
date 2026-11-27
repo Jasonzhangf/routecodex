@@ -82,6 +82,12 @@ fn direct_policy_with_models(
 ) -> V3ResponsesDirect11Policy {
     V3ResponsesDirect11Policy {
         target: V3Target10ConcreteProviderSelected {
+            occurrence: routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "default".into(),
+                tier_index: 0,
+                plan_index: 0,
+            },
+            active_selection: None,
             route: V3Router07OpaqueTargetHitOnce {
                 server_id: "direct-model-binding".to_string(),
                 routing_group_id: "direct-model-binding".to_string(),
@@ -94,6 +100,7 @@ fn direct_policy_with_models(
                 request_client_model: Some(client_model.to_string()),
                 request_capabilities: BTreeSet::from(["text".to_string()]),
                 request_input_tokens: 1,
+                estimated_history_turns: None,
                 hit_count: 1,
             },
             candidate: V3TargetCandidate {
@@ -132,6 +139,11 @@ fn direct_policy_with_models(
                 oauth_declaration: None,
                 required_capabilities: Vec::new(),
                 pool_ids: vec!["default".to_string()],
+                occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                    pool_id: "default".into(),
+                    tier_index: 0,
+                    plan_index: 0,
+                }],
                 default_pool_member: true,
                 path: vec!["selected-provider".to_string()],
             },
@@ -141,6 +153,7 @@ fn direct_policy_with_models(
             default_floor_protected: false,
         },
         request_id: "req-direct-model-binding".to_string(),
+        request_purpose: crate::nodes::V3RequestPurpose::Conversation,
         request_body: json!({"model": client_model, "input": "hello"}),
     }
 }

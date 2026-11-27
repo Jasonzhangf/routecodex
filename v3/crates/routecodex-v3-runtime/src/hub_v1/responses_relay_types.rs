@@ -92,6 +92,7 @@ pub struct V3ResponsesProtocolDirectHandoff {
 /// or Direct handoff. Grouped so the call sites stay compact.
 #[derive(Clone, Default)]
 pub struct V3ResponsesRelayRuntimeSeeds {
+    pub request_purpose: Option<crate::nodes::V3RequestPurpose>,
     /// Actual client identity headers for this request. Provider-declared
     /// headers retain precedence when the transport request merges them.
     pub client_identity_headers: Vec<(String, String)>,
@@ -101,6 +102,9 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     pub image_history: Option<crate::V3ImageHistoryView>,
     pub request_local_busy_candidates: BTreeSet<String>,
+    /// Listener-owned selection control. This is separate from Provider health
+    /// and is never serialized with request or response payloads.
+    pub active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -271,6 +275,7 @@ pub struct V3RuntimeObservability {
 #[derive(Debug, Clone, Default)]
 pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
+    direct_explicit_finish_reason: Arc<Mutex<Option<String>>>,
     control: Arc<Mutex<V3RuntimeStreamControlState>>,
     /// Typed attempt-local fact recorded while the complete native provider
     /// stream is processed. It is physically separate from the diagnostic
@@ -380,6 +385,9 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
     pub(crate) selected_observability: &'state V3RuntimeObservability,
     pub(crate) trace: &'state mut Vec<&'static str>,
+    pub(crate) active_keys: Option<&'state routecodex_v3_target::V3ActiveKeySelectionState>,
+    pub(crate) active_episode: Option<&'state mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    pub(crate) active_attempt_dispatched: bool,
 }
 
 impl V3RuntimeStreamObservation {
@@ -549,6 +557,26 @@ impl V3RuntimeStreamObservation {
     }
 
     pub fn record_provider_event_json(&self, event: &Value) -> Result<(), String> {
+        self.record_provider_event_json_with_options(event, false)
+    }
+
+    /// Direct Responses SSE pre-hook variant. It records the same typed facts
+    /// (usage, explicit provider reasons, response status, incomplete details,
+    /// semantic terminal) but keeps the generic `requires_action` ->
+    /// `finish_reason` inference off: only the governed sealed Direct result
+    /// may infer a missing Direct reason.
+    pub(crate) fn record_provider_event_json_without_generic_requires_action(
+        &self,
+        event: &Value,
+    ) -> Result<(), String> {
+        self.record_provider_event_json_with_options(event, true)
+    }
+
+    fn record_provider_event_json_with_options(
+        &self,
+        event: &Value,
+        suppress_generic_requires_action: bool,
+    ) -> Result<(), String> {
         let event_type = event.get("type").and_then(Value::as_str).map(str::trim);
         let semantic = event.get("response").unwrap_or(event);
         let response_status = semantic
@@ -569,10 +597,14 @@ impl V3RuntimeStreamObservation {
         let finish_reason = read_v3_runtime_finish_reason(semantic)
             .or_else(|| read_v3_runtime_finish_reason(event))
             .or_else(|| {
-                infer_v3_runtime_finish_reason_from_provider_event_json(
-                    event_type,
-                    response_status.as_deref(),
-                )
+                if suppress_generic_requires_action {
+                    None
+                } else {
+                    infer_v3_runtime_finish_reason_from_provider_event_json(
+                        event_type,
+                        response_status.as_deref(),
+                    )
+                }
             })
             .or_else(|| infer_v3_runtime_incomplete_finish_reason(event, event_type));
         // chat/gemini 等非 Responses 客户端 wire 没有 `status` 字段：语义
@@ -659,6 +691,36 @@ impl V3RuntimeStreamObservation {
             .lock()
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
         snapshot.finish_reason = Some(finish_reason.to_string());
+        Ok(())
+    }
+
+    /// Direct diagnostic write only. Preserve provider spelling and priority;
+    /// do not mutate semantic-terminal control or generic observer behavior.
+    pub(crate) fn record_direct_responses_finish_reason(
+        &self,
+        explicit: Option<String>,
+        inferred: Option<String>,
+        completion_terminal: bool,
+    ) -> Result<(), String> {
+        let mut prior_explicit = self
+            .direct_explicit_finish_reason
+            .lock()
+            .map_err(|_| "V3 runtime Direct observation state lock is poisoned".to_string())?;
+        if explicit.is_some() {
+            *prior_explicit = explicit;
+        }
+        let reason = prior_explicit.clone().or(inferred);
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        if reason.is_some() {
+            snapshot.finish_reason = reason;
+        } else if completion_terminal {
+            // A generic nonterminal `requires_action` reason must not leak into
+            // a later completed Direct payload that has no Direct result reason.
+            snapshot.finish_reason = None;
+        }
         Ok(())
     }
 

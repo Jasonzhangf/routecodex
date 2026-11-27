@@ -598,13 +598,24 @@ pub(crate) fn emit_v3_request_complete_console_line(
         .ok_or_else(|| {
             "successful V3 Runtime observability is missing response_status".to_string()
         })?;
+    let is_direct =
+        observability.execution_mode == "direct" && context.entry_protocol == "responses";
     let finish_reason = observability
         .finish_reason
         .as_deref()
-        .map(str::trim)
+        .map(|value| {
+            if is_direct {
+                value.to_string()
+            } else {
+                value.trim().to_string()
+            }
+        })
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| infer_v3_console_finish_reason_from_response_status(Some(response_status)))
+        .or_else(|| {
+            (!is_direct)
+                .then(|| infer_v3_console_finish_reason_from_response_status(Some(response_status)))
+                .flatten()
+        })
         .unwrap_or_else(|| "unreported".to_string());
     let human_usage = format_v3_console_human_usage_summary(observability.usage.as_ref());
     let debug_usage = format_v3_console_usage_summary(observability.usage.as_ref());
@@ -850,7 +861,7 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
 ) -> Option<V3DirectSseConsoleFinalizer> {
     let mut observability = frame.observability.clone();
     if let Some(observability) = observability.as_mut() {
-        enrich_v3_direct_observability_from_frame(observability, frame);
+        enrich_v3_direct_observability_from_frame(observability, frame, &context.entry_protocol);
         emit_v3_frame_error_console_line_for_context(context, frame, observability);
     } else {
         let identity = context.identity.clone();
@@ -916,6 +927,7 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
 pub(crate) fn enrich_v3_direct_observability_from_frame(
     observability: &mut V3RuntimeObservability,
     frame: &V3Server16HttpFrame,
+    entry_protocol: &str,
 ) {
     observability.transport = match &frame.body {
         V3Server16Body::Json(_) => "json",
@@ -931,12 +943,23 @@ pub(crate) fn enrich_v3_direct_observability_from_frame(
     if let Some(status) = read_v3_console_response_status(body) {
         observability.response_status = Some(status);
     }
-    if let Some(finish_reason) = read_v3_console_finish_reason(body) {
+    // Direct Responses carries completion in the response status and the actual
+    // output list, not always in a `finish_reason` wire field. The Direct owner
+    // supplies the same classification used for SSE observation so text and
+    // tool completions cannot both collapse to a status guess.
+    let finish_reason = if entry_protocol == "responses" {
+        routecodex_v3_runtime::hub_v1::v3_direct_responses_finish_reason(body)
+    } else {
+        read_v3_console_finish_reason(body).or_else(|| {
+            observability.finish_reason.clone().or_else(|| {
+                infer_v3_console_finish_reason_from_response_status(
+                    observability.response_status.as_deref(),
+                )
+            })
+        })
+    };
+    if let Some(finish_reason) = finish_reason {
         observability.finish_reason = Some(finish_reason);
-    } else if observability.finish_reason.is_none() {
-        observability.finish_reason = infer_v3_console_finish_reason_from_response_status(
-            observability.response_status.as_deref(),
-        );
     }
     if let Some(usage) = extract_v3_console_usage_summary(body) {
         observability.usage = Some(usage);
@@ -1868,6 +1891,9 @@ mod direct_sse_observability_none_tests {
         });
         let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
         Arc::new(V3ListenerState {
+            active_keys: None,
+            active_key_control_revoked: Default::default(),
+            responses_handoff_observer: Default::default(),
             server,
             manifest_version: manifest.version,
             manifest: Arc::clone(&manifest),

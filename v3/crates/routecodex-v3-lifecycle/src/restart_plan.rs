@@ -1,5 +1,67 @@
 use super::*;
 
+pub(super) fn settle_terminal_restart_plan(
+    dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+    nonce: &str,
+) -> Result<(), V3LifecycleError> {
+    let plan = dir.join(RESTART_PLAN_FILE);
+    if !regular_handoff_exists(&plan)? {
+        return Ok(());
+    }
+    let cache_path = dir.join("pid.cache");
+    let control_path = dir.join("control.json");
+    if regular_handoff_exists(&cache_path)? && regular_handoff_exists(&control_path)? {
+        let cache: V3ManagedPidCache = read_json(&cache_path)?;
+        let control = read_json(&control_path)?;
+        if cache.pid == std::process::id()
+            && cache.start_nonce == nonce
+            && reap::managed_control_matches_generation(declaration, &cache, &control)
+        {
+            return remove_verified_generation_plan(dir, &cache, declaration);
+        }
+    }
+    Err(V3LifecycleError::IdentityMismatch(
+        "restart plan cleanup lacks matching managed generation proof".into(),
+    ))
+}
+
+pub(super) fn remove_verified_generation_plan(
+    dir: &Path,
+    cache: &V3ManagedPidCache,
+    declaration: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    if verify_generation_restart_plan(dir, cache, declaration)? {
+        fs::remove_file(dir.join(RESTART_PLAN_FILE))?;
+    }
+    Ok(())
+}
+
+pub(super) fn verify_generation_restart_plan(
+    dir: &Path,
+    owner: &V3ManagedPidCache,
+    target: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    let path = dir.join(RESTART_PLAN_FILE);
+    if !regular_handoff_exists(&path)? {
+        return Ok(false);
+    }
+    let plan: V3ManagedRestartPlanRecord = read_json(&path)?;
+    if plan.schema_version != SCHEMA_VERSION
+        || plan.instance_id != owner.instance_id
+        || plan.start_nonce != owner.start_nonce
+        || plan
+            .target_declaration
+            .as_ref()
+            .is_some_and(|decl| decl != target)
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "restart plan differs from verified managed generation or target".into(),
+        ));
+    }
+    Ok(true)
+}
+
 pub(super) fn control_restart_plan(
     instance_dir: &Path,
     request: &ControlRequest,

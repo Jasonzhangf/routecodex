@@ -231,8 +231,9 @@ fn normalize_v3_hub_req_inbound_02_payload(
             }
         }
         let mut canonical =
-            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_semantic(
                 &responses_semantic,
+                input.entry_protocol,
             )
             .map_err(|error| format!("Anthropic inbound Chat canonicalization failed: {error}"))?;
         if let Some(canonical_object) = canonical.as_object_mut() {

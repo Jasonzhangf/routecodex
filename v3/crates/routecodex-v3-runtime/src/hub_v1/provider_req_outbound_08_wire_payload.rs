@@ -220,6 +220,10 @@ impl V3ProviderReqOutbound08WirePayload {
         self.wire.as_ref()
     }
 
+    pub(crate) fn provider_wire_mut(&mut self) -> Option<&mut V3Provider12ResponsesWirePayload> {
+        self.wire.as_mut()
+    }
+
     pub(crate) fn provider_protocol(&self) -> super::V3HubProviderWireProtocol {
         self.previous.previous.provider_protocol
     }
@@ -298,6 +302,11 @@ mod tests {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["default".to_string()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "default".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: true,
             path: vec!["responses".to_string()],
         }

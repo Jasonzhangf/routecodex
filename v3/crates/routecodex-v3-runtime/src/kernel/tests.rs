@@ -64,6 +64,7 @@ async fn direct_ordinary_429_streak_uses_the_failure_observation_time() {
             same_candidate_retries: &mut BTreeMap::new(),
             trace: &mut Vec::new(),
         },
+        None,
     )
     .await
     .unwrap();
@@ -108,6 +109,8 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         unavailable_candidates: Vec::new(),
         attempts: 1,
         default_floor_protected: false,
+        occurrence: plan.expanded.candidates[0].occurrences[0].clone(),
+        active_selection: None,
     };
     let selected_key = candidate_key(&selected.candidate);
     let sibling_key = candidate_key(&plan.expanded.candidates[1]);
@@ -159,6 +162,7 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
             same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("first-byte timeout policy");
@@ -241,6 +245,8 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         unavailable_candidates: vec![],
         attempts: 1,
         default_floor_protected: false,
+        occurrence: plan.expanded.candidates[0].occurrences[0].clone(),
+        active_selection: None,
     };
     let key = candidate_key(&selected.candidate);
     let before: Vec<_> = plan
@@ -348,6 +354,8 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         unavailable_candidates: vec![],
         attempts: 1,
         default_floor_protected: false,
+        occurrence: plan.expanded.candidates[0].occurrences[0].clone(),
+        active_selection: None,
     };
     let availability = health.session_bound_availability(&scope);
     let before: Vec<_> = plan
@@ -389,6 +397,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
             same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("response processing recovery");

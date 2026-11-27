@@ -95,6 +95,80 @@ async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::Sock
     );
 }
 
+#[test]
+fn exact_custody_failure_returns_before_stalled_sample_retention() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let home = root.path().join("home");
+    let environment = SamplePersistenceTestEnvironment::new(&home);
+    let (stalled, on_time, status, result) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let (declaration, instance, handle) =
+                spawn_sample_persistence_failure_server(root.path(), &home, port).await;
+            let samples = home.join(".rcc/codex-samples");
+            fs::remove_file(
+                samples
+                    .join("openai-responses/ports")
+                    .join(port.to_string()),
+            )
+            .unwrap();
+            let lock = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(samples.join(".retention.lock"))
+                .unwrap();
+            lock.lock().unwrap();
+            sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
+            let stalled = tokio::time::timeout(
+                Duration::from_millis(150),
+                handle.wait_for_codex_sample_persistence(),
+            )
+            .await
+            .is_err();
+            ensure_private_dir(&instance).unwrap();
+            let sidecar = V3HooksSidecarSupervisor::from_startup(
+                instance.clone(),
+                tokio::spawn(async { Ok(None) }),
+            );
+            let failure = fail_managed_runtime_with_hooks_cleanup(
+                &instance,
+                &declaration.instance_id,
+                Some(handle),
+                sidecar,
+                V3LifecycleError::Validation("post-publication failure".into()),
+            );
+            tokio::pin!(failure);
+            let bounded = tokio::time::timeout(Duration::from_secs(4), &mut failure).await;
+            drop(lock);
+            let on_time = bounded.is_ok();
+            let result = match bounded {
+                Ok(result) => result,
+                Err(_) => failure.await,
+            };
+            let status: V3ManagedStatusRecord = read_json(&instance.join("status.json")).unwrap();
+            (stalled, on_time, status, result)
+        });
+    drop(environment);
+    root.close().unwrap();
+    assert!(stalled, "accepted sample did not stall on retention");
+    assert!(on_time, "failure waited behind stalled retention");
+    assert_eq!(status.state, V3ManagedRunState::Failed);
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("post-publication failure"));
+}
+
 #[tokio::test]
 async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_detail() {
     let _guard = TEST_ENV_LOCK.lock_async().await;
@@ -119,7 +193,8 @@ async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_
 
     shutdown_managed_runtime(
         &instance_dir,
-        &declaration.instance_id,
+        &declaration,
+        "fixture-nonce",
         &socket_path,
         handle,
         V3HooksSidecarSupervisor::from_startup(
@@ -184,7 +259,21 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
 
     ensure_private_dir(&instance_dir).unwrap();
     let socket_path = instance_dir.join("managed-control.sock");
-    fs::write(instance_dir.join("pid.cache"), "managed-pid").unwrap();
+    let pid = std::process::id();
+    let nonce = new_start_nonce(&declaration.instance_id);
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            retained_control: None,
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            pid,
+            start_nonce: nonce.clone(),
+            started_at_epoch_ms: epoch_ms(),
+            process_start_token: process_start_token(pid).unwrap(),
+        },
+    )
+    .unwrap();
     fs::write(instance_dir.join("control.json"), "managed-control").unwrap();
     fs::write(&socket_path, "managed-socket").unwrap();
     let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
@@ -195,7 +284,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     let sidecar = V3HooksSidecarProcess::for_test(sidecar_child, 0, process_record_path.clone());
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
-        control_start_nonce: "test-nonce".into(),
+        control_start_nonce: nonce,
         declaration: declaration.clone(),
         executable_path: root.join("missing-replacement"),
         snapshots: true,
@@ -224,7 +313,10 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         "restart must reach native exec despite historical diagnostic failure: {error}"
     );
 
-    assert!(error.to_string().contains("os error"));
+    assert!(
+        error.to_string().contains("No such file or directory"),
+        "{error}"
+    );
     assert!(!instance_dir.join(FRONT_HANDOFF_FILE).exists());
     assert!(!instance_dir.join(PROVIDER_HANDOFF_FILE).exists());
     assert!(process_record_path.exists());
@@ -247,6 +339,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     let failures = handle.shutdown().await;
     assert!(
         failures
+            .codex_sample_persist_failures
             .iter()
             .any(|failure| failure.file_name == "request.json"),
         "historical diagnostic evidence must remain reportable: {failures:?}"

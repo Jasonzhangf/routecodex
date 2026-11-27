@@ -89,13 +89,18 @@ impl Entry {
         );
     }
     async fn cleanup(self) -> Vec<String> {
-        let mut failures = self
-            .handle
-            .shutdown()
-            .await
+        let report = self.handle.shutdown().await;
+        let mut failures = report
+            .codex_sample_persist_failures
             .into_iter()
             .map(|failure| format!("{failure:?}"))
             .collect::<Vec<_>>();
+        failures.extend(
+            report
+                .control_cleanup_failures
+                .iter()
+                .map(ToString::to_string),
+        );
         if self.shutdown.send(()).is_err() {
             failures.push("owned upstream shutdown receiver was already closed".to_string());
         }

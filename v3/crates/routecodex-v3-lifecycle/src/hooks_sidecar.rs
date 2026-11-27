@@ -176,6 +176,18 @@ impl V3HooksSidecarSupervisor {
         Ok(())
     }
 
+    pub(crate) fn retain_interrupted_exec_owner(
+        previous_instance_dir: &Path,
+        instance_dir: &Path,
+    ) -> Result<(), V3LifecycleError> {
+        // A completed retention step already transferred the association. The
+        // hooks startup owner reports any unresolved cleanup through readiness.
+        if instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE).try_exists()? {
+            return Ok(());
+        }
+        Self::retain_exec_owner(previous_instance_dir, instance_dir)
+    }
+
     pub(crate) async fn cleanup_exec_owner(instance_dir: &Path) -> Option<String> {
         let pending = instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE);
         let cleanup_dir = if pending.exists() {

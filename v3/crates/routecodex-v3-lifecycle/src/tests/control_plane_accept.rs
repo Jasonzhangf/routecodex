@@ -109,6 +109,7 @@ async fn transient_control_accept_error_keeps_managed_runtime_serving_child() {
     write_json_atomic(
         &instance_dir.join("pid.cache"),
         &V3ManagedPidCache {
+            retained_control: None,
             schema_version: SCHEMA_VERSION,
             instance_id: instance_id.to_string(),
             pid: std::process::id(),

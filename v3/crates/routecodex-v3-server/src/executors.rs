@@ -281,7 +281,10 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         Err(_) => 0,
     };
     let mut output =
-        routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<V3ChatDirectCodec, _>(
+        routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core_with_active_keys::<
+            V3ChatDirectCodec,
+            _,
+        >(
             (),
             &state.manifest,
             raw,
@@ -291,6 +294,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             true,
             Some(&provider_failure_event_sink),
             Some(&route_selection_event_sink),
+            state.active_keys.clone(),
         )
         .await;
     if let Some(handoff) = output.protocol_relay_handoff {
@@ -635,21 +639,23 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    let mut output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
-        routecodex_v3_runtime::V3AnthropicDirectCodec,
-        _,
-    >(
-        client_headers.clone(),
-        &state.manifest,
-        raw,
-        routecodex_v3_runtime::default_responses_transport(),
-        state.provider_health.runtime_health(),
-        now_epoch_ms,
-        true,
-        Some(&failure_sink),
-        Some(&selection_sink),
-    )
-    .await;
+    let mut output =
+        routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core_with_active_keys::<
+            routecodex_v3_runtime::V3AnthropicDirectCodec,
+            _,
+        >(
+            client_headers.clone(),
+            &state.manifest,
+            raw,
+            routecodex_v3_runtime::default_responses_transport(),
+            state.provider_health.runtime_health(),
+            now_epoch_ms,
+            true,
+            Some(&failure_sink),
+            Some(&selection_sink),
+            state.active_keys.clone(),
+        )
+        .await;
     if let Some(handoff) = output.protocol_relay_handoff {
         let mut relay_output = match routecodex_v3_runtime::execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health_and_handoff(
             &state.manifest,
@@ -863,21 +869,23 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    let mut output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
-        routecodex_v3_runtime::V3GeminiDirectCodec,
-        _,
-    >(
-        (),
-        &state.manifest,
-        raw,
-        routecodex_v3_runtime::default_responses_transport(),
-        state.provider_health.runtime_health(),
-        now_epoch_ms,
-        true,
-        Some(&failure_sink),
-        Some(&selection_sink),
-    )
-    .await;
+    let mut output =
+        routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core_with_active_keys::<
+            routecodex_v3_runtime::V3GeminiDirectCodec,
+            _,
+        >(
+            (),
+            &state.manifest,
+            raw,
+            routecodex_v3_runtime::default_responses_transport(),
+            state.provider_health.runtime_health(),
+            now_epoch_ms,
+            true,
+            Some(&failure_sink),
+            Some(&selection_sink),
+            state.active_keys.clone(),
+        )
+        .await;
     if let Some(handoff) = output.protocol_relay_handoff {
         let mut relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime_with_default_transport_provider_health_and_handoff(
             &state.manifest,

@@ -5,6 +5,7 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
     provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
     now_epoch_ms: u64,
     image_history: Option<crate::V3ImageHistoryView>,
+    active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<
     (V3ResponsesProtocolExecutionPlan, V3RequestExecutionControl),
     V3ResponsesProtocolExecutionPlanFailure,
@@ -18,7 +19,7 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
         })?
         .with_image_history(image_history);
     let plan = plan_v3_responses_protocol_execution_with_captured_target(
-        manifest, raw, provider_health, now_epoch_ms, &mut None, control.image_history.as_ref(),
+        manifest, raw, provider_health, now_epoch_ms, &mut None, control.image_history.as_ref(), active_keys,
     )?;
     Ok((plan, control))
 }
@@ -36,6 +37,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         now_epoch_ms,
         &mut None,
         None,
+        None,
     )
 }
 
@@ -46,6 +48,7 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     now_epoch_ms: u64,
     captured_target: &mut Option<crate::operation_runner::V3ResolveTargetSideOutput>,
     image_history: Option<&crate::V3ImageHistoryView>,
+    active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     let standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
@@ -160,7 +163,7 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
         );
     let provider_health = provider_health.into();
     let preplan =
-        match crate::operation_runner::plan_execution::run_v3_plan_execution_preplan_operator(
+        match crate::operation_runner::plan_execution::run_v3_plan_execution_preplan_operator_with_active_keys(
             resolved_request,
             manifest.clone(),
             crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(
@@ -168,13 +171,13 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
             ),
             standardized.failure_session_scope.clone(),
             provider_health,
+            active_keys,
             BTreeSet::new(),
             now_epoch_ms,
             deterministic_sample,
-            crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
-                entry_protocol: crate::hub_v1::V3HubEntryProtocol::Responses,
-                allowed_modes: allowed_modes.clone(),
-            },
+            crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::responses_entry(
+                allowed_modes.clone(), standardized.request_purpose,
+            ),
         ) {
             Ok(preplan) => preplan,
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted {
@@ -208,7 +211,9 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     trace.push("V3Target09CandidateSetExpanded");
     trace.push("V3Target10ConcreteProviderSelected");
     trace.push("V3Execution11ProtocolDecision");
-    let protocol_candidate_keys = match protocol_candidate_keys_for_decision_mode(
+    let protocol_candidate_keys = if standardized.request_purpose == crate::nodes::V3RequestPurpose::NativeCompaction {
+        preplan.expanded.candidates.iter().map(candidate_key).collect()
+    } else { match protocol_candidate_keys_for_decision_mode(
         &preplan.expanded,
         "responses",
         &allowed_modes,
@@ -216,7 +221,7 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
     ) {
         Ok(keys) => keys,
         Err(source) => return Err(protocol_plan_source_failure(source, trace)),
-    };
+    }};
     Ok(V3ResponsesProtocolExecutionPlan {
         decision: preplan.protocol_decision,
         node_trace: trace,
@@ -238,12 +243,14 @@ pub(crate) fn protocol_candidate_keys_for_decision_mode(
     let mut candidate_keys = BTreeSet::new();
     for candidate in &expanded.candidates {
         let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+            occurrence: candidate.occurrences.first().expect("expanded occurrence").clone(),
             route: expanded.route.clone(),
             candidate: candidate.clone(),
             candidate_count: expanded.candidates.len(),
             unavailable_candidates: Vec::new(),
             attempts: 1,
             default_floor_protected: false,
+            active_selection: None,
         };
         match build_v3_execution_11_protocol_decision_from_v3_target_10(
             selected,
