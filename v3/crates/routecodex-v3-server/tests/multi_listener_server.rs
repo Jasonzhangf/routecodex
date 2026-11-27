@@ -6761,24 +6761,7 @@ fn reasoning_lookup_tool_declaration() -> Value {
     })
 }
 
-fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
-    let messages = body["messages"]
-        .as_array()
-        .ok_or_else(|| format!("missing provider messages: {body}"))?;
-    let opening_message = messages
-        .first()
-        .ok_or_else(|| format!("missing opening user message: {body}"))?;
-    if opening_message["role"] != "user"
-        || opening_message["content"]
-            .as_array()
-            .and_then(|content| content.first())
-            .and_then(|block| block["text"].as_str())
-            != Some(REASONING_LOOKUP_CONTROL)
-    {
-        return Err(format!(
-            "missing opening reasoning lookup control text: {body}"
-        ));
-    }
+fn validate_reasoning_lookup_tool_declaration(body: &Value) -> Result<(), String> {
     let tools = body["tools"]
         .as_array()
         .ok_or_else(|| format!("missing provider tool declarations: {body}"))?;
@@ -6797,8 +6780,31 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     if tool_declaration != &expected_tool {
         return Err(format!("reasoning lookup tool declaration changed: {body}"));
     }
+    Ok(())
+}
+
+fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
+    let messages = body["messages"]
+        .as_array()
+        .ok_or_else(|| format!("missing provider messages: {body}"))?;
+    let opening_message = messages
+        .first()
+        .ok_or_else(|| format!("missing opening user message: {body}"))?;
+    if opening_message["role"] != "user"
+        || opening_message["content"]
+            .as_array()
+            .and_then(|content| content.first())
+            .and_then(|block| block["text"].as_str())
+            != Some(REASONING_LOOKUP_CONTROL)
+    {
+        return Err(format!(
+            "missing opening reasoning lookup control text: {body}"
+        ));
+    }
+    validate_reasoning_lookup_tool_declaration(body)?;
     let mut tool_use_at = None;
     let mut tool_result_at = None;
+    let mut thinking_blocks = Vec::new();
     for (message_index, message) in messages.iter().enumerate() {
         let role = message["role"].as_str().unwrap_or_default();
         for (block_index, block) in message["content"]
@@ -6809,7 +6815,7 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
         {
             match block["type"].as_str() {
                 Some("tool_use") if tool_use_at.is_none() => {
-                    tool_use_at = Some((message_index, role, block));
+                    tool_use_at = Some((message_index, block_index, role, block));
                 }
                 Some("tool_use") => {
                     return Err(format!("unexpected duplicate tool_use: {body}"));
@@ -6820,11 +6826,12 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
                 Some("tool_result") => {
                     return Err(format!("unexpected duplicate tool_result: {body}"));
                 }
+                Some("thinking") => thinking_blocks.push((message_index, block_index, block)),
                 _ => {}
             }
         }
     }
-    let (tool_use_message, tool_use_role, tool_use) =
+    let (tool_use_message, tool_use_block, tool_use_role, tool_use) =
         tool_use_at.ok_or_else(|| format!("missing paired tool_use: {body}"))?;
     if tool_use_role != "assistant" {
         return Err(format!("tool_use must be in an assistant message: {body}"));
@@ -6834,6 +6841,16 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
         || tool_use["input"] != json!({"query":"p0 reasoning","limit":3})
     {
         return Err(format!("tool_use identity or input changed: {body}"));
+    }
+    if thinking_blocks
+        .iter()
+        .any(|(message_index, block_index, _)| {
+            *message_index != tool_use_message || *block_index >= tool_use_block
+        })
+    {
+        return Err(format!(
+            "thinking must precede tool_use in the same assistant message: {body}"
+        ));
     }
 
     let (tool_result_message, tool_result_block, tool_result_role, tool_result) =
@@ -6928,9 +6945,11 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
     let first = client
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
-        .json(&json!({"stream":true,"messages":[
-            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
-        ]}))
+        .json(
+            &json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+                {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+            ]}),
+        )
         .send()
         .await
         .unwrap();
@@ -6977,6 +6996,59 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
         .await
         .unwrap();
     assert_eq!(missing_declaration.status(), StatusCode::BAD_REQUEST);
+
+    let misplaced_thinking = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":REASONING_LOOKUP_CALL_ID,
+                "name":REASONING_LOOKUP_TOOL,
+                "input":{"query":"p0 reasoning","limit":3}
+            }]},
+            {"role":"user","content":[
+                {"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"},
+                {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}}
+            ]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(misplaced_thinking.status(), StatusCode::BAD_REQUEST);
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_declaration() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[{
+            "name":REASONING_LOOKUP_TOOL,
+            "input_schema":{
+                "type":"object",
+                "properties":{
+                    "query":{"type":"string"},
+                    "limit":{"type":"string"}
+                },
+                "required":["query"]
+            }
+        }],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     shutdown.send(()).unwrap();
 }
 
@@ -7063,6 +7135,12 @@ async fn controlled_anthropic_reasoning_upstream(
     let null_empty_ciphertext_reasoning = control(REASONING_LOOKUP_CONTROL);
     let bytes = if state.strict_reasoning_lookup_followup {
         if request_index == 0 {
+            if let Err(error) = validate_reasoning_lookup_tool_declaration(&body) {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(error))
+                    .unwrap();
+            }
             anthropic_sse_reasoning_tool_call_fixture()
         } else {
             if let Err(error) = validate_reasoning_lookup_followup(&body) {
