@@ -508,6 +508,12 @@ pub(crate) fn observe_v3_target_successors(
     keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
     now_ms: u64,
 ) -> Vec<routecodex_v3_target::V3TargetOccurrenceEligibility> {
+    let mut expanded = expanded.clone();
+    if expanded.route.estimated_history_turns.is_some() {
+        expanded.candidates.retain(|candidate| {
+            !health.provider_blocked_until_compact(scope, &candidate.provider_id)
+        });
+    }
     let excluded = expanded
         .candidates
         .iter()
@@ -526,7 +532,7 @@ pub(crate) fn observe_v3_target_successors(
         excluded: failed,
     };
     V3TargetInterpreter::default().observe_eligible_occurrences(
-        expanded,
+        &expanded,
         &reader,
         now_ms,
         &excluded,
@@ -553,7 +559,11 @@ pub(crate) fn selection_invalidation(
         candidate.active_key_identity() == selected.candidate.active_key_identity()
             && candidate.occurrences.contains(&selected.occurrence)
     });
-    if !captured || !V3TargetInterpreter::candidate_admitted(&selected.candidate, now_ms) {
+    if !captured
+        || !V3TargetInterpreter::candidate_admitted(&selected.candidate, now_ms)
+        || (expanded.route.estimated_history_turns.is_some()
+            && health.provider_blocked_until_compact(session, &selected.candidate.provider_id))
+    {
         return Some(V3SelectionInvalidation::OccurrenceChanged);
     }
     if expanded
@@ -585,7 +595,7 @@ pub(crate) fn prepare_selected_dispatch(
     selected: &V3Target10ConcreteProviderSelected,
     expanded: Option<&V3Target09CandidateSetExpanded>,
     keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
-    episode: Option<&mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    mut episode: Option<&mut routecodex_v3_target::V3ActiveKeyEpisode>,
     control: &crate::execution_control::V3RequestExecutionControl,
     health: &V3ProviderFailureRuntimeHealth,
     session: &V3ProviderFailureSessionScope,
@@ -613,6 +623,23 @@ pub(crate) fn prepare_selected_dispatch(
         &candidate.model_id,
         now_ms,
     )? {
+        exclusions.insert(v3_relay_provider_candidate_key(candidate));
+        return Ok(false);
+    }
+    if selected.route.estimated_history_turns.is_some()
+        && health.provider_blocked_until_compact(session, &candidate.provider_id)
+    {
+        control
+            .cancel_business_recovery_trial(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                &candidate.auth_alias,
+                &candidate.model_id,
+            )
+            .map_err(|error| error.to_string())?;
+        if let Some(episode) = episode.as_deref_mut() {
+            episode.cancel();
+        }
         exclusions.insert(v3_relay_provider_candidate_key(candidate));
         return Ok(false);
     }
@@ -684,7 +711,7 @@ pub(crate) fn active_key_durability_diagnostic(
 
 pub(crate) fn select_v3_target_with_session_then_global(
     target: &V3TargetInterpreter,
-    expanded: V3Target09CandidateSetExpanded,
+    mut expanded: V3Target09CandidateSetExpanded,
     failure_session_scope: &V3ProviderFailureSessionScope,
     session_availability: &dyn V3ProviderAvailabilityReader,
     global_availability: &V3ProviderFailureRuntimeHealth,
@@ -693,6 +720,12 @@ pub(crate) fn select_v3_target_with_session_then_global(
     deterministic_sample: u64,
     active: Option<&V3ActiveKeySelectionContext<'_>>,
 ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    if expanded.route.estimated_history_turns.is_some() {
+        expanded.candidates.retain(|candidate| {
+            !global_availability
+                .provider_blocked_until_compact(failure_session_scope, &candidate.provider_id)
+        });
+    }
     let reader = V3SessionGlobalSchedulingReader {
         session: session_availability,
         global: global_availability,
@@ -877,6 +910,84 @@ pub struct V3ProviderFailureRuntimeHealth {
     probe_owner: std::sync::Arc<std::sync::Mutex<Option<V3ManagedProbeSender>>>,
     precool: std::sync::Arc<std::sync::Mutex<BTreeMap<V3PrecoolIdentity, V3DeferredHealthAction>>>,
     observation_clock: Option<Arc<dyn V3ProviderHealthObservationClock>>,
+    turn_limits: Arc<std::sync::Mutex<V3ConversationTurnLimits>>,
+}
+
+type V3TurnLimitScope = (String, String, String);
+
+#[derive(Debug, Default)]
+struct V3ConversationTurnLimits {
+    generation: u64,
+    blocked: BTreeMap<V3TurnLimitScope, BTreeMap<String, u64>>,
+}
+
+impl V3ConversationTurnLimits {
+    fn scope_key(scope: &V3ProviderFailureSessionScope) -> V3TurnLimitScope {
+        (
+            scope.server_id().to_owned(),
+            scope.routing_group().to_owned(),
+            scope.session_id().to_owned(),
+        )
+    }
+}
+
+impl V3ProviderFailureRuntimeHealth {
+    pub(crate) fn provider_blocked_until_compact(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+    ) -> bool {
+        scope.is_client_session()
+            && self
+                .turn_limits
+                .lock()
+                .unwrap()
+                .blocked
+                .get(&V3ConversationTurnLimits::scope_key(scope))
+                .is_some_and(|providers| providers.contains_key(provider_id))
+    }
+
+    pub(crate) fn record_session_turn_limit(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+    ) {
+        if scope.is_client_session() {
+            let mut limits = self.turn_limits.lock().unwrap();
+            limits.generation += 1;
+            let generation = limits.generation;
+            limits
+                .blocked
+                .entry(V3ConversationTurnLimits::scope_key(scope))
+                .or_default()
+                .insert(provider_id.to_owned(), generation);
+        }
+    }
+
+    pub(crate) fn compaction_turn_limit_generation(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+    ) -> Option<u64> {
+        scope
+            .is_client_session()
+            .then(|| self.turn_limits.lock().unwrap().generation)
+    }
+
+    pub(crate) fn clear_turn_limits_after_compaction(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        through_generation: u64,
+        _receipt: &crate::nodes::V3AttemptSuccessReceipt,
+    ) {
+        let mut limits = self.turn_limits.lock().unwrap();
+        let key = V3ConversationTurnLimits::scope_key(scope);
+        if let Some(providers) = limits.blocked.get_mut(&key) {
+            providers.retain(|_, generation| *generation > through_generation);
+            if providers.is_empty() {
+                limits.blocked.remove(&key);
+            }
+        }
+    }
 }
 
 /// Observation time belongs to the health owner. Request residence and actual
@@ -1027,6 +1138,7 @@ impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
             probe_owner: Default::default(),
             precool: Default::default(),
             observation_clock: None,
+            turn_limits: Default::default(),
             action_gate: V3ProviderActionGate::default(),
             default_same_provider_retries: 0,
         }
@@ -1249,6 +1361,28 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
     // remains `HTTP_{status}`. Active episodes also retain the actual Provider
     // error category so Error can distinguish quota/auth from ordinary429.
     let is_real_http_failure = provider_status == Some(status);
+    let ordinary_request = selected.route.estimated_history_turns.is_some();
+    let session_turn_limit_rejected = ordinary_request
+        && is_real_http_failure
+        && state.last_external_http.as_ref().is_some_and(
+            routecodex_v3_error::V3ExternalHttpWitness::is_session_turn_limit_rejection,
+        );
+    if session_turn_limit_rejected {
+        context.provider_health.record_session_turn_limit(
+            &context.failure_session_scope,
+            &selected.candidate.provider_id,
+        );
+        if let Some(control) = context.recovery_control {
+            control
+                .cancel_business_recovery_trial(
+                    &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
+                    &selected.candidate.auth_alias,
+                    &selected.candidate.model_id,
+                )
+                .map_err(|error| v3_relay_provider_policy_ordinary_error(error.to_string()))?;
+        }
+    }
     let external_error_type = if is_real_http_failure {
         if active_keys.is_some() && selected.active_selection.is_some() {
             error_type
@@ -1324,11 +1458,26 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
-    let is_request_local_compat_failure = is_response_processing_failure
+    let is_request_local_compat_failure = session_turn_limit_rejected
+        || is_response_processing_failure
         || (!(is_real_http_failure && status == 403)
             && is_health_neutral_request_compat_failure(source_stage, error_type.as_deref()));
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
+    if session_turn_limit_rejected {
+        if let Some(expanded) = context.captured_target_09 {
+            excluded_with_failed.extend(
+                expanded
+                    .candidates
+                    .iter()
+                    .filter(|candidate| candidate.provider_id == selected.candidate.provider_id)
+                    .map(v3_relay_provider_candidate_key),
+            );
+        }
+        state
+            .failed_candidates
+            .extend(excluded_with_failed.iter().cloned());
+    }
     let resolution = reselect_from_captured_target_plan(
         context,
         &selected,
@@ -1344,7 +1493,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
                 V3RelayProviderTargetResolution::Selected(_)
             )
     );
-    let trial_failed = match context.recovery_control {
+    let trial_failed = match context
+        .recovery_control
+        .filter(|_| !session_turn_limit_rejected)
+    {
         Some(control)
             if !matches!(
                 attempt_source.source_kind,
@@ -1369,6 +1521,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
     };
     if has_alternative
         && !trial_failed
+        && !session_turn_limit_rejected
         && is_request_local_compat_failure
         && is_real_http_failure
         && matches!(status, 400..=402 | 404..=599)
@@ -1392,7 +1545,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),
-            state: if is_response_processing_failure {
+            state: if session_turn_limit_rejected {
+                "session_turn_limit_exceeded"
+            } else if is_response_processing_failure {
                 "request_local_response_processing"
             } else if is_request_local_compat_failure {
                 "request_local_provider_compat"
@@ -1949,6 +2104,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
         body,
         deterministic_sample,
         false,
+        false,
     )
 }
 
@@ -1960,6 +2116,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
     body: &Value,
     deterministic_sample: u64,
     has_unprojected_history_images: bool,
+    is_compaction: bool,
 ) -> Result<
     V3Router07OpaqueTargetHitOnce,
     Result<
@@ -1967,10 +2124,12 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
     >,
 > {
-    let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
+    let facts = crate::nodes::build_v3_router_request_facts_for_resolve_target(
         body,
         entry_kind,
+        endpoint_path,
         crate::configured_v3_longcontext_threshold_tokens(manifest, server_id),
+        is_compaction,
         manifest,
     );
     let router = V3VirtualRouter::process_shared();

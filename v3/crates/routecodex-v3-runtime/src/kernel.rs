@@ -212,6 +212,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let direct_failure_session_scope = standardized.failure_session_scope.clone();
     let provider_health =
         provider_health.unwrap_or_else(|| V3ProviderFailureRuntimeHealth::from_manifest(manifest));
+    let request_is_compaction = standardized.request_purpose.is_compaction()
+        || standardized
+            .endpoint
+            .trim_end_matches('/')
+            .ends_with("/responses/compact");
+    let compaction_turn_limit_generation = if request_is_compaction {
+        request_execution_control.retain_compaction_generation(
+            provider_health.compaction_turn_limit_generation(&direct_failure_session_scope),
+        )
+    } else {
+        None
+    };
     let availability = provider_health.session_bound_availability(&direct_failure_session_scope);
     let mut pinned_selected = None;
     let initial_selected_target_present = initial_selected_target.is_some();
@@ -238,11 +250,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             ),
         )
     } else if pinned_selected.is_none() && !initial_selected_target_present {
-        let request_is_compaction = standardized.request_purpose.is_compaction()
-            || standardized
-                .endpoint
-                .trim_end_matches('/')
-                .ends_with("/responses/compact");
         let resolved = crate::operation_runner::run_v3_resolve_target_operator_with_history_images(
             standardized.body.clone(),
             crate::operation_runner::V3ResolveTargetExecutionMode::DirectFresh {
@@ -389,10 +396,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     0,
                     allow_exhaustion_rescue_probe,
                     preferred.map(|s| crate::operation_runner::plan_execution::V3PreferredSelection::pending(s, active_episode.as_ref())),
-                    crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
-                        entry_protocol: V3HubEntryProtocol::Responses,
-                        allowed_modes: allowed_modes.clone(),
-                    },
+                    crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::responses_entry(
+                        allowed_modes.clone(), standardized.request_purpose,
+                    ),
                 ))
                 .await
                 {
@@ -463,6 +469,37 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                 }
             } else if let Some(selected) = preferred {
+                if !request_is_compaction
+                    && provider_health.provider_blocked_until_compact(
+                        &direct_failure_session_scope,
+                        &selected.candidate.provider_id,
+                    )
+                {
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        runtime_source(
+                            "V3Target09CandidateSetExpanded",
+                            "pinned provider is blocked until compaction",
+                        ),
+                        None,
+                        trace,
+                        &hook_registry,
+                    );
+                }
+                if !routecodex_v3_target::V3TargetInterpreter::candidate_within_turn_limit(
+                    manifest,
+                    &selected.route,
+                    &selected.candidate,
+                ) {
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        runtime_source(
+                            "V3Target09CandidateSetExpanded",
+                            "pinned provider model reached its estimated turn limit",
+                        ),
+                        last_external_http.clone(),
+                        trace,
+                        &hook_registry,
+                    );
+                }
                 match v3_direct_admit_pinned_target(selected) {
                     Ok(selected) => (selected, None),
                     Err(output) => return output,
@@ -693,6 +730,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             });
 
+        if !request_is_compaction
+            && provider_health.provider_blocked_until_compact(
+                &direct_failure_session_scope,
+                &policy.target.candidate.provider_id,
+            )
+        {
+            failed_candidates.insert(candidate_key(&policy.target.candidate));
+            continue;
+        }
         match crate::provider_failure_runtime_policy::prepare_selected_dispatch(
             &policy.target,
             expanded.as_ref(),
@@ -1589,6 +1635,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
         };
+        if let Some(generation) = compaction_turn_limit_generation.filter(|_| {
+            !provider_health_neutral
+                && direct_compaction_completed(&client_payload.body, standardized.request_purpose)
+        }) {
+            provider_health.clear_turn_limits_after_compaction(
+                &direct_failure_session_scope,
+                generation,
+                &attempt_success_receipt,
+            );
+        }
         let mut observability = build_v3_direct_runtime_observability(
             &policy.target,
             "responses",

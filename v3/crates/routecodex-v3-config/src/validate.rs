@@ -968,6 +968,7 @@ fn compile_models(
                 max_tokens: model.max_tokens,
                 max_context_tokens: model.max_context_tokens.or(Some(200_000)),
                 context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
+                exclude_at_estimated_turns: model.exclude_at_estimated_turns,
                 features: model.features,
                 availability: model.availability,
             },

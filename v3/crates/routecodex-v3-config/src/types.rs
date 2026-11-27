@@ -635,6 +635,9 @@ pub struct V3ProviderModelAuthoringConfig {
     pub max_context_tokens: Option<u64>,
     #[serde(default = "default_context_token_estimate_scale_bps")]
     pub context_token_estimate_scale_bps: u64,
+    /// Exclude this model when the observable history estimate reaches this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_at_estimated_turns: Option<std::num::NonZeroU64>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
     #[serde(default)]
@@ -1298,6 +1301,7 @@ pub struct V3ProviderModelManifest {
     pub max_tokens: Option<u64>,
     pub max_context_tokens: Option<u64>,
     pub context_token_estimate_scale_bps: u64,
+    pub exclude_at_estimated_turns: Option<std::num::NonZeroU64>,
     pub features: BTreeMap<String, bool>,
     pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }

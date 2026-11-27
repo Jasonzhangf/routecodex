@@ -115,6 +115,7 @@ impl V3ProviderFailureRuntimeHealth {
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
             precool: Default::default(),
+            turn_limits: Default::default(),
             observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
@@ -130,6 +131,7 @@ impl V3ProviderFailureRuntimeHealth {
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
             precool: Default::default(),
+            turn_limits: Default::default(),
             observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
@@ -154,6 +156,7 @@ impl V3ProviderFailureRuntimeHealth {
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
             precool: Default::default(),
+            turn_limits: Default::default(),
             observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
@@ -175,6 +178,7 @@ impl V3ProviderFailureRuntimeHealth {
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
             precool: Default::default(),
+            turn_limits: Default::default(),
             observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,

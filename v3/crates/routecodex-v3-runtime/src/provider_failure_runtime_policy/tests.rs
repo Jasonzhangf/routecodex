@@ -10,6 +10,37 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
 
+#[test]
+fn late_compact_preserves_newer_conversation_turn_limit_rejections() {
+    let manifest =
+        global_pool_alive_manifest_with_rescue_timeout("conversation-turn-limit", Some(5_000));
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let control = crate::execution_control::V3RequestExecutionControl::from_manifest(
+        &manifest,
+        "conversation-turn-limit",
+    )
+    .unwrap();
+    let scope = V3ProviderFailureSessionScope::new("listener", "default", "conversation").unwrap();
+    let other = V3ProviderFailureSessionScope::new("listener", "default", "another").unwrap();
+    let receipt = crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
+    health.record_session_turn_limit(&scope, "old");
+    health.record_session_turn_limit(&scope, "new");
+    health.record_session_turn_limit(&other, "old");
+    let generation = control
+        .retain_compaction_generation(health.compaction_turn_limit_generation(&scope))
+        .unwrap();
+    health.record_session_turn_limit(&scope, "new");
+    let handoff_generation = control
+        .clone()
+        .retain_compaction_generation(health.compaction_turn_limit_generation(&scope))
+        .unwrap();
+    assert_eq!(handoff_generation, generation);
+    health.clear_turn_limits_after_compaction(&scope, handoff_generation, &receipt);
+    assert!(!health.provider_blocked_until_compact(&scope, "old"));
+    assert!(health.provider_blocked_until_compact(&scope, "new"));
+    assert!(health.provider_blocked_until_compact(&other, "old"));
+}
+
 // Test the post-observation policy separately from the public hold tests.
 // Await the real declared action gate, then finish a qualified physical
 // observation. No sleep, forced due time or synthetic cooldown is used.

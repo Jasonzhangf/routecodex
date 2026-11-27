@@ -1727,6 +1727,13 @@ features:
   active_key_recovery_dispatch_guard:
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch -- --exact
     failure_mode: A concurrent hold during recovery acquisition must reject the stale unsent selection and release only its matching trial without changing cadence or counting a dispatch.
+  estimated_turn_filter_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server estimated_turn_filter
+    test_ids: [responses_estimated_turn_filter_applies_per_request, estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_role]
+  session_turn_limit_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server turn_limit
+    test_ids: [responses_session_turn_limit_skips_every_key_until_compact, responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider, responses_active_key_turn_limit_preserves_failure_and_compact_boundaries]
+    active_composition: Direct and Responses Relay exact-400 failures charge one actual active dispatch; same-key retries, sibling and inactive aliases remain excluded. A trial-owned rejecting Provider releases matching custody without changing cooldown or cadence, and a trial-ready successor actually dispatches and recovers. Repeated filtered requests preserve the fourth-failure threshold. Native compact resets its active streak and clears only conversation restrictions while another held member stays held. Manual release leaves conversation restrictions intact. Estimated-turn filtering preserves original active-key eligibility without delivery failures.
   admission_nonblocking_blackbox:
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e37891a_admission_nonblocking -- --nocapture --test-threads=1
     test_ids:

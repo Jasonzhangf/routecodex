@@ -439,6 +439,7 @@ fn compile_v2_provider_models(
                         .or(model.context_window)
                         .or(model.max_context),
                     context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
+                    exclude_at_estimated_turns: model.exclude_at_estimated_turns,
                     features: model.features,
                     availability: model.availability,
                 },
@@ -591,6 +592,12 @@ pub struct V2ProviderModelConfig {
     pub context_window: Option<u64>,
     #[serde(default = "default_context_token_estimate_scale_bps")]
     pub context_token_estimate_scale_bps: u64,
+    #[serde(
+        default,
+        alias = "exclude_at_estimated_turns",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub exclude_at_estimated_turns: Option<std::num::NonZeroU64>,
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。

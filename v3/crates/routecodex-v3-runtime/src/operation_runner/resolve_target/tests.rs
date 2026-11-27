@@ -57,6 +57,8 @@ fn relay_mode(
         entry_kind: "responses".to_string(),
         endpoint_path: "/v1/responses".to_string(),
         requested_model: None,
+        source_estimated_turns: None,
+        is_compaction: false,
         deterministic_sample: 0,
     }
 }
@@ -223,6 +225,8 @@ fn relay_without_model_uses_endpoint_model_only_for_routing() {
         entry_kind: "responses".to_string(),
         endpoint_path: "/v1/responses".to_string(),
         requested_model: Some("primary.gpt-test".to_string()),
+        source_estimated_turns: None,
+        is_compaction: false,
         deterministic_sample: 0,
     };
 
@@ -259,6 +263,8 @@ fn relay_error_keeps_the_existing_typed_resolver_error() {
             entry_kind: "responses".to_string(),
             endpoint_path: "/v1/responses".to_string(),
             requested_model: None,
+            source_estimated_turns: None,
+            is_compaction: false,
             deterministic_sample: 0,
         },
     ) else {

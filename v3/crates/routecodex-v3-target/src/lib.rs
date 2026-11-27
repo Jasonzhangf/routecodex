@@ -160,6 +160,8 @@ pub enum V3TargetError {
     },
     #[error("selected target has no concrete candidates")]
     CandidateSetEmpty,
+    #[error("all concrete candidates exceeded or reached their configured estimated turn limit")]
+    EstimatedTurnLimitReached,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -667,6 +669,12 @@ impl V3TargetInterpreter {
                 (pool_id, priorities)
             })
             .collect();
+        candidates.retain(|candidate| {
+            Self::candidate_within_turn_limit(manifest, &classified.route, candidate)
+        });
+        if candidates.is_empty() {
+            return Err(V3TargetError::EstimatedTurnLimitReached);
+        }
         let sticky_pool_members = Self::sticky_pool_members(manifest, group, &classified.route);
         Ok(V3Target09CandidateSetExpanded {
             route: classified.route,
@@ -736,6 +744,22 @@ impl V3TargetInterpreter {
             strategy: pool.selection.strategy.clone(),
             universe,
         })
+    }
+
+    pub fn candidate_within_turn_limit(
+        manifest: &V3Config05ManifestPublished,
+        route: &V3Router07OpaqueTargetHitOnce,
+        candidate: &V3TargetCandidate,
+    ) -> bool {
+        let Some(estimate) = route.estimated_history_turns else {
+            return true;
+        };
+        manifest
+            .providers
+            .get(&candidate.provider_id)
+            .and_then(|provider| provider.models.get(&candidate.model_id))
+            .and_then(|model| model.exclude_at_estimated_turns)
+            .is_none_or(|threshold| estimate < threshold.get())
     }
 
     /// Expands the configured members of every sticky pool in the target plan

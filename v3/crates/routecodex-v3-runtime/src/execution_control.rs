@@ -121,6 +121,7 @@ pub struct V3RequestExecutionControl {
     attempt_budget: V3AttemptBudget,
     refill_excluded_candidates: Arc<Mutex<BTreeSet<String>>>,
     business_recovery_trial: Arc<Mutex<Option<V3BusinessRecoveryTrialGuard>>>,
+    compaction_generation: Arc<std::sync::OnceLock<u64>>,
     pub(crate) image_history: Option<crate::image_history::V3ImageHistoryView>,
 }
 
@@ -203,8 +204,13 @@ impl V3RequestExecutionControl {
             refill_excluded_candidates: Arc::default(),
             business_recovery_trial: Arc::new(Mutex::new(None)),
             failure: Arc::default(),
+            compaction_generation: Arc::default(),
             image_history: None,
         })
+    }
+
+    pub(crate) fn retain_compaction_generation(&self, observed: Option<u64>) -> Option<u64> {
+        observed.map(|generation| *self.compaction_generation.get_or_init(|| generation))
     }
 
     pub(crate) fn acquire_business_recovery_trial(

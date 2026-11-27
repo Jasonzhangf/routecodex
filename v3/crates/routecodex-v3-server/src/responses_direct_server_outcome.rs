@@ -394,6 +394,7 @@ async fn execute_responses_direct_server_outcome_inner(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let mut relay_runtime_seeds = handoff.relay_runtime_seeds();
+        relay_runtime_seeds.request_purpose = Some(request_purpose);
         relay_runtime_seeds.client_identity_headers = client_identity_headers.clone();
         let relay_result = if capture_provider_request || capture_provider_response {
             execute_v3_responses_relay_runtime_with_default_transport_health(

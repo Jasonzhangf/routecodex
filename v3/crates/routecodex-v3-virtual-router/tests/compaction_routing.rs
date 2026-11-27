@@ -75,6 +75,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         max_tokens: None,
                         max_context_tokens: None,
                         context_token_estimate_scale_bps: 10_000,
+                        exclude_at_estimated_turns: None,
                         features: BTreeMap::new(),
                         availability: None,
                     },
@@ -170,6 +171,7 @@ fn compact_pool_precedes_dotted_direct_model() {
                 capabilities: BTreeSet::from(["text".into()]),
                 input_tokens: 1,
                 current_turn_input_tokens: 1,
+                estimated_history_turns: None,
                 route_classification: RouteClassification {
                     route_name: "compact".into(),
                     reasoning: "compact:registered-ingress".into(),

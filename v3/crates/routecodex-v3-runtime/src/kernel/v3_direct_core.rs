@@ -149,6 +149,8 @@ where
     // stage-3 丢弃记录要写「客户端原始值」，必须在 codec 标准化之前取句柄：
     // `standardized` 之后还会被 before-send prepare 改写。
     let client_original_body = std::sync::Arc::new(raw.body.clone());
+    let request_purpose = raw.request_purpose;
+    let request_is_compaction = request_purpose.is_compaction();
     let mut standardized = match C::build_standardized(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -178,6 +180,13 @@ where
     };
     let attempt_budget = request_execution_control.attempt_budget();
     let direct_failure_session_scope = C::failure_session_scope(&control, &standardized);
+    let compaction_turn_limit_generation = if request_is_compaction {
+        request_execution_control.retain_compaction_generation(
+            provider_health.compaction_turn_limit_generation(&direct_failure_session_scope),
+        )
+    } else {
+        None
+    };
     let availability = provider_health.session_bound_availability(&direct_failure_session_scope);
     let resolved = crate::operation_runner::run_v3_resolve_target_operator(
         C::body(&standardized).clone(),
@@ -194,7 +203,7 @@ where
                 manifest,
                 C::server_id(&standardized),
             ),
-            is_compaction: C::endpoint(&standardized)
+            is_compaction: request_is_compaction || C::endpoint(&standardized)
                 .trim_end_matches('/')
                 .ends_with("/responses/compact"),
             now_epoch_ms,
@@ -548,6 +557,12 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
+        if !request_is_compaction && provider_health.provider_blocked_until_compact(
+            &direct_failure_session_scope, &selected.candidate.provider_id,
+        ) {
+            failed_candidates.insert(candidate_key(&selected.candidate));
+            continue;
+        }
         match crate::provider_failure_runtime_policy::prepare_selected_dispatch(
             C::policy_target(&policy), Some(&expanded), active_keys.as_deref(), active_episode.as_mut(),
             &request_execution_control, &provider_health, &direct_failure_session_scope, &mut failed_candidates,
@@ -1638,6 +1653,16 @@ where
             if let Ok(summary) = runtime_timing.finish_runtime() {
                 observability.timing = Some(summary);
             }
+        }
+        if let Some(generation) = compaction_turn_limit_generation.filter(|_| {
+            (200..300).contains(&provider_status)
+                && direct_compaction_completed(&client_payload.body, request_purpose)
+        }) {
+            provider_health.clear_turn_limits_after_compaction(
+                &direct_failure_session_scope,
+                generation,
+                &attempt_success_receipt,
+            );
         }
         return V3ResponsesDirectRuntimeOutput {
             client_payload,

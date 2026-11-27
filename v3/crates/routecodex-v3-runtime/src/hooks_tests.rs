@@ -95,6 +95,7 @@ fn direct_policy_with_models(
                 request_client_model: Some(client_model.to_string()),
                 request_capabilities: BTreeSet::from(["text".to_string()]),
                 request_input_tokens: 1,
+                estimated_history_turns: None,
                 hit_count: 1,
             },
             candidate: V3TargetCandidate {
@@ -147,6 +148,7 @@ fn direct_policy_with_models(
             default_floor_protected: false,
         },
         request_id: "req-direct-model-binding".to_string(),
+        request_purpose: crate::nodes::V3RequestPurpose::Conversation,
         request_body: json!({"model": client_model, "input": "hello"}),
     }
 }

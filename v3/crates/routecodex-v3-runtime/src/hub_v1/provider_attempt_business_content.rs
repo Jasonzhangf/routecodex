@@ -424,6 +424,42 @@ fn v3_responses_attempt_has_deliverable_business_content(response: &Value) -> bo
     facts.has_deliverable_business_content()
 }
 
+pub(crate) fn v3_responses_compact_summary_completed(response: &Value) -> bool {
+    let usable = |item: &Value| {
+        item["type"] != "refusal"
+            && item["refusal"].is_null()
+            && !matches!(
+                item["status"].as_str(),
+                Some("failed" | "incomplete" | "in_progress" | "cancelled")
+            )
+    };
+    if response["status"] != "completed"
+        || !response["incomplete_details"].is_null()
+        || !usable(response)
+    {
+        return false;
+    }
+    let mut has_summary = has_visible_text(response.get("output_text"));
+    if let Some(items) = response["output"].as_array() {
+        for item in items {
+            if !usable(item) {
+                return false;
+            }
+            has_summary |= item["type"] == "output_text" && has_visible_text(item.get("text"));
+            if let Some(parts) = item["content"].as_array() {
+                for part in parts {
+                    if !usable(part) {
+                        return false;
+                    }
+                    has_summary |=
+                        part["type"] == "output_text" && has_visible_text(part.get("text"));
+                }
+            }
+        }
+    }
+    has_summary
+}
+
 pub(super) fn v3_responses_output_item_has_deliverable_content(item: &Value) -> bool {
     if let Some(text) = item.as_str() {
         return VISIBLE_TEXT_PATTERN.is_match(text);

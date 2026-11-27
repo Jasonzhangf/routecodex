@@ -696,6 +696,17 @@ impl V3ExternalHttpWitness {
     pub fn body_read_failure(&self) -> Option<&str> {
         self.body_read_failure.as_deref()
     }
+
+    pub fn is_session_turn_limit_rejection(&self) -> bool {
+        self.status == 400
+            && self.body_read_failure.is_none()
+            && serde_json::from_slice::<serde_json::Value>(&self.body).is_ok_and(|body| {
+                body.pointer("/error/code")
+                    .or_else(|| body.get("code"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("session_turn_limit_exceeded")
+            })
+    }
 }
 
 /// The provider failure terminal carries either the real upstream HTTP response

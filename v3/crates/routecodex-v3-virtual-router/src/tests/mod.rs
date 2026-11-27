@@ -109,6 +109,7 @@ fn matching_facts() -> V3RouterRequestFacts {
         capabilities: BTreeSet::from(["tools".into()]),
         input_tokens: 10,
         current_turn_input_tokens: 10,
+        estimated_history_turns: None,
         route_classification: test_route("tools", &["tools", "default"]),
     }
 }
@@ -227,6 +228,7 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
                 capabilities: BTreeSet::from(["text".into(), "tools".into()]),
                 input_tokens: 1,
                 current_turn_input_tokens: 1,
+                estimated_history_turns: None,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -289,6 +291,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     max_tokens: None,
                     max_context_tokens: None,
                     context_token_estimate_scale_bps: 10_000,
+                    exclude_at_estimated_turns: None,
                     features: BTreeMap::new(),
                     availability: None,
                 },
@@ -316,6 +319,7 @@ fn direct_facts(model: &str, capabilities: BTreeSet<String>) -> V3RouterRequestF
         capabilities,
         input_tokens: 10,
         current_turn_input_tokens: 10,
+        estimated_history_turns: None,
         route_classification: RouteClassification::default(),
     }
 }
@@ -382,6 +386,7 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 1,
                 current_turn_input_tokens: 1,
+                estimated_history_turns: None,
                 route_classification: test_route("compact", &["compact"]),
             },
         )
@@ -555,6 +560,7 @@ fn tools_capability_without_current_turn_signal_stays_default() {
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -586,6 +592,7 @@ fn no_match_uses_default_and_only_equal_best_precedence_is_ambiguous() {
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 // Declared capabilities alone are not a current-turn signal.
                 route_classification: test_route("default", &["default"]),
             },
@@ -661,6 +668,7 @@ fn entry_protocol_uses_generic_route_signal_pool() {
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -751,6 +759,7 @@ fn classifier_candidates_select_pool_regardless_of_declared_capabilities() {
                 capabilities: BTreeSet::from(["tools".into(), "web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -786,6 +795,7 @@ fn web_search_capability_pool_is_not_generic_route_fallback() {
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -817,6 +827,7 @@ fn candidate_order_hosted_websearch_precedes_multimodal() {
                 capabilities: BTreeSet::from(["web_search".into(), "multimodal".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "web_search",
                     &["web_search", "multimodal", "default"],
@@ -863,6 +874,7 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
                 ]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "coding",
                     &["coding", "thinking", "tools", "default"],
@@ -890,6 +902,7 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
                 capabilities: BTreeSet::from(["thinking".into(), "tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("thinking", &["thinking", "tools", "default"]),
             },
         )
@@ -922,6 +935,7 @@ fn longcontext_candidate_selects_configured_pool() {
                 capabilities: BTreeSet::from(["multimodal".into()]),
                 input_tokens: 1_000,
                 current_turn_input_tokens: 1_000,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "longcontext",
                     &["longcontext", "multimodal", "default"],
@@ -965,6 +979,7 @@ fn pool_min_max_matches_current_turn_tokens_not_full_request() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 5_000,
                 current_turn_input_tokens: 1,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -987,6 +1002,7 @@ fn pool_min_max_matches_current_turn_tokens_not_full_request() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 5_000,
                 current_turn_input_tokens: 2_000,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -1024,6 +1040,7 @@ fn pool_min_max_bounds_exclude_when_current_turn_below_min() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 1_000,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -1092,6 +1109,7 @@ fn candidate_priority_skips_absent_or_empty_pools() {
                     capabilities: ordered.iter().map(|signal| (*signal).to_string()).collect(),
                     input_tokens: 10,
                     current_turn_input_tokens: 10,
+                    estimated_history_turns: None,
                     route_classification: test_route(expected, &candidates),
                 },
             )
@@ -1129,6 +1147,7 @@ fn model_match_pool_does_not_preempt_candidate_signal() {
                 capabilities: BTreeSet::from(["thinking".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -1181,6 +1200,7 @@ fn virtual_alias_and_auto_share_the_current_turn_classification_pool() {
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
                     current_turn_input_tokens: 10,
+                    estimated_history_turns: None,
                     route_classification: test_route("thinking", &["thinking", "default"]),
                 },
             )
@@ -1246,6 +1266,7 @@ fn model_match_pool_is_not_an_inbound_route() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -1276,6 +1297,7 @@ fn model_match_pool_without_signal_uses_default_pool() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 1,
                 current_turn_input_tokens: 1,
+                estimated_history_turns: None,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -1347,6 +1369,7 @@ fn missing_non_default_match_and_invalid_protocol_facts_fail_explicitly() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 0,
                 current_turn_input_tokens: 0,
+                estimated_history_turns: None,
                 route_classification: RouteClassification::default(),
             },
         ),
@@ -1659,6 +1682,7 @@ fn no_implicit_capability_pool_without_configured_pool() {
                     max_tokens: None,
                     max_context_tokens: None,
                     context_token_estimate_scale_bps: 10_000,
+                    exclude_at_estimated_turns: None,
                     features: BTreeMap::new(),
                     availability: None,
                 },
@@ -1687,6 +1711,7 @@ fn no_implicit_capability_pool_without_configured_pool() {
                 capabilities: BTreeSet::from(["multimodal".into(), "web_search".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "web_search",
                     &["web_search", "multimodal", "default"],
@@ -1735,6 +1760,7 @@ fn candidate_order_selects_first_configured_non_empty_pool() {
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "coding",
                     &["coding", "thinking", "tools", "default"],
@@ -1781,6 +1807,7 @@ fn empty_configured_pool_is_skipped_for_next_candidate() {
                 capabilities: BTreeSet::from(["multimodal".into(), "coding".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "multimodal",
                     &["multimodal", "coding", "default"],
@@ -1812,6 +1839,7 @@ fn absent_non_default_pool_falls_through_to_default() {
                 capabilities: BTreeSet::from(["multimodal".into(), "coding".into()]),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route(
                     "multimodal",
                     &["multimodal", "coding", "default"],
@@ -1843,6 +1871,7 @@ fn explicit_direct_model_ignores_classification_candidates() {
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
                 current_turn_input_tokens: 10,
+                estimated_history_turns: None,
                 route_classification: test_route("multimodal", &["multimodal", "default"]),
             },
         )

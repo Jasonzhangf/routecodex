@@ -84,6 +84,7 @@ background probe is not accepted business success.
 | Typed outcome | Streak | Same-key recovery |
 | --- | --- | --- |
 | Ordinary real HTTP 429 or recoverable 5xx | Increment | Retry within episode budget and current health eligibility. |
+| Ordinary request in a known conversation receives a complete real HTTP 400 with exact `session_turn_limit_exceeded` | Increment once after actual dispatch | End the episode. Exclude all aliases of that Provider for this conversation. Usable compact clears only the observed restrictions, as described below. Keep Provider health separate. |
 | Confirmed auth/account/quota failure, HTTP 403, HTTP 400/422 | Increment after actual dispatch | End this episode and reselect without repeating the unchanged rejection. Preserve existing health rules, including the separate 403 threshold. |
 | Provider timeout, reset or truncated body before business commit | Increment | Retry only if the typed cause and current eligibility permit it. |
 | Response decode, post-filter empty result, unharvestable tool leakage or local response-processing failure after dispatch | Increment | End the episode and follow the existing typed Error recovery path. Synthetic 502/599 is not proof of account health failure. |
@@ -95,6 +96,13 @@ background probe is not accepted business success.
 The fourth failure can close an episode before its configured retry budget is
 used. A later request cannot restart the shared streak merely by creating a new
 episode. Queue counters never substitute for Provider health counters.
+
+Estimated-turn and conversation-restriction filters run before dispatch. They
+consume no retry budget or delivery failure. A usable compact clears only the
+conversation restrictions observed when it began. Its accepted business success
+also resets its own matching active streak. Compact never releases another held
+member or restores an obsolete binding. Manual queue release does not clear a
+conversation restriction.
 
 Provider cooldown recovery uses an exclusively owned real business attempt when
 its minimum time and cadence are due. Runtime validates active membership, the

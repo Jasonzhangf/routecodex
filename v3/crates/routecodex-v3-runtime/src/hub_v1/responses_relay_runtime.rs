@@ -557,6 +557,11 @@ async fn handle_v3_responses_relay_provider_failure(
             let eligible = !result.business_trial_failed
                 && !feedback.stale
                 && !feedback.transitioned
+                && !(selected.route.estimated_history_turns.is_some()
+                    && context.provider_health.provider_blocked_until_compact(
+                        &context.failure_session_scope,
+                        &selected.candidate.provider_id,
+                    ))
                 && active_keys.selection_current(&episode.selection)
                 && health;
             match plan_v3_active_key_recovery(class, episode.can_retry(eligible)) {
