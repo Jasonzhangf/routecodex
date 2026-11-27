@@ -24,6 +24,9 @@ wire projection, response semantics, runtime configuration, Server cutover, or l
 - Negative: scope mismatch, missing continuation binding, ambiguous local-plus-remote ownership,
   malformed tool-result ordering, required hook failure, Req03 restore residue, Req04 bypass,
   non-adjacent conversion, dynamic hook registry, and a second Relay lifecycle.
+- Responses-derived tool outputs with no parent in the submitted history pass Req04 unchanged.
+  Missing history alone is not malformed identity or a demonstrated kind mismatch. Native
+  protocol identity checks retain their existing contract.
 
 ## Ownership budget
 
@@ -35,6 +38,11 @@ source scanner no longer locks private function bodies or JSON helper spellings.
 ## Verification
 
 - Focused Rust integration tests: `hub_relay_request_semantics`.
+- Public `/v1/responses` regression:
+  `issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400`.
+  Explicit Relay sends the exact orphan item to its sole Provider once, including absent `id`
+  and exact output text. Its complete marked HTTP 400 follows the typed Error chain and final
+  Provider projection rule; no parent is invented and no local 598 is fabricated.
 - Behavioral consumers cover lossless normalization, tool/history handling, hook order and required
   hook failures. The registered static-hook and compile-fail gates retain their own boundaries.
 - Shared V3 architecture, resource, module-boundary, Rust-only, static-hook, compile-fail, fmt,
