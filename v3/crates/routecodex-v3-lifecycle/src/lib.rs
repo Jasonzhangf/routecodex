@@ -507,6 +507,7 @@ impl V3ManagedLifecycle {
         wait_for_stopping_instance(&instance_dir, &declaration, timeout).await?;
         recover_exited_front_control_handoff(&instance_dir, &declaration).await?;
         reap_inactive_runtime_files(&instance_dir, &declaration)?;
+        prune_stale_stopped_instance_dirs(&self.state_root, &declaration.instance_id);
         self.launch_managed_child(executable_path.as_ref(), &declaration, timeout)
             .await
     }
@@ -2191,7 +2192,100 @@ async fn require_no_pending_shutdown(
     }
     Ok(())
 }
+
+/// Retains at most two stopped instance directories (excluding `current_instance_id`)
+/// so repeated restarts/tests do not accumulate unbounded `instances/` directories.
+fn prune_stale_stopped_instance_dirs(state_root: &Path, current_instance_id: &str) {
+    const RETAINED_STOPPED_INSTANCES: usize = 2;
+    let instances_root = state_root.join("instances");
+    let Ok(entries) = fs::read_dir(&instances_root) else {
+        return;
+    };
+    let mut stopped = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == current_instance_id)
+        {
+            continue;
+        }
+        let status_path = path.join("status.json");
+        if status_path.exists() {
+            let Ok(status) = read_json::<V3ManagedStatusRecord>(&status_path) else {
+                continue;
+            };
+            if status.state != V3ManagedRunState::Stopped {
+                continue;
+            }
+        }
+        let cache_path = path.join("pid.cache");
+        if cache_path.exists() {
+            let Ok(cache) = read_json::<V3ManagedPidCache>(&cache_path) else {
+                continue;
+            };
+            if !managed_generation_has_exited(&cache).unwrap_or(false) {
+                continue;
+            }
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        stopped.push((modified, path));
+    }
+    if stopped.len() <= RETAINED_STOPPED_INSTANCES {
+        return;
+    }
+    stopped.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    for (_, path) in stopped.into_iter().skip(RETAINED_STOPPED_INSTANCES) {
+        let _ = fs::remove_dir_all(&path);
+    }
+}
+
 #[cfg(test)]
 mod internal_hooksd_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod instance_prune_tests {
+    use super::*;
+
+    #[test]
+    fn prune_stale_stopped_instance_dirs_keeps_current_running_and_two_newest_stopped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let instances = dir.path().join("instances");
+        fs::create_dir_all(&instances).expect("create instances");
+        let mut stopped = Vec::new();
+        for idx in 0..4 {
+            let id = format!("v3-stopped-{idx}");
+            let inst_dir = instances.join(&id);
+            fs::create_dir_all(&inst_dir).expect("create stopped dir");
+            write_status(&inst_dir, &id, V3ManagedRunState::Stopped, None).expect("write status");
+            std::thread::sleep(Duration::from_millis(15));
+            stopped.push(inst_dir);
+        }
+        let running = instances.join("v3-running");
+        fs::create_dir_all(&running).expect("create running dir");
+        write_status(&running, "v3-running", V3ManagedRunState::Running, None)
+            .expect("write running status");
+
+        let current = instances.join("v3-current");
+        fs::create_dir_all(&current).expect("create current dir");
+
+        prune_stale_stopped_instance_dirs(dir.path(), "v3-current");
+
+        assert!(current.exists());
+        assert!(running.exists());
+        assert!(!stopped[0].exists());
+        assert!(!stopped[1].exists());
+        assert!(stopped[2].exists());
+        assert!(stopped[3].exists());
+    }
+}
