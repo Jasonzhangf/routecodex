@@ -144,6 +144,7 @@ fn legacy_provider_error_path(
             duration_ms: None,
             until_restart: Some(true),
             provider_global_failure: action.provider_global_failure,
+            failure_threshold: None,
         });
     } else if let Some(duration_ms) = action.cooldown_ms {
         path.push(V3ProviderDispositionStepManifest::Cooldown {
@@ -151,6 +152,7 @@ fn legacy_provider_error_path(
             duration_ms: Some(duration_ms),
             until_restart: None,
             provider_global_failure: action.provider_global_failure,
+            failure_threshold: None,
         });
     }
     path.push(V3ProviderDispositionStepManifest::Project {
@@ -184,11 +186,13 @@ fn compile_provider_error_path(
                 duration_ms,
                 until_restart,
                 provider_global_failure,
+                failure_threshold,
             } => V3ProviderDispositionStepManifest::Cooldown {
                 scope,
                 duration_ms,
                 until_restart,
                 provider_global_failure,
+                failure_threshold,
             },
             V3ProviderDispositionStepAuthoringConfig::Project {
                 reason_code,
@@ -240,6 +244,7 @@ fn validate_provider_error_path(
             V3ProviderDispositionStepManifest::Cooldown {
                 duration_ms,
                 until_restart,
+                failure_threshold,
                 ..
             } => {
                 let has_duration = duration_ms.is_some();
@@ -250,6 +255,11 @@ fn validate_provider_error_path(
                 {
                     return Err(validation(format!(
                         "provider error policy {policy_id} cooldown requires exactly one valid duration_ms or until_restart=true"
+                    )));
+                }
+                if failure_threshold.is_some_and(|value| value == 0 || value > 100) {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} cooldown failure_threshold must be 1..=100"
                     )));
                 }
             }
@@ -291,6 +301,7 @@ fn default_provider_error_path() -> Vec<V3ProviderDispositionStepManifest> {
             duration_ms: Some(900_000),
             until_restart: None,
             provider_global_failure: false,
+            failure_threshold: None,
         },
         V3ProviderDispositionStepManifest::Project {
             reason_code: "provider_failure".to_string(),

@@ -386,6 +386,8 @@ async fn project_provider_raw_to_client_payload_inner(
         && compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
         && compat_plan.provider_protocol == V3HubProviderWireProtocol::Responses;
     let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
+    let sse_first_frame_elapsed =
+        std::time::Duration::from_millis(raw.sse_first_frame_elapsed_ms());
     let content_type = raw
         .header_text("content-type")
         .map_err(provider_body_source)?
@@ -433,6 +435,7 @@ async fn project_provider_raw_to_client_payload_inner(
                 Some(status),
                 stream,
                 sse_first_frame_timeout_ms,
+                sse_first_frame_elapsed,
                 thinking_tags,
                 deepseek_console_go,
                 provider_response_compat,
@@ -564,6 +567,7 @@ async fn process_direct_sse_stream_with_status(
     provider_status: Option<u16>,
     stream: V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
+    sse_first_frame_elapsed: std::time::Duration,
     thinking_tags: bool,
     deepseek_console_go: bool,
     provider_response_compat: Option<&str>,
@@ -585,7 +589,8 @@ async fn process_direct_sse_stream_with_status(
         });
     let first_event_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
-        .unwrap_or_else(v3_direct_sse_default_timeout);
+        .unwrap_or_else(v3_direct_sse_default_timeout)
+        .saturating_sub(sse_first_frame_elapsed);
     let stream = guard_initial_direct_sse_provider_failure_with_timeout_and_status(
         provider_id,
         provider_status,

@@ -3557,3 +3557,773 @@ targets = [
     let _ = p_task.await;
     let _ = b_task.await;
 }
+
+#[tokio::test]
+async fn map001_public_delayed_sse_on_json_intent_respects_combined_first_frame_timeout() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let _guard = LOCK.lock().await;
+    let _home = Home::new("delayed-sse-budget");
+    std::env::set_var("ONTOLOGY_SSE_BUDGET_KEY", "sk-ontology-sse-budget");
+
+    let primary_hits = Arc::new(AtomicUsize::new(0));
+    let backup_hits = Arc::new(AtomicUsize::new(0));
+
+    // Primary behavior per request:
+    // - Hit #1 (when sse_first_frame_timeout_ms=380, request_timeout_ms=400): send SSE headers at 220ms,
+    //   sleep 220ms (>180ms remaining request budget, <380ms first_frame), then send valid SSE completed event.
+    // - Hit #2 (on server_timeout with sse_first_frame_timeout_ms=250, request_timeout_ms=5000): send SSE
+    //   headers immediately, sleep 150ms, send `: keepalive\n\n` (stops sniff peek!), then sleep 200ms
+    //   (combined 350ms > 250ms first-frame budget) without sending semantic frame -> must time out!
+    let primary_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let primary_addr = primary_listener.local_addr().unwrap();
+    let p_hits = primary_hits.clone();
+    let (p_sd, mut p_stop) = oneshot::channel::<()>();
+    let p_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut p_stop => break,
+                accepted = primary_listener.accept() => {
+                    let Ok((mut conn, _)) = accepted else { break; };
+                    let idx = p_hits.fetch_add(1, Ordering::SeqCst);
+                    tokio::spawn(async move {
+                        let mut buf = [0_u8; 8192];
+                        let _ = conn.read(&mut buf).await;
+                        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+                        if idx == 0 {
+                            // Spend 220ms before headers (leaving 180ms of 400ms request_timeout_ms),
+                            // then 220ms before first SSE chunk (>180ms remaining request budget, <380ms SSE budget).
+                            tokio::time::sleep(Duration::from_millis(220)).await;
+                            let _ = conn.write_all(head.as_bytes()).await;
+                            tokio::time::sleep(Duration::from_millis(220)).await;
+                            let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_delayed_sse_ok\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"direct-wire\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"delayed sse within budget\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n";
+                            let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
+                            let _ = conn.write_all(chunk.as_bytes()).await;
+                        } else if idx == 2 {
+                            // Case 3: Disguised JSON arriving at 320ms (>250ms sse_first_frame_timeout_ms,
+                            // <5000ms request_timeout_ms) must succeed on attempt 1 under request deadline.
+                            let _ = conn.write_all(head.as_bytes()).await;
+                            tokio::time::sleep(Duration::from_millis(320)).await;
+                            let json_body = json!({
+                                "id": "resp_slow_disguised_json_ok",
+                                "object": "response",
+                                "status": "completed",
+                                "model": "direct-wire",
+                                "output": [{
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": "slow disguised json ok"}]
+                                }],
+                                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+                            })
+                            .to_string();
+                            let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
+                            let _ = conn.write_all(chunk.as_bytes()).await;
+                        } else {
+                            let _ = conn.write_all(head.as_bytes()).await;
+                            tokio::time::sleep(Duration::from_millis(150)).await;
+                            let ping = ": keepalive\n\n";
+                            let chunk1 = format!("{:x}\r\n{}\r\n", ping.len(), ping);
+                            let _ = conn.write_all(chunk1.as_bytes()).await;
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_too_late\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"too late\"}]}]}}\n\n";
+                            let chunk2 = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
+                            let _ = conn.write_all(chunk2.as_bytes()).await;
+                        }
+                    });
+                }
+            }
+        }
+    });
+
+    let backup_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backup_addr = backup_listener.local_addr().unwrap();
+    let b_hits = backup_hits.clone();
+    let (b_sd, b_stop) = oneshot::channel();
+    let b_task = tokio::spawn(async move {
+        let app = Router::new()
+            .route(
+                "/v1/responses",
+                post(move || {
+                    let b_hits = b_hits.clone();
+                    async move {
+                        b_hits.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "application/json")
+                            .body(Body::from(
+                                json!({
+                                    "id": "resp_backup_sse_timeout",
+                                    "object": "response",
+                                    "status": "completed",
+                                    "model": "backup-wire",
+                                    "output": [{
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [{"type": "output_text", "text": "backup after combined sse timeout"}]
+                                    }],
+                                    "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+                                })
+                                .to_string(),
+                            ))
+                            .unwrap()
+                    }
+                }),
+            );
+        axum::serve(backup_listener, app)
+            .with_graceful_shutdown(async {
+                let _ = b_stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let fast_port = test_ports::free_port();
+    let slow_port = test_ports::free_port();
+    let relay_port = test_ports::free_port();
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.fast]
+bind = "127.0.0.1"
+port = {}
+routing_group = "rg_fast"
+endpoints = ["responses"]
+{}
+
+[servers.slow]
+bind = "127.0.0.1"
+port = {}
+routing_group = "rg_slow"
+endpoints = ["responses", "openai_chat"]
+{}
+
+[servers.relay_resp]
+bind = "127.0.0.1"
+port = {}
+routing_group = "rg_relay_resp"
+endpoints = ["responses"]
+{}
+
+[providers.primary_short_req]
+type = "responses"
+base_url = "http://{primary_addr}/v1"
+default_model = "direct-wire"
+request_timeout_ms = 400
+sse_first_frame_timeout_ms = 380
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_SSE_BUDGET_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.primary_short_req.models."direct-wire"]
+wire_name = "direct-wire"
+aliases = ["delayed-sse-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.primary_short_sse]
+type = "responses"
+base_url = "http://{primary_addr}/v1"
+default_model = "direct-wire"
+request_timeout_ms = 5000
+sse_first_frame_timeout_ms = 250
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_SSE_BUDGET_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.primary_short_sse.models."direct-wire"]
+wire_name = "direct-wire"
+aliases = ["delayed-sse-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.primary_relay_sse]
+type = "responses"
+base_url = "http://{primary_addr}/v1"
+default_model = "direct-wire"
+request_timeout_ms = 5000
+sse_first_frame_timeout_ms = 250
+responses = {{ process = "relay", streaming = "client" }}
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_SSE_BUDGET_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.primary_relay_sse.models."direct-wire"]
+wire_name = "direct-wire"
+aliases = ["delayed-sse-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.backup]
+type = "responses"
+base_url = "http://{backup_addr}/v1"
+default_model = "backup-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_SSE_BUDGET_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.backup.models."backup-wire"]
+wire_name = "backup-wire"
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.rg_fast.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "primary_short_req", model = "direct-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "backup", model = "backup-wire", key = "key", priority = 1 }}
+]
+
+[route_groups.rg_slow.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "primary_short_sse", model = "direct-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "backup", model = "backup-wire", key = "key", priority = 1 }}
+]
+
+[route_groups.rg_relay_resp.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "primary_relay_sse", model = "direct-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "backup", model = "backup-wire", key = "key", priority = 1 }}
+]
+"#,
+        hub_v1_fixture::hub_v1_test_declaration(),
+        fast_port,
+        hub_v1_fixture::hub_v1_server_execution("fast"),
+        slow_port,
+        hub_v1_fixture::hub_v1_server_execution("slow"),
+        relay_port,
+        hub_v1_fixture::hub_v1_server_execution("relay_resp"),
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    // Case 1: Genuine SSE arriving at 220ms after headers (> 180ms remaining request budget,
+    // < 380ms sse_first_frame_timeout_ms) must deliver first-attempt 200 without invoking backup.
+    let ok_resp = client
+        .post(format!("http://127.0.0.1:{fast_port}/v1/responses"))
+        .json(&json!({"model":"delayed-sse-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_resp.status(), StatusCode::OK);
+    let ok_text = ok_resp.text().await.unwrap();
+    assert_eq!(primary_hits.load(Ordering::SeqCst), 1);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 0);
+    let ok_completed_text = ok_text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .filter_map(|raw| serde_json::from_str::<Value>(raw.trim()).ok())
+        .find(|value| value["type"] == "response.completed")
+        .and_then(|value| {
+            value["response"]["output"][0]["content"][0]["text"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            serde_json::from_str::<Value>(&ok_text)
+                .ok()
+                .and_then(|value| {
+                    value["output"][0]["content"][0]["text"]
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                })
+        });
+    assert_eq!(
+        ok_completed_text.as_deref(),
+        Some("delayed sse within budget"),
+        "expected completed text from primary delayed SSE, got: {ok_text}"
+    );
+
+    // Case 2: Combined sniff delay (150ms) + runtime wait (200ms) > 250ms sse_first_frame_timeout_ms
+    // must time out primary and recover via backup even when request_timeout_ms=5000.
+    let sw_resp = client
+        .post(format!("http://127.0.0.1:{slow_port}/v1/responses"))
+        .json(&json!({"model":"delayed-sse-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sw_resp.status(), StatusCode::OK);
+    let sw_body: Value = sw_resp.json().await.unwrap();
+    assert_eq!(
+        sw_body["output"][0]["content"][0]["text"],
+        "backup after combined sse timeout"
+    );
+    assert_eq!(primary_hits.load(Ordering::SeqCst), 2);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 1);
+
+    // Case 3: Slow disguised JSON arriving after 250ms sse_first_frame_timeout_ms (320ms) yet
+    // within 5000ms request_timeout_ms must deliver attempt-1 HTTP 200 JSON without backup.
+    let json_resp = client
+        .post(format!("http://127.0.0.1:{slow_port}/v1/responses"))
+        .json(&json!({"model":"delayed-sse-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_resp.status(), StatusCode::OK);
+    let json_body: Value = json_resp.json().await.unwrap();
+    assert_eq!(
+        json_body["output"][0]["content"][0]["text"],
+        "slow disguised json ok"
+    );
+    assert_eq!(primary_hits.load(Ordering::SeqCst), 3);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 1);
+
+    // Case 4: Explicit Relay (/v1/chat/completions -> relay_runtime_core) combined first-frame timeout
+    // (150ms sniff + 200ms > 250ms) must recover cleanly via backup.
+    let relay_chat_resp = client
+        .post(format!("http://127.0.0.1:{slow_port}/v1/chat/completions"))
+        .json(&json!({"model":"delayed-sse-alias","messages":[{"role":"user","content":"ping"}],"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(relay_chat_resp.status(), StatusCode::OK);
+    let relay_chat_body: Value = relay_chat_resp.json().await.unwrap();
+    assert_eq!(
+        relay_chat_body["choices"][0]["message"]["content"],
+        "backup after combined sse timeout"
+    );
+    assert_eq!(primary_hits.load(Ordering::SeqCst), 4);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 2);
+
+    // Case 5: Explicit Responses Relay (responses_relay_runtime_inner) combined first-frame timeout
+    // (150ms sniff + 200ms > 250ms) must also recover cleanly via backup.
+    let relay_resp = client
+        .post(format!("http://127.0.0.1:{relay_port}/v1/responses"))
+        .json(&json!({"model":"delayed-sse-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(relay_resp.status(), StatusCode::OK);
+    let relay_resp_body: Value = relay_resp.json().await.unwrap();
+    assert_eq!(
+        relay_resp_body["output"][0]["content"][0]["text"],
+        "backup after combined sse timeout"
+    );
+    assert_eq!(primary_hits.load(Ordering::SeqCst), 5);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 3);
+
+    drop(server);
+    let _ = p_sd.send(());
+    let _ = b_sd.send(());
+    let _ = p_task.await;
+    let _ = b_task.await;
+}
+
+#[tokio::test]
+async fn map003_public_xingchiapi_repeated_transport_connection_closed_cools_and_recovers_while_final_remains_neutral(
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let _guard = LOCK.lock().await;
+    let home = Home::new("xingchiapi-repeat-transport");
+    std::env::set_var("ONTOLOGY_XINGCHI_REPEAT_KEY", "sk-ontology-xingchi-repeat");
+
+    let xingchi_hits = Arc::new(AtomicUsize::new(0));
+    let backup_hits = Arc::new(AtomicUsize::new(0));
+    let final_only_hits = Arc::new(AtomicUsize::new(0));
+
+    // xingchiapi mock:
+    // - hits 0..2: real HTTP 500 JSON (mixed failure; must NOT contribute to xingchiapi connection-closed streak)
+    // - hits 2..5: drops TCP immediately (`connection closed before message completed`) -> 3rd consecutive cools 5000ms
+    // - hit 5+: serves healthy 200 JSON (real business recovery trial).
+    let xingchi_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let xingchi_addr = xingchi_listener.local_addr().unwrap();
+    let x_hits = xingchi_hits.clone();
+    let (x_sd, mut x_stop) = oneshot::channel::<()>();
+    let x_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut x_stop => break,
+                accepted = xingchi_listener.accept() => {
+                    let Ok((mut conn, _)) = accepted else { break; };
+                    let idx = x_hits.fetch_add(1, Ordering::SeqCst);
+                    tokio::spawn(async move {
+                        let mut buf = [0_u8; 8192];
+                        let _ = conn.read(&mut buf).await;
+                        if idx < 2 {
+                            let err_body = r#"{"error":{"message":"transient upstream 500","type":"server_error"}}"#;
+                            let resp = format!(
+                                "HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                                err_body.len(),
+                                err_body
+                            );
+                            let _ = conn.write_all(resp.as_bytes()).await;
+                            return;
+                        }
+                        if idx < 5 {
+                            // Close connection without HTTP response -> `connection closed before message completed`
+                            drop(conn);
+                            return;
+                        }
+                        let body = json!({
+                            "id": "resp_xingchi_recovered",
+                            "object": "response",
+                            "status": "completed",
+                            "model": "gpt-6.1-sol",
+                            "output": [{
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": "xingchiapi recovered on real trial"}]
+                            }],
+                            "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
+                        })
+                        .to_string();
+                        let resp = format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = conn.write_all(resp.as_bytes()).await;
+                    });
+                }
+            }
+        }
+    });
+
+    // Final-candidate-only mock: drops connection cleanly so final candidate health neutrality is verified.
+    let final_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let final_addr = final_listener.local_addr().unwrap();
+    let f_hits = final_only_hits.clone();
+    let (f_sd, mut f_stop) = oneshot::channel::<()>();
+    let f_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut f_stop => break,
+                accepted = final_listener.accept() => {
+                    let Ok((mut conn, _)) = accepted else { break; };
+                    f_hits.fetch_add(1, Ordering::SeqCst);
+                    tokio::spawn(async move {
+                        let mut buf = [0_u8; 8192];
+                        let _ = conn.read(&mut buf).await;
+                        drop(conn);
+                    });
+                }
+            }
+        }
+    });
+
+    let backup_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backup_addr = backup_listener.local_addr().unwrap();
+    let b_hits = backup_hits.clone();
+    let (b_sd, b_stop) = oneshot::channel();
+    let b_task = tokio::spawn(async move {
+        let app = Router::new()
+            .route(
+                "/v1/responses",
+                post(move || {
+                    let b_hits = b_hits.clone();
+                    async move {
+                        b_hits.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "application/json")
+                            .body(Body::from(
+                                json!({
+                                    "id": "resp_backup_repeat_transport",
+                                    "object": "response",
+                                    "status": "completed",
+                                    "model": "backup-wire",
+                                    "output": [{
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [{"type": "output_text", "text": "backup served during cooldown"}]
+                                    }],
+                                    "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+                                })
+                                .to_string(),
+                            ))
+                            .unwrap()
+                    }
+                }),
+            );
+        axum::serve(backup_listener, app)
+            .with_graceful_shutdown(async {
+                let _ = b_stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let listen_port = test_ports::free_port();
+    let final_port = test_ports::free_port();
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.a]
+bind = "127.0.0.1"
+port = {}
+routing_group = "default"
+endpoints = ["responses"]
+{}
+
+[servers.only_xingchi]
+bind = "127.0.0.1"
+port = {}
+routing_group = "exhausted_only"
+endpoints = ["responses"]
+{}
+
+[providers.xingchiapi]
+type = "responses"
+base_url = "http://{xingchi_addr}/v1"
+default_model = "gpt-6.1-sol"
+auth = {{ type = "api_key", entries = [{{ alias = "key10", env = "ONTOLOGY_XINGCHI_REPEAT_KEY" }}] }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 5000 }}
+[providers.xingchiapi.models."gpt-6.1-sol"]
+wire_name = "gpt-6.1-sol"
+aliases = ["xingchi-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.xingchi_solo]
+type = "responses"
+base_url = "http://{final_addr}/v1"
+default_model = "gpt-6.1-sol"
+auth = {{ type = "api_key", entries = [{{ alias = "key10", env = "ONTOLOGY_XINGCHI_REPEAT_KEY" }}] }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 5000 }}
+[providers.xingchi_solo.models."gpt-6.1-sol"]
+wire_name = "gpt-6.1-sol"
+aliases = ["xingchi-alias"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.backup]
+type = "responses"
+base_url = "http://{backup_addr}/v1"
+default_model = "backup-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "ONTOLOGY_XINGCHI_REPEAT_KEY" }}] }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 5000 }}
+[providers.backup.models."backup-wire"]
+wire_name = "backup-wire"
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "xingchiapi", model = "gpt-6.1-sol", key = "key10", priority = 2 }},
+  {{ kind = "provider_model", provider = "backup", model = "backup-wire", key = "key1", priority = 1 }}
+]
+
+[route_groups.exhausted_only.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "xingchi_solo", model = "gpt-6.1-sol", key = "key10", priority = 1 }}
+]
+"#,
+        hub_v1_fixture::hub_v1_test_declaration(),
+        listen_port,
+        hub_v1_fixture::hub_v1_server_execution("a"),
+        final_port,
+        hub_v1_fixture::hub_v1_server_execution("only_xingchi"),
+    );
+
+    let mut authoring = parse_v3_config_02_authoring(&source).unwrap();
+    // Adopt shipped internal.toml Error policies (including xingchiapi_transport_connection_closed)
+    authoring.error = routecodex_v3_config::internal::v3_internal_user_config_authoring().error;
+    let mut manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    manifest.debug.codex_samples = true;
+
+    #[derive(Debug)]
+    struct TestObservationClock(std::sync::atomic::AtomicU64);
+    impl routecodex_v3_runtime::V3ProviderHealthObservationClock for TestObservationClock {
+        fn now_epoch_ms(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = Arc::new(TestObservationClock(std::sync::atomic::AtomicU64::new(now)));
+    let server = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        manifest,
+        clock.clone(),
+    )
+    .await
+    .unwrap();
+    let samples_dir = home
+        .path
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join(listen_port.to_string());
+    let mut seen_dirs = std::collections::HashSet::<std::path::PathBuf>::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    // 1. Mixed failure sequence: 2x HTTP 500 followed by 3x connection_closed.
+    // The 1st connection_closed must remain `provider_failure_observed` (not borrowing HTTP 500's streak);
+    // only the 3rd consecutive connection_closed commits cooldown (`state == "cooldown"`).
+    for attempt_idx in 0..5 {
+        let resp = client
+            .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+            .json(&json!({"model":"xingchi-alias","input":"ping","stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value = resp.json().await.unwrap();
+        assert_eq!(
+            body["output"][0]["content"][0]["text"],
+            "backup served during cooldown"
+        );
+        server
+            .wait_for_codex_sample_persistence()
+            .await
+            .expect("repeat transport failure sample must persist");
+        let failed = read_next_failed_attempt_evidence(&samples_dir, &mut seen_dirs).await;
+        let expected_state = if attempt_idx < 4 {
+            "provider_failure_observed"
+        } else {
+            "cooldown"
+        };
+        assert_eq!(
+            failed["attempts"][0]["health_state"], expected_state,
+            "attempt {attempt_idx} sample: {failed}"
+        );
+    }
+    assert_eq!(xingchi_hits.load(Ordering::SeqCst), 5);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 5);
+
+    // 2. While within the declared 5000ms cooldown window (clock + 4990ms), cooldown-pool lists xingchiapi
+    // and the request skips it directly to backup.
+    clock.0.store(now + 4_990, Ordering::SeqCst);
+    let pool_during: Value = client
+        .get(format!(
+            "http://127.0.0.1:{listen_port}/_routecodex/health/cooldown-pool"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries_during = pool_during["entries"].as_array().unwrap();
+    assert!(
+        entries_during
+            .iter()
+            .any(|e| e["provider_id"] == "xingchiapi"),
+        "expected xingchiapi in cooldown-pool, got {pool_during}"
+    );
+    let resp4 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({"model":"xingchi-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp4.status(), StatusCode::OK);
+    let body4: Value = resp4.json().await.unwrap();
+    assert_eq!(
+        body4["output"][0]["content"][0]["text"],
+        "backup served during cooldown"
+    );
+    assert_eq!(
+        xingchi_hits.load(Ordering::SeqCst),
+        5,
+        "cooled identity must stay skipped before declared 5000ms recovery window opens"
+    );
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 6);
+
+    // 3. Advance clock just past declared 5000ms cooldown -> real business request runs recovery trial
+    // once on xingchiapi and restores healthy routing upon complete business success.
+    clock.0.store(now + 5_005, Ordering::SeqCst);
+    let resp5 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({"model":"xingchi-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp5.status(), StatusCode::OK);
+    let body5: Value = resp5.json().await.unwrap();
+    assert_eq!(
+        body5["output"][0]["content"][0]["text"],
+        "xingchiapi recovered on real trial"
+    );
+    assert_eq!(xingchi_hits.load(Ordering::SeqCst), 6);
+    assert_eq!(backup_hits.load(Ordering::SeqCst), 6);
+
+    let pool_after: Value = client
+        .get(format!(
+            "http://127.0.0.1:{listen_port}/_routecodex/health/cooldown-pool"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        pool_after["entries"].as_array().unwrap().is_empty(),
+        "successful business trial must clear xingchiapi cooldown: {pool_after}"
+    );
+
+    // 4. Subsequent request keeps using recovered xingchiapi on attempt 1.
+    let resp6 = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({"model":"xingchi-alias","input":"ping","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp6.status(), StatusCode::OK);
+    let body6: Value = resp6.json().await.unwrap();
+    assert_eq!(
+        body6["output"][0]["content"][0]["text"],
+        "xingchiapi recovered on real trial"
+    );
+    assert_eq!(xingchi_hits.load(Ordering::SeqCst), 7);
+
+    // 5. Final/only candidate exhaustion remains health-neutral (`last_candidate_terminal`).
+    let final_err = client
+        .post(format!("http://127.0.0.1:{final_port}/v1/responses"))
+        .json(&json!({"model":"xingchi-alias","input":"ping","stream":false}))
+        .send()
+        .await;
+    assert!(
+        final_err.is_err() || !final_err.unwrap().status().is_success(),
+        "final candidate transport exhaustion must break request transport"
+    );
+    assert_eq!(final_only_hits.load(Ordering::SeqCst), 1);
+    let pool_final: Value = client
+        .get(format!(
+            "http://127.0.0.1:{final_port}/_routecodex/health/cooldown-pool"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        pool_final["entries"].as_array().unwrap().is_empty(),
+        "final candidate transport exhaustion must remain health-neutral: {pool_final}"
+    );
+
+    drop(server);
+    let _ = x_sd.send(());
+    let _ = f_sd.send(());
+    let _ = b_sd.send(());
+    let _ = x_task.await;
+    let _ = f_task.await;
+    let _ = b_task.await;
+}

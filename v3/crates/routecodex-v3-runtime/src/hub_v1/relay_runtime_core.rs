@@ -93,12 +93,34 @@ pub(super) fn guard_v3_relay_sse_payload(
 /// Relay SSE 首帧守卫：provider 返回 SSE 后、投影前 await 首帧。首帧错误/空流/
 /// 挂起超时 -> V3ProviderError，走 provider 失败策略(reselect 切 provider)。
 /// 保证 provider SSE 错误在响应头前被捕获并切 provider，客户端无感、对话不断流。
+#[cfg(test)]
 async fn guard_relay_sse_first_frame(
+    request_id: &str,
+    provider_id: &str,
+    provider_protocol: V3HubProviderWireProtocol,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    sse_first_frame_timeout_ms: Option<u64>,
+    allow_responses_incomplete: bool,
+) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
+    guard_relay_sse_first_frame_with_elapsed(
+        request_id,
+        provider_id,
+        provider_protocol,
+        stream,
+        sse_first_frame_timeout_ms,
+        std::time::Duration::ZERO,
+        allow_responses_incomplete,
+    )
+    .await
+}
+
+pub(crate) async fn guard_relay_sse_first_frame_with_elapsed(
     request_id: &str,
     provider_id: &str,
     provider_protocol: V3HubProviderWireProtocol,
     mut stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
+    sse_first_frame_elapsed: std::time::Duration,
     allow_responses_incomplete: bool,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
@@ -113,7 +135,8 @@ async fn guard_relay_sse_first_frame(
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
             reason: "published provider SSE first-frame timeout is missing".to_string(),
-        })?;
+        })?
+        .saturating_sub(sse_first_frame_elapsed);
     let first_frame_deadline = tokio::time::Instant::now() + first_frame_timeout;
     let first = tokio::time::timeout_at(first_frame_deadline, stream.next())
         .await
@@ -285,27 +308,98 @@ pub(crate) fn guard_v3_provider_sse_attempt_deadline(
     ))
 }
 
+fn sse_chunk_has_non_keepalive_frame(
+    decoder: &mut routecodex_v3_sse::SseIncrementalDecoder,
+    chunk: &[u8],
+) -> bool {
+    let raw = routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(chunk);
+    let Ok(frames) = decoder.push(raw) else {
+        // Defer SSE framing errors to the downstream protocol decoder so it owns classification.
+        return true;
+    };
+    for frame in frames {
+        if crate::hub_v1::is_v3_provider_sse_transport_keepalive_frame(frame.frame().fields()) {
+            continue;
+        }
+        let data = crate::hub_v1::collect_v3_provider_sse_json_data(frame.frame().fields());
+        let trimmed = data.trim();
+        if trimmed.is_empty() || crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(trimmed)
+        {
+            continue;
+        }
+        if serde_json::from_str::<Value>(trimmed)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .as_deref()
+            == Some("ping")
+        {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
 pub(crate) fn guard_v3_provider_sse_idle(
     request_id: &str,
     provider_id: &str,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     idle_timeout: std::time::Duration,
 ) -> routecodex_v3_provider_responses::V3ProviderSseStream {
+    guard_v3_provider_sse_idle_with_first_frame_elapsed(
+        request_id,
+        provider_id,
+        stream,
+        idle_timeout,
+        std::time::Duration::ZERO,
+    )
+}
+
+pub(crate) fn guard_v3_provider_sse_idle_with_first_frame_elapsed(
+    request_id: &str,
+    provider_id: &str,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    idle_timeout: std::time::Duration,
+    first_frame_elapsed: std::time::Duration,
+) -> routecodex_v3_provider_responses::V3ProviderSseStream {
     use futures_util::StreamExt;
     let request_id = request_id.to_string();
     let provider_id = provider_id.to_string();
+    let initial_budget = idle_timeout.saturating_sub(first_frame_elapsed);
+    let initial_deadline = Some(tokio::time::Instant::now() + initial_budget);
+    let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
+        routecodex_v3_sse::SseTransportLimits::default(),
+    );
     Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
+        (stream, false, initial_deadline, decoder),
+        move |(mut stream, timed_out, mut first_frame_deadline, mut decoder)| {
             let request_id = request_id.clone();
             let provider_id = provider_id.clone();
             async move {
                 if timed_out {
                     return None;
                 }
-                match tokio::time::timeout(idle_timeout, stream.next()).await {
-                    Ok(Some(Ok(chunk))) => Some((Ok(chunk), (stream, false))),
-                    Ok(Some(Err(error))) => Some((Err(error), (stream, false))),
+                let next = match first_frame_deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline, stream.next()).await,
+                    None => tokio::time::timeout(idle_timeout, stream.next()).await,
+                };
+                match next {
+                    Ok(Some(Ok(chunk))) => {
+                        if first_frame_deadline.is_some()
+                            && sse_chunk_has_non_keepalive_frame(&mut decoder, &chunk)
+                        {
+                            first_frame_deadline = None;
+                        }
+                        Some((Ok(chunk), (stream, false, first_frame_deadline, decoder)))
+                    }
+                    Ok(Some(Err(error))) => {
+                        Some((Err(error), (stream, false, first_frame_deadline, decoder)))
+                    }
                     Ok(None) => None,
                     Err(_) => Some((
                         Err(V3ProviderError::Transport {
@@ -316,7 +410,7 @@ pub(crate) fn guard_v3_provider_sse_idle(
                                 idle_timeout.as_millis()
                             ),
                         }),
-                        (stream, true),
+                        (stream, true, first_frame_deadline, decoder),
                     )),
                 }
             }
@@ -326,7 +420,7 @@ pub(crate) fn guard_v3_provider_sse_idle(
 
 pub(crate) use super::relay_runtime_shared::{
     bind_v3_selected_business_auth_kind, v3_provider_sse_idle_timeout,
-    v3_relay_transport_response_timeout, V3RelayCoreError,
+    v3_relay_transport_response_timeout, v3_relay_transport_send_timeout, V3RelayCoreError,
 };
 
 /// 单次执行完成后，codec 从治理后响应里发布的 Chat Process 事实与治理后
@@ -1061,8 +1155,11 @@ where
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
-        let attempt_timeout =
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
+        let attempt_timeout = v3_relay_transport_send_timeout(
+            manifest,
+            &selected_target_provider_id,
+            transport_request.stream_intent(),
+        );
         let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;
         last_external_http = None;
         request_execution_control.begin_actual_send();
@@ -1182,6 +1279,8 @@ where
             return Err(V3RelayCoreError::Target(timing_error));
         }
         let provider_status = provider_raw.status();
+        let sse_first_frame_elapsed =
+            std::time::Duration::from_millis(provider_raw.sse_first_frame_elapsed_ms());
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
                 let provider_value: Value = match serde_json::from_slice(&bytes) {
@@ -1372,12 +1471,13 @@ where
                 );
                 let first_frame_result = match tokio::time::timeout_at(
                     attempt_deadline,
-                    guard_relay_sse_first_frame(
+                    guard_relay_sse_first_frame_with_elapsed(
                         request_id,
                         &selected_target_provider_id,
                         provider_wire_protocol,
                         stream,
                         sse_first_frame_timeout_ms,
+                        sse_first_frame_elapsed,
                         C::ENTRY_PROTOCOL == V3HubEntryProtocol::OpenAiChat,
                     ),
                 )

@@ -413,6 +413,34 @@ impl V3ProviderFailureRuntimeHealth {
         source: &V3Error01SourceRaised,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
+        self.record_provider_failure_record_from_source_with_policy_for_interface(
+            None,
+            failure_session_scope,
+            provider_id,
+            interface_id,
+            None,
+            auth_alias,
+            model_id,
+            source,
+            0,
+            now_ms,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn record_provider_failure_record_from_source_with_policy_for_interface(
+        &self,
+        manifest: Option<&V3Config05ManifestPublished>,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        interface_id: &str,
+        provider_type: Option<&str>,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        source: &V3Error01SourceRaised,
+        policy_status: u16,
+        now_ms: u64,
+    ) -> Result<V3ProviderFailureRecord, String> {
         let source_projection = serde_json::to_value(source)
             .map_err(|error| format!("serialize Err01 source raised: {error}"))?;
         let (_, classified) = crate::operation_runner::run_v3_err02_classified_operator(
@@ -438,6 +466,47 @@ impl V3ProviderFailureRuntimeHealth {
             status,
             &source.code,
         );
+        let matched_directive = if provider_http_status.is_none() {
+            manifest.and_then(|manifest| {
+                crate::provider_failure_runtime_policy::find_matching_provider_error_policy(
+                    manifest,
+                    failure_session_scope.routing_group(),
+                    provider_id,
+                    provider_type,
+                    model_id,
+                    policy_status,
+                    Some(&source.code),
+                    &source.message,
+                )
+            })
+        } else {
+            None
+        };
+        let matched_rule_id = matched_directive.and_then(|directive| {
+            directive
+                .path
+                .iter()
+                .any(|step| {
+                    matches!(
+                        step,
+                        routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
+                            failure_threshold: Some(_),
+                            ..
+                        }
+                    )
+                })
+                .then_some(directive.policy_id.as_str())
+        });
+        let policy = matched_directive
+            .map(|directive| {
+                crate::provider_failure_runtime_policy::provider_failure_policy_from_error_policy_directive(
+                    directive,
+                    policy_status,
+                    action.recovery,
+                )
+            })
+            .transpose()?
+            .flatten();
         self.defer_provider_health_action(
             failure_session_scope,
             provider_id,
@@ -448,7 +517,8 @@ impl V3ProviderFailureRuntimeHealth {
             now_ms,
             &action,
             (400..=599).contains(&status),
-            None,
+            matched_rule_id,
+            policy,
             0,
         )
     }
@@ -641,6 +711,21 @@ impl V3ProviderFailureRuntimeHealth {
             .map_err(Ok)?
             .flatten()
         {
+            let matched_rule_id = matched_policy_directive.and_then(|directive| {
+                directive
+                    .path
+                    .iter()
+                    .any(|step| {
+                        matches!(
+                            step,
+                            routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
+                                failure_threshold: Some(_),
+                                ..
+                            }
+                        )
+                    })
+                    .then_some(directive.policy_id.as_str())
+            });
             return self
                 .defer_provider_health_action(
                     failure_session_scope,
@@ -652,6 +737,7 @@ impl V3ProviderFailureRuntimeHealth {
                     now_ms,
                     &failure_action,
                     false,
+                    matched_rule_id,
                     Some(policy),
                     configured_retry_backoff_ms(matched_policy_directive, 0),
                 )
@@ -675,6 +761,7 @@ impl V3ProviderFailureRuntimeHealth {
             now_ms,
             &action,
             false,
+            None,
             None,
             configured_retry_backoff_ms(matched_policy_directive, 0),
         )

@@ -1149,3 +1149,180 @@ async fn json_intent_decodes_json_body_when_provider_labels_content_type_as_sse(
         }
     }
 }
+
+#[tokio::test]
+async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request_deadline() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // 1. Delayed genuine SSE past request_timeout_ms (80ms) succeeds within sse_first_frame_timeout_ms (500ms)
+    // and records elapsed peek wait for the downstream Runtime first-frame guard.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_delayed_sse\",\"status\":\"completed\",\"output\":[]}}\n\n";
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
+        conn.write_all(chunk.as_bytes()).await.unwrap();
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-delayed-sse-vs-json-budget",
+            "delayed-sse-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-delayed-sse".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(80)),
+            5_000,
+            Some(500),
+        )
+        .unwrap();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect(
+            "genuine SSE within sse_first_frame_timeout_ms must survive short request deadline",
+        );
+    server.abort();
+    assert!(
+        raw.sse_first_frame_elapsed_ms() >= 120,
+        "expected sniff elapsed >= 120ms, got {}",
+        raw.sse_first_frame_elapsed_ms()
+    );
+    assert_eq!(raw.body_kind(), crate::V3ProviderResponseBodyKind::Sse);
+
+    // 2. Mislabeled JSON arriving after request_timeout_ms (80ms) is still rejected by request deadline.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let json_body = r#"{"id":"resp_late_json"}"#;
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-late-json-vs-budget",
+            "delayed-json-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-late-json".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(80)),
+            5_000,
+            Some(500),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("mislabeled JSON delayed past request deadline must time out");
+    server.abort();
+    assert!(
+        err.to_string().contains("budget exhausted"),
+        "expected request budget timeout error, got {err}"
+    );
+
+    // 3. Mislabeled JSON arriving after short sse_first_frame_timeout_ms (80ms) yet within longer
+    // request_timeout_ms (500ms) must succeed as Json.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let json_body = r#"{"id":"resp_slow_disguised_json_ok"}"#;
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-slow-disguised-json-ok",
+            "slow-disguised-json-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-slow-disguised-json".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(500)),
+            5_000,
+            Some(80),
+        )
+        .unwrap();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect(
+        "mislabeled JSON past short sse_first_frame_timeout_ms must still obey request_timeout_ms",
+    );
+    server.abort();
+    assert_eq!(raw.body_kind(), crate::V3ProviderResponseBodyKind::Json);
+    let parsed: Value = serde_json::from_slice(&raw.into_body_bytes().await.unwrap()).unwrap();
+    assert_eq!(parsed["id"], "resp_slow_disguised_json_ok");
+
+    // 4. Genuine SSE arriving after sse_first_frame_timeout_ms (80ms) must fail even when
+    // request_timeout_ms (500ms) is longer.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_late_sse\",\"status\":\"completed\",\"output\":[]}}\n\n";
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-late-sse-long-req",
+            "late-sse-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-late-sse-long-req".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(500)),
+            5_000,
+            Some(80),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("genuine SSE past sse_first_frame_timeout_ms must fail immediately");
+    server.abort();
+    assert!(
+        err.to_string().contains("first frame"),
+        "expected SSE first-frame timeout error, got {err}"
+    );
+}

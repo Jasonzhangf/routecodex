@@ -798,7 +798,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             request_execution_control.begin_actual_send();
             active_attempt_dispatched = true;
             let transport_result = match tokio::time::timeout(
-                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
+                v3_relay_transport_send_timeout(
+                    manifest,
+                    &selected_target_provider_id,
+                    transport_request.stream_intent(),
+                ),
                 transport.send(transport_request),
             )
             .await
@@ -944,6 +948,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
             }
             let provider_status = provider_raw.status();
+            let sse_first_frame_elapsed =
+                std::time::Duration::from_millis(provider_raw.sse_first_frame_elapsed_ms());
             selected_observability.provider_status = Some(provider_status);
             let provider_id = provider_raw.provider_id().to_string();
             match provider_raw.into_body() {
@@ -1293,12 +1299,14 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         stream
                     };
                     let stream_observation = V3RuntimeStreamObservation::default();
-                    let stream = crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        sse_idle_timeout,
-                    );
+                    let stream =
+                        crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle_with_first_frame_elapsed(
+                            &input.request_id,
+                            &selected_target_provider_id,
+                            stream,
+                            sse_idle_timeout,
+                            sse_first_frame_elapsed,
+                        );
                     let local_failure = std::sync::Arc::new(std::sync::Mutex::new(None));
                     let stream = crate::hub_v1::relay_runtime_core::guard_v3_relay_sse_payload(
                         &input.request_id,

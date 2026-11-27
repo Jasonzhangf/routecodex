@@ -26,7 +26,8 @@ pub use health::{
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
     V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthError, V3ProviderHealthListenerScope,
-    V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
+    V3ProviderHealthStore, V3ProviderMatchedPolicyRule, V3ProviderSessionAvailabilityReader,
+    V3_COOLDOWN_MANUAL_MAX_MS,
 };
 pub use key_health::{
     V3ProviderBusinessRecoveryAcquisition, V3ProviderHealthProbePermit,

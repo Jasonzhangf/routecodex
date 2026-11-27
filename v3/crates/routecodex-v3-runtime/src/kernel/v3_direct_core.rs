@@ -687,6 +687,7 @@ where
                 }
                 let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
+                        manifest: Some(manifest),
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
                         recovery_control: Some(&request_execution_control),
@@ -901,6 +902,7 @@ where
             );
             let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                 &V3DirectProviderFailurePolicyContext {
+                    manifest: Some(manifest),
                     failure_session_scope: &direct_failure_session_scope,
                     provider_health: &provider_health,
                     recovery_control: Some(&request_execution_control),
@@ -1084,6 +1086,7 @@ where
                 }
                 let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                         &V3DirectProviderFailurePolicyContext {
+                            manifest: Some(manifest),
                             failure_session_scope: &direct_failure_session_scope,
                             provider_health: &provider_health,
                             recovery_control: Some(&request_execution_control),
@@ -1285,6 +1288,7 @@ where
                         }
                         let mut policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                             &V3DirectProviderFailurePolicyContext {
+                                manifest: Some(manifest),
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
                                 recovery_control: Some(&request_execution_control),
@@ -1454,6 +1458,7 @@ where
                         };
                         let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                             &V3DirectProviderFailurePolicyContext {
+                                manifest: Some(manifest),
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
                                 recovery_control: Some(&request_execution_control),

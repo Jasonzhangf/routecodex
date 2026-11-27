@@ -796,9 +796,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         last_external_http = None;
         request_execution_control.begin_actual_send();
         let provider_raw = match tokio::time::timeout(
-            default_transport::responses_direct_transport_response_timeout(
+            default_transport::responses_direct_transport_send_timeout(
                 manifest,
                 &policy.target.candidate.provider_id,
+                transport_request.stream_intent(),
             ),
             transport.send(transport_request),
         )
@@ -894,6 +895,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 };
                 let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
+                        manifest: Some(manifest),
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
                         recovery_control: Some(&request_execution_control),
@@ -1117,6 +1119,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
                 let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
+                        manifest: Some(manifest),
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
                         recovery_control: Some(&request_execution_control),
@@ -1281,6 +1284,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 };
                 let policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                     &V3DirectProviderFailurePolicyContext {
+                        manifest: Some(manifest),
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
                         recovery_control: Some(&request_execution_control),
@@ -1465,6 +1469,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             // error payload instead of sleeping to a deadline.
                             let mut policy_result = match run_v3_direct_provider_failure_policy_with_active_keys(
                                 &V3DirectProviderFailurePolicyContext {
+                                    manifest: Some(manifest),
                                     failure_session_scope: &direct_failure_session_scope,
                                     provider_health: &provider_health,
                                     recovery_control: Some(&request_execution_control),

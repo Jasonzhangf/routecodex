@@ -1041,6 +1041,7 @@ fn hold_sse_handoff(
 ) -> V3ProviderResp14Raw {
     let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
     let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
+    let sse_first_frame_elapsed_ms = raw.sse_first_frame_elapsed_ms();
     let (request_id, provider_id, status, headers, body) = raw.into_parts();
     let V3ProviderResponseBody::Sse(stream) = body else {
         unreachable!("provider handoff must only wrap an SSE response");
@@ -1116,6 +1117,7 @@ fn hold_sse_handoff(
     V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
         .with_compatibility_profile(compatibility_profile)
         .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms)
+        .with_sse_first_frame_elapsed_ms(sse_first_frame_elapsed_ms)
 }
 
 /// Constructing this future does not mark the phase. Its body runs only when
@@ -1704,6 +1706,20 @@ async fn read_json_disguised_as_sse_or_stream(
     compatibility_profile: Option<String>,
     sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+    let sniff_started = Instant::now();
+    let sse_first_frame_budget = Duration::from_millis(
+        sse_first_frame_timeout_ms
+            .unwrap_or_else(routecodex_v3_config::default_provider_sse_first_frame_timeout_ms),
+    );
+    let sse_first_frame_deadline = sniff_started + sse_first_frame_budget;
+    // Wait up to `max(deadline, sse_first_frame_deadline)` before classifying:
+    // slow disguised JSON remains legal until `deadline` (`request_timeout_ms`),
+    // while genuine SSE still fails immediately once `sse_first_frame_budget` expires.
+    let sniff_deadline = Some(
+        deadline
+            .map(|deadline| deadline.max(sse_first_frame_deadline))
+            .unwrap_or(sse_first_frame_deadline),
+    );
     let mut byte_stream = Box::pin(response.bytes_stream());
     let mut prefetched = Vec::<Bytes>::new();
     let mut first_non_ws: Option<u8> = None;
@@ -1715,7 +1731,7 @@ async fn read_json_disguised_as_sse_or_stream(
         status,
         &headers,
         cancellation.as_ref(),
-        deadline,
+        sniff_deadline,
     )
     .await?
     {
@@ -1734,6 +1750,9 @@ async fn read_json_disguised_as_sse_or_stream(
     }
 
     if matches!(first_non_ws, Some(b'{') | Some(b'[')) {
+        if let Some(deadline) = deadline {
+            remaining_timeout(deadline, &request_id, &provider_id)?;
+        }
         let mut body = Vec::new();
         for chunk in prefetched {
             body.extend_from_slice(&chunk);
@@ -1758,6 +1777,18 @@ async fn read_json_disguised_as_sse_or_stream(
         );
     }
 
+    let elapsed = sniff_started.elapsed();
+    if elapsed > sse_first_frame_budget {
+        return Err(V3ProviderError::Transport {
+            request_id,
+            provider_id,
+            reason: format!(
+                "provider SSE stream did not produce a first frame within timeout ({}ms)",
+                sse_first_frame_budget.as_millis()
+            ),
+        });
+    }
+    let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
     let replayed = stream::iter(prefetched.into_iter().map(Ok)).chain(byte_stream);
     let stream = validated_sse_stream(
         replayed,
@@ -1768,7 +1799,8 @@ async fn read_json_disguised_as_sse_or_stream(
     Ok(
         V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
             .with_compatibility_profile(compatibility_profile)
-            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms),
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms)
+            .with_sse_first_frame_elapsed_ms(elapsed_ms),
     )
 }
 /// 上游模型发现（WebUI onboarding）使用的合成 request id；只出现在错误变体里。

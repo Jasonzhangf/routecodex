@@ -127,6 +127,26 @@ pub(crate) fn v3_relay_transport_response_timeout(
     )
 }
 
+/// Outer transport guard for `transport.send(...)`.
+///
+/// `request_timeout_ms` bounds response headers and non-streaming JSON bodies inside
+/// `ProviderResponsesTransport`. When a `Json` request receives `Content-Type: text/event-stream`,
+/// sniffing the first body chunk may use up to `sse_first_frame_timeout_ms` after headers so
+/// genuine delayed SSE streams can hand off with their remaining first-frame budget intact.
+pub(crate) fn v3_relay_transport_send_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+    stream_intent: routecodex_v3_provider_responses::V3ResponsesStreamIntent,
+) -> std::time::Duration {
+    let request_timeout = v3_relay_transport_response_timeout(manifest, provider_id);
+    if stream_intent != routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json {
+        return request_timeout;
+    }
+    let sse_first_frame =
+        v3_provider_sse_idle_timeout(manifest, provider_id).unwrap_or(std::time::Duration::ZERO);
+    request_timeout.saturating_add(sse_first_frame)
+}
+
 /// The published SSE timeout covers both first frame and inter-frame idle time.
 pub(crate) fn v3_provider_sse_idle_timeout(
     manifest: &V3Config05ManifestPublished,

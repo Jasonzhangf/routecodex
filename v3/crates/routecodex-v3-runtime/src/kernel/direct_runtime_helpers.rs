@@ -148,6 +148,7 @@ pub(crate) struct V3DirectProviderFailurePolicyContext<
     'ctx,
     R: V3ProviderAvailabilityReader + ?Sized,
 > {
+    manifest: Option<&'ctx V3Config05ManifestPublished>,
     failure_session_scope: &'ctx V3ProviderFailureSessionScope,
     provider_health: &'ctx V3ProviderFailureRuntimeHealth,
     recovery_control: Option<&'ctx crate::execution_control::V3RequestExecutionControl>,
@@ -234,19 +235,24 @@ fn run_v3_direct_policy_error_02_to_05_decision(
 
 fn record_v3_direct_provider_failure_record(
     provider_health: &V3ProviderFailureRuntimeHealth,
+    manifest: Option<&V3Config05ManifestPublished>,
     failure_session_scope: &V3ProviderFailureSessionScope,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     source: &V3Error01SourceRaised,
+    status: u16,
     now_epoch_ms: u64,
 ) -> crate::shared::V3DirectSourceResult<V3ProviderFailureRecord> {
     provider_health
-        .record_provider_failure_record_from_source_for_interface(
+        .record_provider_failure_record_from_source_with_policy_for_interface(
+            manifest,
             failure_session_scope,
             &selected.candidate.provider_id,
             &selected.candidate.interface_id,
+            Some(&selected.candidate.provider_type),
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             source,
+            status,
             now_epoch_ms,
         )
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
@@ -1283,9 +1289,11 @@ async fn run_v3_direct_provider_failure_policy_inner<R: V3ProviderAvailabilityRe
     } else {
         match record_v3_direct_provider_failure_record(
             context.provider_health,
+            context.manifest,
             context.failure_session_scope,
             selected,
             &source,
+            status,
             failure_now_ms,
         ) {
             Ok(record) => record,
