@@ -9252,6 +9252,234 @@ async fn issue4a0b3aa_r18_named_orphan_with_empty_messages_public() {
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r19_dual_idless_named_receipt_with_existing_explicit_named_receipt_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r19_dual_idless_named_receipt",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r19-named-receipt-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": "second-output",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_name": "send_message_to_thread",
+                    "responses_tool_output_namespace": "codex_tui",
+                    "responses_item_id": "fco_2"
+                }
+            }],
+            "input": [{
+                "type": "function_call_output",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "first-output"
+            }]
+        }))
+        .send()
+        .await
+        .expect("ID-less named receipt with existing explicit fco_2 named receipt must succeed");
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history r19 named receipt capture timeout")
+        .expect("dual-history r19 named receipt capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        input.len(),
+        2,
+        "both fco_2 and new ID-less named receipt must reach first provider: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[0],
+        json!({
+            "type": "function_call_output",
+            "id": "fco_2",
+            "name": "send_message_to_thread",
+            "namespace": "codex_tui",
+            "output": "second-output"
+        })
+    );
+    assert!(
+        input[1].get("id").is_none() && input[1].get("call_id").is_none(),
+        "new named receipt must stay ID-less without call_id: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "function_call_output",
+            "name": "send_message_to_thread",
+            "namespace": "codex_tui",
+            "output": "first-output"
+        })
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r19_dual_idless_before_exact_twin_with_chat_user_row_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r19_dual_tso_with_chat_user",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r19-dual-tso-user-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let tool_one =
+        json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+    let tool_two =
+        json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_two).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_item_id": "tso_2",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                },
+                {
+                    "role": "user",
+                    "content": "follow up"
+                }
+            ],
+            "input": [
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_one
+                },
+                {
+                    "type": "tool_search_output",
+                    "id": "tso_2",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_two
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("ID-less input before exact tso_2 twin with Chat user row must succeed");
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history r19 tso user capture timeout")
+        .expect("dual-history r19 tso user capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    let tso_items: Vec<&Value> = input
+        .iter()
+        .filter(|item| item["type"] == "tool_search_output")
+        .collect();
+    assert_eq!(
+        tso_items.len(),
+        2,
+        "both tool_search_output receipts must appear exactly once: {}",
+        capture.body
+    );
+    assert_eq!(
+        input.len(),
+        3,
+        "idless_tso_1, tso_2, and Chat user row must all reach first provider: {}",
+        capture.body
+    );
+    assert!(
+        input[0].get("id").is_none(),
+        "idless_tso_1 must precede tso_2 and remain ID-less: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[0],
+        json!({
+            "type": "tool_search_output",
+            "call_id": "call_1",
+            "execution": "client",
+            "status": "completed",
+            "tools": tool_one
+        })
+    );
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "tool_search_output",
+            "id": "tso_2",
+            "call_id": "call_1",
+            "execution": "client",
+            "status": "completed",
+            "tools": tool_two
+        })
+    );
+    assert_eq!(input[2]["type"], "message");
+    assert_eq!(input[2]["role"], "user");
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

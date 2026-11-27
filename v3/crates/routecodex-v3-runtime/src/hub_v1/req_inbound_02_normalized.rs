@@ -607,12 +607,15 @@ fn merge_responses_chat_histories(
         let mut merged = sanitized_source;
         let mut merged_entries =
             vec![V3HubMessageHistoryProvenance::default(); original_source_len];
+        let mut matched_source_for_decoded = vec![None; decoded.len()];
+        let mut decoded_entry_provenances = Vec::with_capacity(decoded.len());
         for (dec_idx, result) in decoded.iter().enumerate() {
             let result_provenance = decoded_provenance
                 .message_entries
                 .get(dec_idx)
                 .cloned()
                 .unwrap_or_default();
+            decoded_entry_provenances.push(result_provenance.clone());
             let result_item_id = tool_output_item_id(result);
             let is_unreserved_candidate = |idx: usize| {
                 !source_reserved[idx] && same_legacy_tool_output_identity(&merged[idx], result)
@@ -622,6 +625,12 @@ fn merge_responses_chat_histories(
             } else if result_item_id.is_some() {
                 (0..original_source_len).find(|&idx| {
                     is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
+                })
+            } else if tool_output_name(result).is_some() {
+                (0..original_source_len).find(|&idx| {
+                    is_unreserved_candidate(idx)
+                        && tool_output_item_id(&merged[idx]).is_none()
+                        && merge_equivalent_chat_value(&merged[idx], result).is_some()
                 })
             } else {
                 (0..original_source_len)
@@ -637,6 +646,29 @@ fn merge_responses_chat_histories(
                     "Responses inbound canonicalization failed: conflicting tool output representations".to_string()
                 })?;
                 merged_entries[pos] = result_provenance;
+                matched_source_for_decoded[dec_idx] = Some(pos);
+            }
+        }
+        let mut source_to_merged_pos: Vec<usize> = (0..original_source_len).collect();
+        for (dec_idx, result) in decoded.iter().enumerate() {
+            if matched_source_for_decoded[dec_idx].is_some() {
+                continue;
+            }
+            let result_provenance = decoded_entry_provenances[dec_idx].clone();
+            if let Some(next_source_idx) = matched_source_for_decoded[dec_idx + 1..]
+                .iter()
+                .flatten()
+                .copied()
+                .next()
+            {
+                let insert_at = source_to_merged_pos[next_source_idx];
+                merged.insert(insert_at, result.clone());
+                merged_entries.insert(insert_at, result_provenance);
+                for pos in &mut source_to_merged_pos {
+                    if *pos >= insert_at {
+                        *pos += 1;
+                    }
+                }
             } else {
                 merged.push(result.clone());
                 merged_entries.push(result_provenance);
@@ -1893,20 +1925,91 @@ mod tests {
             .as_array()
             .expect("canonical Chat messages");
         assert_eq!(messages.len(), 2, "{messages:#?}");
-        assert_eq!(
-            messages[0]["routecodex_chat_extension"]["responses_item_id"],
-            json!("tso_2")
-        );
-        assert_eq!(
-            normalized.explicit_history_pairing.message_order(0),
-            Some(1)
-        );
-        assert!(messages[1]["routecodex_chat_extension"]
+        assert!(messages[0]["routecodex_chat_extension"]
             .get("responses_item_id")
             .is_none());
         assert_eq!(
-            normalized.explicit_history_pairing.message_order(1),
+            normalized.explicit_history_pairing.message_order(0),
             Some(0)
+        );
+        assert_eq!(
+            messages[1]["routecodex_chat_extension"]["responses_item_id"],
+            json!("tso_2")
+        );
+        assert_eq!(
+            normalized.explicit_history_pairing.message_order(1),
+            Some(1)
+        );
+
+        let with_trailing_user_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": serde_json::to_string(&tool_two).unwrap(),
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_type": "tool_search_output",
+                            "responses_output_field": "tools",
+                            "responses_item_id": "tso_2",
+                            "responses_status": "completed",
+                            "responses_execution": "client"
+                        }
+                    },
+                    {
+                        "role": "user",
+                        "content": "follow up"
+                    }
+                ],
+                "input": [
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_1",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": tool_one
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "id": "tso_2",
+                        "call_id": "call_1",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": tool_two
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let with_trailing_user =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(with_trailing_user_raw)
+                .expect("ID-less incoming receipt before tso_2 with trailing Chat user row must preserve native order");
+        let with_user_messages = with_trailing_user.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(with_user_messages.len(), 3, "{with_user_messages:#?}");
+        assert!(with_user_messages[0]["routecodex_chat_extension"]
+            .get("responses_item_id")
+            .is_none());
+        assert_eq!(
+            with_trailing_user.explicit_history_pairing.message_order(0),
+            Some(0)
+        );
+        assert_eq!(
+            with_user_messages[1]["routecodex_chat_extension"]["responses_item_id"],
+            json!("tso_2")
+        );
+        assert_eq!(
+            with_trailing_user.explicit_history_pairing.message_order(1),
+            Some(1)
+        );
+        assert_eq!(with_user_messages[2]["role"], json!("user"));
+        assert_eq!(
+            with_trailing_user.explicit_history_pairing.message_order(2),
+            None
         );
     }
 
@@ -1953,7 +2056,7 @@ mod tests {
         assert_eq!(prov.message_input_order, Some(0));
 
         // Prior named output with exact item_id is reserved for exact incoming twin so an
-        // earlier ID-less named output appends without conflict.
+        // earlier ID-less named output inserts before it without conflict.
         let twin_and_idless_raw = raw_request(
             json!({
                 "model": "gpt-5.5",
@@ -1993,15 +2096,66 @@ mod tests {
             .as_array()
             .expect("canonical Chat messages");
         assert_eq!(twin_messages.len(), 2, "{twin_messages:#?}");
-        assert_eq!(twin_messages[0]["content"], json!("second-output"));
+        assert_eq!(twin_messages[0]["content"], json!("first-output"));
+        assert!(twin_messages[0]["routecodex_chat_extension"]
+            .get("responses_item_id")
+            .is_none());
         assert_eq!(
             twin_normalized.explicit_history_pairing.message_order(0),
-            Some(1)
-        );
-        assert_eq!(twin_messages[1]["content"], json!("first-output"));
-        assert_eq!(
-            twin_normalized.explicit_history_pairing.message_order(1),
             Some(0)
         );
+        assert_eq!(twin_messages[1]["content"], json!("second-output"));
+        assert_eq!(
+            twin_messages[1]["routecodex_chat_extension"]["responses_item_id"],
+            json!("fco_2")
+        );
+        assert_eq!(
+            twin_normalized.explicit_history_pairing.message_order(1),
+            Some(1)
+        );
+
+        // Existing named output fco_2 with only an ID-less distinct named output in `input`
+        // must keep both receipts without falsely matching fco_2 by name/namespace alone.
+        let idless_with_existing_fco_2_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "user",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_name": "send_message_to_thread",
+                        "responses_tool_output_namespace": "codex_tui",
+                        "responses_item_id": "fco_2"
+                    }
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "name": "send_message_to_thread",
+                    "namespace": "codex_tui",
+                    "output": "first-output"
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let idless_with_existing_fco_2 =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+                idless_with_existing_fco_2_raw,
+            )
+            .expect("ID-less named receipt must remain distinct from explicit fco_2 receipt");
+        let distinct_messages = idless_with_existing_fco_2.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(distinct_messages.len(), 2, "{distinct_messages:#?}");
+        assert_eq!(distinct_messages[0]["content"], json!("second-output"));
+        assert_eq!(
+            distinct_messages[0]["routecodex_chat_extension"]["responses_item_id"],
+            json!("fco_2")
+        );
+        assert_eq!(distinct_messages[1]["content"], json!("first-output"));
+        assert!(distinct_messages[1]["routecodex_chat_extension"]
+            .get("responses_item_id")
+            .is_none());
     }
 }
