@@ -52,9 +52,7 @@ pub(crate) fn classify_v3_provider_compat_error(
     if reason.starts_with("ProviderCompatPayloadBoundaryViolation") {
         V3ProviderCompatError::new_payload_boundary(stage, profile.as_str().to_string(), reason)
     } else if matches!(stage, "request" | "request_protocol")
-        && (reason.contains("MalformedOutboundField")
-            || reason.contains("UnmappedOutboundFields")
-            || reason.contains("codec malformed"))
+        && (reason.contains("MalformedOutboundField") || reason.contains("codec malformed"))
     {
         V3ProviderCompatError {
             stage,

@@ -339,20 +339,27 @@ fn openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context()
 }
 
 #[test]
-fn openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire() {
+fn openai_chat_wire_omits_unknown_client_metadata_with_drop_record() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
         "client_metadata": {"unknown":{"nested":true}}
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("client metadata projected to OpenAI Chat metadata must be string-valued");
+    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::OpenAiChat,
+    )
+    .expect("unknown client_metadata without target slot must warn/omit without blocking request");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(request.get("client_metadata").is_none(), "{request}");
+    assert!(request.get("metadata").is_none(), "{request}");
+    assert_eq!(request["messages"][0]["content"], "hello");
     assert!(
-        error.contains("$.request.client_metadata.unknown"),
-        "{error}"
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.client_metadata.unknown"),
+        "expected drop record for $.client_metadata.unknown: {drops:?}"
     );
 }
 
@@ -530,9 +537,7 @@ fn openai_chat_wire_preserves_preflattened_apply_patch_function_schema() {
 }
 
 #[test]
-fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
-    // custom 工具含非 type/name/description/format 字段：拒绝（UnmappedOutboundFields），
-    // 禁止降级为 function 静默丢失（opencode-go 等上游以 unknown variant 'custom' 拒绝）。
+fn openai_chat_wire_flattens_custom_tool_and_drops_extra_unmapped_fields() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "apply"}],
@@ -544,21 +549,29 @@ fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
             "schema": {"type": "object"}
         }]
     });
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("custom tool with unmapped field must be rejected, not downgraded");
-    let message = error.to_string();
+    let (request, drops) = build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+        &payload,
+        &V3ProjectionDropContext::disabled(),
+    )
+    .expect(
+        "custom tool extra unmapped field must emit drop record and preserve mapped function tool",
+    );
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
     assert!(
-        message.contains("UnmappedOutboundFields") && message.contains("schema"),
-        "unexpected rejection: {message}"
+        request["tools"][0]["function"].get("schema").is_none(),
+        "{request}"
     );
     assert!(
-        !message.contains("function"),
-        "must not fall back to function: {message}"
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0].schema"),
+        "expected drop record for $.tools[0].schema: {drops:?}"
     );
 }
 
 #[test]
-fn openai_chat_wire_rejects_unknown_web_search_content_type() {
+fn openai_chat_wire_omits_unknown_web_search_content_type_with_drop_record() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "search"}],
@@ -569,11 +582,19 @@ fn openai_chat_wire_rejects_unknown_web_search_content_type() {
         }]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("unknown search content type must fail before provider send");
+    let (request, drops) = build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+        &payload,
+        &V3ProjectionDropContext::disabled(),
+    )
+    .expect("unknown search_content_types element must emit drop record without blocking web_search_options");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.tools[0].search_content_types"), "{error}");
+    assert_eq!(request["web_search_options"], json!({}));
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0].search_content_types"),
+        "expected drop record for $.tools[0].search_content_types: {drops:?}"
+    );
 }
 
 #[test]
@@ -911,17 +932,24 @@ fn anthropic_wire_preserves_service_tier_request_field() {
 }
 
 #[test]
-fn anthropic_wire_rejects_chat_store_true_without_silent_semantic_loss() {
+fn anthropic_wire_omits_chat_store_true_with_drop_record() {
     let payload = json!({
         "model": "claude-test",
         "messages": [{"role": "user", "content": "hello"}],
         "store": true
     });
 
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Anthropic)
-            .expect_err("store=true has no Anthropic equivalent");
-    assert!(error.contains("$.request.store"), "{error}");
+    let (wire, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Anthropic,
+    )
+    .expect("store=true without Anthropic slot must warn/omit while preserving message payload");
+    assert!(wire.get("store").is_none(), "{wire}");
+    assert_eq!(wire["messages"][0]["content"], "hello");
+    assert!(
+        drops.iter().any(|drop| drop.json_path == "$.store"),
+        "expected drop record for $.store: {drops:?}"
+    );
 }
 
 #[test]
@@ -1270,16 +1298,24 @@ fn codex_client_metadata_does_not_reach_responses_wire() {
 }
 
 #[test]
-fn relay_responses_wire_rejects_unconsumed_previous_response_id() {
+fn relay_responses_wire_omits_unconsumed_previous_response_id_with_drop_record() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
         "previous_response_id": "unsupported_previous_response_id"
     });
-    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("Responses continuation must not cross into Relay outbound");
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.previous_response_id"), "{error}");
+    let (wire, drops) = build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+        &payload, true,
+    )
+    .expect("unconsumed previous_response_id must emit drop record and omit instead of aborting Relay outbound");
+    assert!(wire.get("previous_response_id").is_none(), "{wire}");
+    assert_eq!(wire["input"][0]["content"][0]["text"], "hello");
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.previous_response_id"),
+        "expected drop record for $.previous_response_id: {drops:?}"
+    );
 }
 
 #[test]

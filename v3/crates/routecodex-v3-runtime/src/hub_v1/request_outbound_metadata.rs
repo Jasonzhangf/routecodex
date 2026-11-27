@@ -1,10 +1,12 @@
 use serde_json::{Map, Value};
 
 use super::client_metadata_projection::unsupported_client_metadata_paths;
+use crate::projection_drop_log::V3ProjectionDropRecord;
 
 pub(super) fn project_openai_client_metadata_to_metadata(
     projected: &mut Value,
     target_protocol: &str,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let Some(row) = projected.as_object_mut() else {
         return Ok(());
@@ -15,11 +17,16 @@ pub(super) fn project_openai_client_metadata_to_metadata(
     let client_metadata = client_metadata.as_object().ok_or_else(|| {
         format!("MalformedOutboundField target_protocol={target_protocol} path=$.client_metadata")
     })?;
-    let unsupported = unsupported_client_metadata_paths(client_metadata);
-    if !unsupported.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol={target_protocol} paths={}",
-            unsupported.join(",")
+    for path in unsupported_client_metadata_paths(client_metadata) {
+        let key = path
+            .strip_prefix("$.request.client_metadata.")
+            .unwrap_or(path.as_str());
+        drops.push(V3ProjectionDropRecord::new(
+            target_protocol,
+            format!("$.client_metadata.{key}"),
+            "unmapped_target_protocol_field_unrepresentable",
+            client_metadata.get(key).cloned().unwrap_or(Value::Null),
+            "project_openai_client_metadata_to_metadata",
         ));
     }
     let Some(user_id) = client_metadata.get("user_id") else {

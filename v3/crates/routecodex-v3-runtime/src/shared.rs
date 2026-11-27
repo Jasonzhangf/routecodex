@@ -1461,9 +1461,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_unregistered_responses_event_still_fails_closed() {
-        // Fail-closed lock for DIRECT: registering `response.metadata` must not
-        // admit unregistered `response.*` siblings or private namespaces.
+    async fn direct_sse_unregistered_responses_event_alone_fails_without_fake_completion() {
+        // An unknown non-error event alone carries no client output or terminal;
+        // precommit keeps buffering and reports empty-stream failure at EOF.
         for frame in [
             b"event: response.metadat\ndata: {\"type\":\"response.metadat\",\"sequence_number\":6}\n\n".as_slice(),
             b"event: provider_private.websocket_timing\ndata: {\"type\":\"provider_private.websocket_timing\",\"elapsed_ms\":12}\n\n".as_slice(),
@@ -1482,13 +1482,24 @@ mod tests {
             );
             assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
             assert_eq!(error.source_stage, "V3ProviderResp14Raw");
-            assert_eq!(error.code, "provider_response_sse_event_invalid");
-            assert!(
-                error.message.contains("is not registered"),
-                "unexpected message: {}",
-                error.message
-            );
         }
+
+        // When paired with a deliverable output + completed terminal, unknown
+        // non-error extension events do not block the stream.
+        let valid_with_unknown: V3ProviderSseStream = Box::pin(stream::iter([
+            Ok(b"event: response.metadat\ndata: {\"type\":\"response.metadat\",\"sequence_number\":6}\n\n".to_vec()),
+            Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n".to_vec()),
+        ]));
+        assert!(guard_initial_direct_sse_provider_failure_with_timeout(
+            "provider",
+            valid_with_unknown,
+            std::time::Duration::from_secs(1),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await
+        .is_ok());
     }
 
     #[tokio::test]

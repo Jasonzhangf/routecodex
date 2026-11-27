@@ -4,19 +4,26 @@
 // carries Chat semantics. Only fields with an exact Gemini equivalent are
 // consumed here; target-unsupported semantics fail before provider wire build.
 
-fn project_gemini_compatible_fields(source: &mut Value) -> Result<(), String> {
-    project_gemini_compatible_fields_inner(source)
+fn project_gemini_compatible_fields(
+    source: &mut Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
+    project_gemini_compatible_fields_inner(source, drops)
 }
 
 fn project_gemini_compatible_fields_for_selected_target(
     source: &mut Value,
     model_capabilities: &[String],
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
-    validate_gemini_thinking_config_for_selected_target(source, model_capabilities)?;
-    project_gemini_compatible_fields_inner(source)
+    validate_gemini_thinking_config_for_selected_target(source, model_capabilities, drops)?;
+    project_gemini_compatible_fields_inner(source, drops)
 }
 
-fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), String> {
+fn project_gemini_compatible_fields_inner(
+    source: &mut Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
     let native_request = take_gemini_native_request_record(source)?;
     let governed_tools = source.get("tools").cloned();
     project_gemini_chat_request_with_governed_tools(source)?;
@@ -24,15 +31,15 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
         return Ok(());
     };
     if let Some(effort) = row.remove("reasoning_effort") {
-        project_gemini_reasoning_effort(row, effort)?;
+        project_gemini_reasoning_effort(row, effort, drops)?;
     }
     if let Some(tool_choice) = row.remove("tool_choice") {
-        project_gemini_tool_choice(row, tool_choice)?;
+        project_gemini_tool_choice(row, tool_choice, drops)?;
     }
     if let Some(native_request) = native_request {
         restore_gemini_native_request(row, native_request, governed_tools.as_ref())?;
     }
-    consume_gemini_routecodex_chat_extension(row)?;
+    consume_gemini_routecodex_chat_extension(row, drops)?;
     Ok(())
 }
 
@@ -917,19 +924,31 @@ fn insert_at_path(target: &mut Value, path: &[&str], value: Value) {
 }
 
 fn validate_gemini_thinking_config_for_selected_target(
-    source: &Value,
+    source: &mut Value,
     model_capabilities: &[String],
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
-    let mut requested_paths = Vec::new();
-    if source.get("reasoning_effort").is_some() {
-        requested_paths.push("$.reasoning_effort".to_string());
+    let mut requested = Vec::new();
+    if let Some(effort) = source.get("reasoning_effort") {
+        requested.push(("$.reasoning_effort", effort.clone()));
     }
+    let mut drop_invalid_thinking_level = false;
     if let Some(level) = source.pointer("/generationConfig/thinkingConfig/thinkingLevel") {
-        validate_gemini_thinking_level_value(
+        if validate_gemini_thinking_level_value(
             level,
             "$.generationConfig.thinkingConfig.thinkingLevel",
-        )?;
-        requested_paths.push("$.generationConfig.thinkingConfig.thinkingLevel".to_string());
+            drops,
+        )? {
+            requested.push((
+                "$.generationConfig.thinkingConfig.thinkingLevel",
+                level.clone(),
+            ));
+        } else {
+            drop_invalid_thinking_level = true;
+        }
+    }
+    if drop_invalid_thinking_level {
+        remove_gemini_thinking_config_field(source, "thinkingLevel");
     }
     if let Some(budget) = source.pointer("/generationConfig/thinkingConfig/thinkingBudget") {
         if budget.as_u64().is_none() {
@@ -938,27 +957,72 @@ fn validate_gemini_thinking_config_for_selected_target(
                     .to_string(),
             );
         }
-        requested_paths.push("$.generationConfig.thinkingConfig.thinkingBudget".to_string());
+        requested.push((
+            "$.generationConfig.thinkingConfig.thinkingBudget",
+            budget.clone(),
+        ));
     }
-    if requested_paths.is_empty() || gemini_selected_target_supports_reasoning(model_capabilities) {
+    if requested.is_empty() || gemini_selected_target_supports_reasoning(model_capabilities) {
         return Ok(());
     }
-    Err(format!(
-        "UnmappedOutboundFields target_protocol=gemini paths={} missing_capability=reasoning",
-        requested_paths.join(",")
-    ))
+    for (path, value) in requested {
+        drops.push(V3ProjectionDropRecord::new(
+            "gemini",
+            path,
+            "missing_target_capability_reasoning",
+            value,
+            "validate_gemini_thinking_config_for_selected_target",
+        ));
+    }
+    if let Some(root) = source.as_object_mut() {
+        root.remove("reasoning_effort");
+    }
+    remove_gemini_thinking_config_field(source, "thinkingLevel");
+    remove_gemini_thinking_config_field(source, "thinkingBudget");
+    Ok(())
 }
 
-fn validate_gemini_thinking_level_value(value: &Value, path: &str) -> Result<(), String> {
-    let value = value
+fn remove_gemini_thinking_config_field(source: &mut Value, field: &str) {
+    let Some(generation_config) = source
+        .get_mut("generationConfig")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let should_remove_thinking_config = generation_config
+        .get_mut("thinkingConfig")
+        .and_then(Value::as_object_mut)
+        .map(|thinking_config| {
+            thinking_config.remove(field);
+            thinking_config.is_empty()
+        })
+        .unwrap_or(false);
+    if should_remove_thinking_config {
+        generation_config.remove("thinkingConfig");
+    }
+}
+
+fn validate_gemini_thinking_level_value(
+    value: &Value,
+    path: &str,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<bool, String> {
+    let trimmed = value
         .as_str()
         .map(str::trim)
         .ok_or_else(|| format!("MalformedOutboundField target_protocol=gemini path={path}"))?;
-    match value.to_ascii_lowercase().as_str() {
-        "minimal" | "low" | "medium" | "high" => Ok(()),
-        _ => Err(format!(
-            "UnmappedOutboundFields target_protocol=gemini paths={path}"
-        )),
+    match trimmed.to_ascii_lowercase().as_str() {
+        "minimal" | "low" | "medium" | "high" => Ok(true),
+        _ => {
+            drops.push(V3ProjectionDropRecord::new(
+                "gemini",
+                path,
+                "unmapped_target_protocol_field_unrepresentable",
+                value.clone(),
+                "validate_gemini_thinking_level_value",
+            ));
+            Ok(false)
+        }
     }
 }
 
@@ -969,7 +1033,10 @@ fn gemini_selected_target_supports_reasoning(model_capabilities: &[String]) -> b
         .any(|capability| capability == "reasoning" || capability == "thinking")
 }
 
-fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Result<(), String> {
+fn consume_gemini_routecodex_chat_extension(
+    row: &mut Map<String, Value>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
     let Some(extension) = row.remove("routecodex_chat_extension") else {
         return Ok(());
     };
@@ -977,51 +1044,62 @@ fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Res
         "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension".to_string()
     })?;
     let Some(responses_request) = extension.remove("responses_request") else {
-        if extension.is_empty() {
-            return Ok(());
+        for (key, value) in &extension {
+            drops.push(V3ProjectionDropRecord::new(
+                "gemini",
+                json_path_child("$.routecodex_chat_extension", key),
+                "unmapped_target_protocol_field_unrepresentable",
+                value.clone(),
+                "consume_gemini_routecodex_chat_extension",
+            ));
         }
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol=gemini paths={}",
-            extension
-                .keys()
-                .map(|key| json_path_child("$.routecodex_chat_extension", key))
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
+        return Ok(());
     };
     let mut responses_request = responses_request.as_object().cloned().ok_or_else(|| {
         "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request"
             .to_string()
     })?;
-    consume_gemini_responses_store(&mut responses_request)?;
-    let mut unsupported: Vec<String> = responses_request
-        .keys()
-        .map(|key| json_path_child("$.routecodex_chat_extension.responses_request", key))
-        .collect();
-    unsupported.extend(
-        extension
-            .keys()
-            .map(|key| json_path_child("$.routecodex_chat_extension", key)),
-    );
-    if !unsupported.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol=gemini paths={}",
-            unsupported.join(",")
+    consume_gemini_responses_store(&mut responses_request, drops)?;
+    for (key, value) in &responses_request {
+        drops.push(V3ProjectionDropRecord::new(
+            "gemini",
+            json_path_child("$.routecodex_chat_extension.responses_request", key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "consume_gemini_routecodex_chat_extension",
+        ));
+    }
+    for (key, value) in &extension {
+        drops.push(V3ProjectionDropRecord::new(
+            "gemini",
+            json_path_child("$.routecodex_chat_extension", key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "consume_gemini_routecodex_chat_extension",
         ));
     }
     Ok(())
 }
 
-fn consume_gemini_responses_store(row: &mut Map<String, Value>) -> Result<(), String> {
+fn consume_gemini_responses_store(
+    row: &mut Map<String, Value>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
     let Some(value) = row.remove("store") else {
         return Ok(());
     };
     match value.as_bool() {
         Some(false) => Ok(()),
-        Some(true) => Err(
-            "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.store"
-                .to_string(),
-        ),
+        Some(true) => {
+            drops.push(V3ProjectionDropRecord::new(
+                "gemini",
+                "$.routecodex_chat_extension.responses_request.store",
+                "unmapped_target_protocol_field_unrepresentable",
+                value,
+                "consume_gemini_responses_store",
+            ));
+            Ok(())
+        }
         None => Err(
             "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request.store"
                 .to_string(),
@@ -1032,6 +1110,7 @@ fn consume_gemini_responses_store(row: &mut Map<String, Value>) -> Result<(), St
 fn project_gemini_reasoning_effort(
     row: &mut Map<String, Value>,
     effort: Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let value = effort.as_str().map(str::trim).ok_or_else(|| {
         "MalformedOutboundField target_protocol=gemini path=$.reasoning_effort".to_string()
@@ -1039,10 +1118,14 @@ fn project_gemini_reasoning_effort(
     let level = match value {
         "minimal" | "low" | "medium" | "high" => value.to_ascii_uppercase(),
         _ => {
-            return Err(
-                "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_effort"
-                    .to_string(),
-            );
+            drops.push(V3ProjectionDropRecord::new(
+                "gemini",
+                "$.reasoning_effort",
+                "unmapped_target_protocol_field_unrepresentable",
+                effort,
+                "project_gemini_reasoning_effort",
+            ));
+            return Ok(());
         }
     };
     let Some(generation_config) = row
@@ -1071,11 +1154,12 @@ fn project_gemini_reasoning_effort(
 fn project_gemini_tool_choice(
     row: &mut Map<String, Value>,
     tool_choice: Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
-    let (mode, allowed_names) = match tool_choice {
-        Value::String(value) => (gemini_tool_choice_mode(&value)?, Vec::new()),
+    let (mode, allowed_names) = match &tool_choice {
+        Value::String(value) => (gemini_tool_choice_mode(value)?, Vec::new()),
         Value::Object(object) => {
-            validate_gemini_tool_choice_object_shape(&object)?;
+            validate_gemini_tool_choice_object_shape(object, drops);
             let mode = match object
                 .get("type")
                 .and_then(Value::as_str)
@@ -1120,9 +1204,14 @@ fn project_gemini_tool_choice(
         }
     };
     let Some(mode) = mode else {
-        return Err(
-            "UnmappedOutboundFields target_protocol=gemini paths=$.tool_choice".to_string(),
-        );
+        drops.push(V3ProjectionDropRecord::new(
+            "gemini",
+            "$.tool_choice",
+            "unmapped_target_protocol_field_unrepresentable",
+            tool_choice,
+            "project_gemini_tool_choice",
+        ));
+        return Ok(());
     };
     let Some(tool_config) = row
         .entry("toolConfig".to_string())
@@ -1151,8 +1240,11 @@ fn project_gemini_tool_choice(
     Ok(())
 }
 
-fn validate_gemini_tool_choice_object_shape(object: &Map<String, Value>) -> Result<(), String> {
-    for key in object.keys() {
+fn validate_gemini_tool_choice_object_shape(
+    object: &Map<String, Value>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) {
+    for (key, value) in object {
         if !matches!(
             key.as_str(),
             "type"
@@ -1162,21 +1254,28 @@ fn validate_gemini_tool_choice_object_shape(object: &Map<String, Value>) -> Resu
                 | "name"
                 | "function"
         ) {
-            return Err(format!(
-                "UnmappedOutboundFields target_protocol=gemini paths=$.tool_choice.{key}"
+            drops.push(V3ProjectionDropRecord::new(
+                "gemini",
+                format!("$.tool_choice.{key}"),
+                "unmapped_target_protocol_field_unrepresentable",
+                value.clone(),
+                "validate_gemini_tool_choice_object_shape",
             ));
         }
     }
     if let Some(function) = object.get("function").and_then(Value::as_object) {
-        for key in function.keys() {
+        for (key, value) in function {
             if key != "name" {
-                return Err(format!(
-                    "UnmappedOutboundFields target_protocol=gemini paths=$.tool_choice.function.{key}"
+                drops.push(V3ProjectionDropRecord::new(
+                    "gemini",
+                    format!("$.tool_choice.function.{key}"),
+                    "unmapped_target_protocol_field_unrepresentable",
+                    value.clone(),
+                    "validate_gemini_tool_choice_object_shape",
                 ));
             }
         }
     }
-    Ok(())
 }
 
 fn collect_gemini_allowed_function_names(value: &Value, path: &str) -> Result<Vec<String>, String> {

@@ -768,8 +768,17 @@ pub(super) fn responses_tool_output_as_anthropic_content(
     })
 }
 
+#[cfg(test)]
 pub(super) fn responses_tools_for_anthropic_wire(
     object: &Map<String, Value>,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let mut drops = Vec::new();
+    responses_tools_for_anthropic_wire_with_drops(object, &mut drops)
+}
+
+pub(super) fn responses_tools_for_anthropic_wire_with_drops(
+    object: &Map<String, Value>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
     let mut output = Vec::new();
     let mut tool_indexes = HashMap::new();
@@ -789,24 +798,32 @@ pub(super) fn responses_tools_for_anthropic_wire(
                 .unwrap_or_default(),
         )
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
-    append_responses_tools_for_anthropic_wire(
+    append_responses_tools_for_anthropic_wire_with_drops(
         Some(&Value::Array(tools)),
         &mut output,
         &mut tool_indexes,
+        drops,
     )?;
     Ok(output)
 }
 
-pub(super) fn append_responses_tools_for_anthropic_wire(
+pub(super) fn append_responses_tools_for_anthropic_wire_with_drops(
     tools: Option<&Value>,
     output: &mut Vec<Value>,
     tool_indexes: &mut HashMap<String, usize>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), V3AnthropicCodecError> {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
+    for (index, tool) in tools
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
         let tool_object = tool
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
-        let anthropic_tool = responses_tool_as_anthropic_tool(tool_object)?;
+        let anthropic_tool =
+            responses_tool_as_anthropic_tool_with_drops(tool_object, index, drops)?;
         let name = anthropic_tool
             .get("name")
             .and_then(Value::as_str)
@@ -824,11 +841,21 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn responses_tool_as_anthropic_tool(
     tool: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
+    let mut drops = Vec::new();
+    responses_tool_as_anthropic_tool_with_drops(tool, 0, &mut drops)
+}
+
+pub(super) fn responses_tool_as_anthropic_tool_with_drops(
+    tool: &Map<String, Value>,
+    index: usize,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Value, V3AnthropicCodecError> {
     if tool.get("type").and_then(Value::as_str) == Some("custom") {
-        return responses_custom_tool_as_anthropic_compatibility_tool(tool);
+        return responses_custom_tool_as_anthropic_compatibility_tool(tool, index, drops);
     }
     if matches!(
         tool.get("type").and_then(Value::as_str),
@@ -923,12 +950,18 @@ pub(super) fn responses_tool_as_anthropic_tool(
 
 fn responses_custom_tool_as_anthropic_compatibility_tool(
     tool: &Map<String, Value>,
+    index: usize,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<Value, V3AnthropicCodecError> {
-    for key in tool.keys() {
+    for (key, value) in tool {
         if !matches!(key.as_str(), "type" | "name" | "description" | "format") {
-            return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-                paths: format!("$.request.tools[].{key}"),
-            });
+            drops.push(V3ProjectionDropRecord::new(
+                "anthropic",
+                format!("$.tools[{index}].{key}"),
+                "unmapped_target_protocol_field_unrepresentable",
+                value.clone(),
+                "responses_custom_tool_as_anthropic_compatibility_tool",
+            ));
         }
     }
     let name = tool
@@ -958,10 +991,32 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
                 },
             )?;
             match format_type {
-                "text" if format.len() == 1 => format!(
-                    "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
-                ),
-                "grammar" if format.len() == 3 => {
+                "text" => {
+                    for (key, value) in format {
+                        if key != "type" {
+                            drops.push(V3ProjectionDropRecord::new(
+                                "anthropic",
+                                format!("$.tools[{index}].format.{key}"),
+                                "unmapped_target_protocol_field_unrepresentable",
+                                value.clone(),
+                                "responses_custom_tool_as_anthropic_compatibility_tool",
+                            ));
+                        }
+                    }
+                    "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field.".to_string()
+                }
+                "grammar" => {
+                    for (key, value) in format {
+                        if !matches!(key.as_str(), "type" | "syntax" | "definition") {
+                            drops.push(V3ProjectionDropRecord::new(
+                                "anthropic",
+                                format!("$.tools[{index}].format.{key}"),
+                                "unmapped_target_protocol_field_unrepresentable",
+                                value.clone(),
+                                "responses_custom_tool_as_anthropic_compatibility_tool",
+                            ));
+                        }
+                    }
                     let syntax = format
                         .get("syntax")
                         .and_then(Value::as_str)
@@ -981,9 +1036,14 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
                     )
                 }
                 _ => {
-                    return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-                        paths: "$.request.tools[].format".to_string(),
-                    })
+                    drops.push(V3ProjectionDropRecord::new(
+                        "anthropic",
+                        format!("$.tools[{index}].format"),
+                        "unmapped_target_protocol_field_unrepresentable",
+                        Value::Object(format.clone()),
+                        "responses_custom_tool_as_anthropic_compatibility_tool",
+                    ));
+                    "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field.".to_string()
                 }
             }
         }

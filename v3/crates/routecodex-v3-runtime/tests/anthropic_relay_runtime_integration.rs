@@ -218,17 +218,21 @@ data: {"type":"message_stop"}
 }
 
 #[tokio::test]
-async fn anthropic_json_and_sse_reject_unknown_terminal_without_success_projection() {
-    let json_error = project_v3_anthropic_message_as_responses_response(&json!({
+async fn anthropic_json_and_sse_tolerate_unknown_terminal_and_preserve_output() {
+    let json_response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_unknown_terminal",
         "type":"message",
         "role":"assistant",
         "model":"MiniMax-M3",
-        "content":[{"type":"text","text":"must fail"}],
+        "content":[{"type":"text","text":"preserved text"}],
         "stop_reason":"future_terminal"
     }))
-    .expect_err("unknown Anthropic JSON stop_reason must fail at the terminal owner");
-    assert!(json_error.to_string().contains("future_terminal"));
+    .expect("unknown Anthropic JSON stop_reason must warn and preserve deliverable text");
+    assert_eq!(json_response["status"], "completed");
+    assert_eq!(
+        json_response["output"][0]["content"][0]["text"],
+        "preserved text"
+    );
 
     let stream = futures_util::stream::iter([
         Ok(br#"event: message_start
@@ -240,7 +244,7 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"text","te
 
 "#.to_vec()),
         Ok(br#"event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"must fail"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"preserved sse text"}}
 
 "#.to_vec()),
         Ok(br#"event: content_block_stop
@@ -256,13 +260,17 @@ data: {"type":"message_stop"}
 
 "#.to_vec()),
     ]);
-    let sse_error = materialize_v3_provider_sse_as_canonical_response(
+    let sse_response = materialize_v3_provider_sse_as_canonical_response(
         V3HubProviderWireProtocol::Anthropic,
         Box::pin(stream),
     )
     .await
-    .expect_err("unknown Anthropic SSE stop_reason must fail at the same terminal owner");
-    assert!(sse_error.to_string().contains("future_terminal"));
+    .expect("unknown Anthropic SSE stop_reason must warn and preserve deliverable text");
+    assert_eq!(sse_response["status"], "completed");
+    assert_eq!(
+        sse_response["output"][0]["content"][0]["text"],
+        "preserved sse text"
+    );
 }
 
 #[async_trait]

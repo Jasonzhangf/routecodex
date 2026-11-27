@@ -195,9 +195,23 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     if registered_event.is_some() {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
-    Err(format!(
-        "provider Responses SSE event type {event_type:?} is not registered"
-    ))
+    if matches!(
+        event_type,
+        "message_start"
+            | "content_block_start"
+            | "content_block_delta"
+            | "content_block_stop"
+            | "message_delta"
+            | "message_stop"
+    ) {
+        return Err(format!(
+            "provider Responses SSE event type {event_type:?} belongs to Anthropic protocol"
+        ));
+    }
+    eprintln!(
+        "[v3-sse-warning] protocol=responses stage=provider_responses_event_classification event_type={event_type:?} reason=unregistered_event_ignored"
+    );
+    Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
 }
 
 #[cfg(test)]

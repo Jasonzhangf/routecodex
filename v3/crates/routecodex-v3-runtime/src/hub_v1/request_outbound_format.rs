@@ -145,17 +145,20 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     has_web_search_capability: bool,
     preserve_responses_custom_tools: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    if payload.get("previous_response_id").is_some() {
-        return Err(
-            "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
-                .to_string(),
-        );
-    }
-    let (mut projected, drops) =
+    let (mut projected, mut drops) =
         build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
             payload,
             preserve_responses_custom_tools,
         )?;
+    if let Some(previous_response_id) = payload.get("previous_response_id") {
+        drops.push(V3ProjectionDropRecord::new(
+            "responses",
+            "$.previous_response_id",
+            "unmapped_target_protocol_field_unrepresentable",
+            previous_response_id.clone(),
+            "build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options",
+        ));
+    }
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
         has_web_search_capability,
@@ -595,13 +598,15 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
     preserve_responses_custom_tools: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let mut source = source.clone();
+    let mut drops = Vec::new();
     if matches!(target_protocol, V3OutboundTargetProtocol::Gemini) {
         match gemini_model_capabilities {
             Some(model_capabilities) => project_gemini_compatible_fields_for_selected_target(
                 &mut source,
                 model_capabilities,
+                &mut drops,
             )?,
-            None => project_gemini_compatible_fields(&mut source)?,
+            None => project_gemini_compatible_fields(&mut source, &mut drops)?,
         }
     }
     promote_tool_search_output_tools_to_provider_tools(&mut source)?;
@@ -609,7 +614,6 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
     // Unknown business fields remain opaque. Only a concrete target-protocol
     // representation limit can produce a projection drop.
     let unmapped = collect_unmapped_outbound_field_paths(source, target_protocol);
-    let mut drops = Vec::new();
     for json_path in &unmapped {
         drops.push(V3ProjectionDropRecord::new(
             target_protocol.as_str(),
@@ -627,6 +631,7 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
         &mut projected,
         target_protocol,
         preserve_responses_custom_tools,
+        &mut drops,
     )?;
     Ok((projected, drops))
 }
@@ -677,6 +682,7 @@ fn apply_outbound_projection_transforms(
     projected: &mut Value,
     target_protocol: V3OutboundTargetProtocol,
     preserve_responses_custom_tools: bool,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
@@ -688,14 +694,14 @@ fn apply_outbound_projection_transforms(
             project_openai_responses_reasoning_extensions_to_reasoning(projected)?;
         }
         V3OutboundTargetProtocol::OpenAiChat => {
-            project_responses_request_chat_extension_to_openai_chat(projected)?;
-            project_openai_client_metadata_to_metadata(projected, "openai_chat")?;
+            project_responses_request_chat_extension_to_openai_chat(projected, drops)?;
+            project_openai_client_metadata_to_metadata(projected, "openai_chat", drops)?;
             validate_openai_metadata(projected, "openai_chat")?;
             project_openai_chat_reasoning_summary_policy(projected)?;
             project_openai_chat_reasoning_context_policy(projected)?;
         }
         V3OutboundTargetProtocol::Anthropic => {
-            project_chat_store_to_anthropic_wire(projected)?;
+            project_chat_store_to_anthropic_wire(projected, drops)?;
             project_chat_canonical_web_search_tools_to_anthropic_wire(projected)?;
         }
         V3OutboundTargetProtocol::Gemini => {
@@ -801,6 +807,7 @@ fn consume_anthropic_system_block_text(projected: &mut Value) {
 
 fn project_responses_request_chat_extension_to_openai_chat(
     projected: &mut Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     consume_anthropic_system_block_text(projected);
     let Some(mut extension) = take_responses_request_chat_extension(projected, "openai_chat")?
@@ -834,26 +841,25 @@ fn project_responses_request_chat_extension_to_openai_chat(
             insert_unless_matching(row, "verbosity", verbosity, "openai_chat")?;
         }
         if let Some(format) = text.remove("format") {
-            project_responses_text_format_to_openai_chat_response_format(row, format)?;
+            project_responses_text_format_to_openai_chat_response_format(row, format, drops)?;
         }
-        if !text.is_empty() {
-            return Err(format!(
-                "UnmappedOutboundFields target_protocol=openai_chat paths={}",
-                text.keys()
-                    .map(|key| format!("$.request.text.{key}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
+        for (key, value) in text {
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                json_path_child("$.text", &key),
+                "unmapped_target_protocol_field_unrepresentable",
+                value,
+                "project_responses_request_chat_extension_to_openai_chat",
             ));
         }
     }
-    if !extension.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol=openai_chat paths={}",
-            extension
-                .keys()
-                .map(|key| format!("$.request.{key}"))
-                .collect::<Vec<_>>()
-                .join(",")
+    for (key, value) in extension {
+        drops.push(V3ProjectionDropRecord::new(
+            "openai_chat",
+            json_path_child("$", &key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value,
+            "project_responses_request_chat_extension_to_openai_chat",
         ));
     }
     Ok(())
@@ -862,6 +868,7 @@ fn project_responses_request_chat_extension_to_openai_chat(
 fn project_responses_text_format_to_openai_chat_response_format(
     row: &mut Map<String, Value>,
     format: Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let format = format.as_object().ok_or_else(|| {
         "MalformedOutboundField target_protocol=openai_chat path=$.request.text.format".to_string()
@@ -884,11 +891,11 @@ fn project_responses_text_format_to_openai_chat_response_format(
                     );
                 }
             }
-            reject_unmapped_responses_text_format_keys(format, &["type"])?;
+            record_unmapped_responses_text_format_keys(format, &["type"], drops);
             Ok(())
         }
         "json_object" => {
-            reject_unmapped_responses_text_format_keys(format, &["type"])?;
+            record_unmapped_responses_text_format_keys(format, &["type"], drops);
             insert_unless_matching(
                 row,
                 "response_format",
@@ -897,10 +904,11 @@ fn project_responses_text_format_to_openai_chat_response_format(
             )
         }
         "json_schema" => {
-            reject_unmapped_responses_text_format_keys(
+            record_unmapped_responses_text_format_keys(
                 format,
                 &["type", "name", "description", "schema", "strict"],
-            )?;
+                drops,
+            );
             let name = format
                 .get("name")
                 .and_then(Value::as_str)
@@ -954,22 +962,23 @@ fn project_responses_text_format_to_openai_chat_response_format(
     }
 }
 
-fn reject_unmapped_responses_text_format_keys(
+fn record_unmapped_responses_text_format_keys(
     format: &Map<String, Value>,
     allowed: &[&str],
-) -> Result<(), String> {
-    let unmapped = format
-        .keys()
-        .filter(|key| !allowed.contains(&key.as_str()))
-        .map(|key| format!("$.request.text.format.{key}"))
-        .collect::<Vec<_>>();
-    if unmapped.is_empty() {
-        return Ok(());
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) {
+    for (key, value) in format {
+        if allowed.contains(&key.as_str()) {
+            continue;
+        }
+        drops.push(V3ProjectionDropRecord::new(
+            "openai_chat",
+            json_path_child("$.text.format", key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "record_unmapped_responses_text_format_keys",
+        ));
     }
-    Err(format!(
-        "UnmappedOutboundFields target_protocol=openai_chat paths={}",
-        unmapped.join(",")
-    ))
 }
 
 fn take_responses_request_chat_extension(

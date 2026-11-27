@@ -75,8 +75,11 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded
-                                .push(anthropic_reasoning_part_as_responses_reasoning(part, None)?);
+                            if let Some(reasoning_item) =
+                                anthropic_reasoning_part_as_responses_reasoning(part, None)?
+                            {
+                                encoded.push(reasoning_item);
+                            }
                         }
                         Some("reasoning") => {
                             return Err(V3AnthropicCodecError::MalformedField {

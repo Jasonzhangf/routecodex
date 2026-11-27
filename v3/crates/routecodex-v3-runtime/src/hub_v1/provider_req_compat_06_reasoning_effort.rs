@@ -89,17 +89,11 @@ pub(super) fn project_reasoning_effort_for_selected_target(
             // standard `none` value and explicitly requires low/high/max;
             // low is the deterministic provider-compatible representation.
             "none" => "low",
-            _ => {
-                return Err(V3ProviderCompatError::other(
-                    "request_reasoning_effort_projection",
-                    selected
-                        .compatibility_profile
-                        .clone()
-                        .unwrap_or_else(|| "compat:passthrough".to_string()),
-                    format!(
-                        "opencode-go-zen does not support reasoning effort {effort}; supported values are low/high/max"
-                    ),
-                ));
+            other => {
+                eprintln!(
+                    "[v3-compat-warning] opencode-go-zen unmapped reasoning effort {other:?}; clamping to low"
+                );
+                "low"
             }
         }
     } else if is_deepseek {

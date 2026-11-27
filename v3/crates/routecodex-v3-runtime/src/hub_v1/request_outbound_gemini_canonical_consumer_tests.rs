@@ -927,7 +927,8 @@ fn gemini_native_request_inverse_preserves_associations_and_governed_text() {
     let mut canonical = gemini_canonical(&source);
     canonical["messages"][0]["content"][0]["text"] = json!("after governance");
 
-    project_gemini_compatible_fields(&mut canonical)
+    let mut drops = Vec::new();
+    project_gemini_compatible_fields(&mut canonical, &mut drops)
         .expect("native Gemini inverse must consume canonical associations");
     println!("[gemini-native-roundtrip] wire={canonical}");
 

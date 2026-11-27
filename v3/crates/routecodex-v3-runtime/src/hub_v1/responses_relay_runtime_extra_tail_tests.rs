@@ -291,32 +291,35 @@ async fn responses_provider_sse_standard_response_metadata_only_stream_still_fai
 }
 
 #[tokio::test]
-async fn responses_provider_sse_unregistered_responses_event_still_fails_closed() {
-    // Fail-closed lock for RELAY: registering `response.metadata` must not open
-    // the `response.*` namespace to near-miss siblings.
+async fn responses_provider_sse_unregistered_responses_event_is_tolerated_when_deliverable_and_fails_alone(
+) {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
         b"event: response.metadat\ndata: {\"type\":\"response.metadat\",\"sequence_number\":6,\"metadata\":{}}\n\n"
             .to_vec(),
     )]));
-    let error =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .expect_err("unregistered response.* sibling must remain fail-closed");
+    let _error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+        provider,
+        &observation,
+    )
+    .await
+    .expect_err(
+        "unregistered event alone without terminal must still fail without faking completion",
+    );
 
-    // Fail-closed: this helper exercises the typed relay codec, which rejects
-    // unregistered `response.*` events with "is unsupported". The shared
-    // classifier (gate one of the full relay path) rejects them with "is not
-    // registered"; both are locked by the provider_sse_json_codec unit tests.
-    let text = error.to_string();
-    assert!(
-        text.contains("response.metadat"),
-        "unexpected error: {text}"
-    );
-    assert!(
-        text.contains("unsupported") || text.contains("is not registered"),
-        "unexpected error: {text}"
-    );
+    let observation_valid = V3RuntimeStreamObservation::default();
+    let provider_valid = Box::pin(stream::iter(vec![
+        Ok(b"event: response.metadat\ndata: {\"type\":\"response.metadat\",\"sequence_number\":6,\"metadata\":{}}\n\n".to_vec()),
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n".to_vec()),
+    ]));
+    let resp02 = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+        provider_valid,
+        &observation_valid,
+    )
+    .await
+    .expect("unregistered non-error event must not abort a valid deliverable Responses stream");
+    assert_eq!(resp02["output"][0]["content"][0]["text"], "hello");
 }
 
 #[tokio::test]
@@ -730,17 +733,28 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
     );
 }
 #[tokio::test]
-async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
+async fn responses_provider_sse_unknown_response_event_alone_fails_without_terminal_and_passes_with_output(
+) {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
             b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
         )]));
-    let error =
+    let _error =
         build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
             .await
-            .unwrap_err();
+            .expect_err("unknown response event alone without completed terminal must still fail");
 
-    assert!(error
-        .to_string()
-        .contains("response.reasoning_summary.delta is unsupported"));
+    let observation_valid = V3RuntimeStreamObservation::default();
+    let provider_valid = Box::pin(stream::iter(vec![
+        Ok(b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"ignored\"}\n\n".to_vec()),
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n".to_vec()),
+    ]));
+    let resp02 = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+        provider_valid,
+        &observation_valid,
+    )
+    .await
+    .expect("unknown response event alongside deliverable output must not abort stream");
+    assert_eq!(resp02["output"][0]["content"][0]["text"], "ok");
 }

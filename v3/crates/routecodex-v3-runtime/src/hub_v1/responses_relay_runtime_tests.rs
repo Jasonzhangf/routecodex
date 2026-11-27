@@ -247,7 +247,7 @@ impl ResponsesTransport for RecordingChatTransport {
 }
 
 #[tokio::test]
-async fn target_protocol_unmapped_field_recovers_through_next_provider() {
+async fn target_protocol_unmapped_field_continues_first_attempt_without_reselection() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let mut manifest = anthropic_then_openai_chat_manifest();
@@ -283,17 +283,20 @@ async fn target_protocol_unmapped_field_recovers_through_next_provider() {
         V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-    .expect("unmapped target field must enter provider recovery");
+    .expect("unmapped optional field must omit and continue on first attempt without reselection");
 
     assert_eq!(output.status, 200);
-    assert!(output
-        .node_trace
-        .iter()
-        .any(|node| *node == "V3TargetLocalReselected"));
-    assert_eq!(
-        *transport.provider_ids.lock().expect("provider ids"),
-        vec!["openai_second"]
+    assert!(
+        !output
+            .node_trace
+            .iter()
+            .any(|node| *node == "V3TargetLocalReselected"),
+        "allowlist absence must not trigger V3TargetLocalReselected: {:?}",
+        output.node_trace
     );
+    let provider_ids = transport.provider_ids.lock().expect("provider ids");
+    assert_eq!(provider_ids.len(), 1);
+    assert_ne!(provider_ids[0], "openai_second");
 }
 
 #[tokio::test]

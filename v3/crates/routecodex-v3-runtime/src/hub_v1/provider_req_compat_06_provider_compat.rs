@@ -529,8 +529,8 @@ mod tests {
     }
 
     #[test]
-    fn gemini_provider_req_rejects_reasoning_effort_without_selected_reasoning_capability() {
-        let error = relay_req07_for_entry_with_candidate(
+    fn gemini_provider_req_omits_reasoning_effort_without_selected_reasoning_capability() {
+        let req07 = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -540,16 +540,21 @@ mod tests {
             V3HubProviderWireProtocol::Gemini,
             selected_candidate(V3HubProviderWireProtocol::Gemini),
         )
-        .expect_err("Gemini Node06 must validate selected target capabilities");
-        assert_eq!(error.stage, "request_protocol");
-        assert_eq!(
-            error.classification(),
-            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
-        );
-        assert_eq!(
-            error.reason,
-            "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_effort missing_capability=reasoning"
-        );
+        .expect("Gemini Node07 must warn/omit unrepresentable reasoning_effort instead of failing");
+        assert!(req07
+            .drops
+            .iter()
+            .any(|drop| drop.json_path == "$.reasoning_effort"));
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("Gemini Node06 compat must accept omitted reasoning_effort");
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("reasoning_effort")
+            .is_none());
+        assert!(req_compat
+            .provider_semantic_payload()
+            .pointer("/generationConfig/thinkingConfig")
+            .is_none());
     }
 
     #[test]
@@ -1269,8 +1274,8 @@ mod tests {
     }
 
     #[test]
-    fn responses_store_true_fails_when_anthropic_cannot_preserve_remote_storage_semantics() {
-        let error = relay_req07_for_entry_with_candidate(
+    fn responses_store_true_omits_store_with_drop_record_for_anthropic() {
+        let req07 = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1280,15 +1285,17 @@ mod tests {
             V3HubProviderWireProtocol::Anthropic,
             selected_candidate(V3HubProviderWireProtocol::Anthropic),
         )
-        .expect_err("Anthropic Node06 must not silently strip store=true");
-        assert_eq!(error.stage, "request_protocol");
+        .expect("Anthropic Node07 must omit store=true with drop record without blocking request");
+        assert!(req07.drops.iter().any(|drop| drop.json_path == "$.store"));
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("Anthropic Node06 compat must accept omitted store=true");
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("store")
+            .is_none());
         assert_eq!(
-            error.classification(),
-            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
-        );
-        assert_eq!(
-            error.reason,
-            "UnmappedOutboundFields target_protocol=anthropic paths=$.request.store"
+            req_compat.provider_semantic_payload()["messages"][0]["content"][0]["text"],
+            "hello"
         );
     }
 

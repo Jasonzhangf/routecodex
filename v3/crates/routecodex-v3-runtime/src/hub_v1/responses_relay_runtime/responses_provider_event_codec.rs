@@ -170,9 +170,10 @@ fn apply_v3_typed_responses_event(
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            format!("V3 Responses Relay response event type {event_type} is unsupported"),
-        ));
+        eprintln!(
+            "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec event_type={event_type:?} reason=unregistered_event_ignored"
+        );
+        return Ok(None);
     }
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())

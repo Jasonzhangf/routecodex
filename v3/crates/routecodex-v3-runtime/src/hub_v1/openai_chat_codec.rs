@@ -405,7 +405,12 @@ impl V3OpenAiChatAnthropicSseTransducer {
                 .and_then(Value::as_str)
                 .unwrap_or("Anthropic SSE provider error")
                 .to_string()),
-            other => Err(format!("Anthropic SSE event type {other} is unsupported")),
+            other => {
+                eprintln!(
+                    "[v3-sse-warning] protocol=anthropic stage=openai_chat_anthropic_sse_transducer event_type={other:?} reason=unregistered_event_ignored"
+                );
+                Ok(Vec::new())
+            }
         }
     }
 
@@ -1076,7 +1081,10 @@ impl V3OpenAiChatResponsesSseTransducer {
                     V3TableDirection::Inbound,
                 )?
                 else {
-                    return Err(format!("Responses SSE event type {other} is unsupported"));
+                    eprintln!(
+                        "[v3-sse-warning] protocol=responses stage=openai_chat_responses_sse_transducer event_type={other:?} reason=unregistered_event_ignored"
+                    );
+                    return Ok(Vec::new());
                 };
                 let mut chunk = self.chunk(json!({}), None);
                 chunk[extension] = event;

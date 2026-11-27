@@ -1,24 +1,75 @@
 use serde_json::{json, Map, Value};
 
 use super::anthropic_codec::V3AnthropicCodecError;
-use super::client_metadata_projection::unsupported_client_metadata_paths;
 use crate::projection_drop_log::V3ProjectionDropRecord;
 
-pub(super) fn project_chat_store_to_anthropic_wire(projected: &mut Value) -> Result<(), String> {
-    let Some(store) = projected
-        .as_object_mut()
-        .and_then(|object| object.remove("store"))
-    else {
+pub(super) fn project_chat_store_to_anthropic_wire(
+    projected: &mut Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
+    let Some(store) = projected.get("store") else {
         return Ok(());
     };
     match store {
-        Value::Bool(false) => Ok(()),
-        Value::Bool(true) => Err(
-            "UnmappedOutboundFields target_protocol=anthropic paths=$.request.store".to_string(),
-        ),
+        Value::Bool(enabled) => {
+            anthropic_store_value(
+                projected.as_object().unwrap(),
+                projected
+                    .pointer("/routecodex_chat_extension/responses_request")
+                    .and_then(Value::as_object),
+            )
+            .map_err(|error| error.to_string())?;
+            if *enabled {
+                drops.push(V3ProjectionDropRecord::new(
+                    "anthropic",
+                    "$.store",
+                    "unmapped_target_protocol_field_unrepresentable",
+                    store.clone(),
+                    "project_chat_store_to_anthropic_wire",
+                ));
+            }
+            projected.as_object_mut().unwrap().remove("store");
+            if let Some(extension) = projected
+                .pointer_mut("/routecodex_chat_extension/responses_request")
+                .and_then(Value::as_object_mut)
+            {
+                extension.remove("store");
+            }
+            Ok(())
+        }
         _ => {
             Err("MalformedOutboundField target_protocol=anthropic path=$.request.store".to_string())
         }
+    }
+}
+
+pub(super) fn anthropic_store_value<'a>(
+    object: &'a Map<String, Value>,
+    responses_request_extension: Option<&'a Map<String, Value>>,
+) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+    let root_store = object.get("store");
+    let extension_store = responses_request_extension.and_then(|extension| extension.get("store"));
+    match (root_store, extension_store) {
+        (Some(root), Some(extension)) if root != extension => {
+            Err(V3AnthropicCodecError::MalformedField { field: "store" })
+        }
+        (Some(root), _) => {
+            if root.is_boolean() {
+                Ok(Some(root))
+            } else {
+                Err(V3AnthropicCodecError::MalformedField { field: "store" })
+            }
+        }
+        (None, Some(extension)) => {
+            if extension.is_boolean() {
+                Ok(Some(extension))
+            } else {
+                Err(V3AnthropicCodecError::MalformedField {
+                    field: "routecodex_chat_extension.responses_request.store",
+                })
+            }
+        }
+        (None, None) => Ok(None),
     }
 }
 
@@ -43,6 +94,7 @@ pub(super) fn responses_metadata_as_anthropic_metadata(
 
 pub(super) fn validate_responses_cache_and_store_for_anthropic(
     extension: Option<&Map<String, Value>>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), V3AnthropicCodecError> {
     let Some(extension) = extension else {
         return Ok(());
@@ -58,18 +110,19 @@ pub(super) fn validate_responses_cache_and_store_for_anthropic(
         }
     }
     if let Some(store) = extension.get("store") {
-        match store.as_bool() {
-            Some(false) => {}
-            Some(true) => {
-                return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-                    paths: "$.request.store".to_string(),
-                });
-            }
-            None => {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "routecodex_chat_extension.responses_request.store",
-                });
-            }
+        let Some(enabled) = store.as_bool() else {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "routecodex_chat_extension.responses_request.store",
+            });
+        };
+        if enabled {
+            drops.push(V3ProjectionDropRecord::new(
+                "anthropic",
+                "$.store",
+                "unmapped_target_protocol_field_unrepresentable",
+                store.clone(),
+                "validate_responses_cache_and_store_for_anthropic",
+            ));
         }
     }
     Ok(())
@@ -132,9 +185,18 @@ pub(super) fn project_responses_text_as_anthropic_output_config(
                     json!({"type":"json_schema","schema":schema}),
                 )?;
             }
-            _ => {
-                return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-                    paths: "$.request.text.output_config.format.type".to_string(),
+            Some(_) => {
+                drops.push(V3ProjectionDropRecord::new(
+                    "anthropic",
+                    "$.text.format",
+                    "unmapped_target_protocol_field_unrepresentable",
+                    Value::Object(format.clone()),
+                    "project_responses_text_as_anthropic_output_config",
+                ));
+            }
+            None => {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "routecodex_chat_extension.responses_request.text.format.type",
                 });
             }
         }
@@ -148,6 +210,13 @@ pub(super) fn project_responses_text_as_anthropic_output_config(
                 field: "routecodex_chat_extension.responses_request.text.verbosity",
             });
         }
+        drops.push(V3ProjectionDropRecord::new(
+            "anthropic",
+            "$.text.verbosity",
+            "unmapped_target_protocol_field_unrepresentable",
+            verbosity.clone(),
+            "project_responses_text_as_anthropic_output_config",
+        ));
     }
     if !output_config.is_empty() {
         output.insert("output_config".to_string(), Value::Object(output_config));
@@ -254,12 +323,6 @@ fn responses_client_user_id(
             .ok_or(V3AnthropicCodecError::MalformedField {
                 field: "routecodex_chat_extension.responses_request.client_metadata",
             })?;
-    let unsupported = unsupported_client_metadata_paths(client_metadata);
-    if !unsupported.is_empty() {
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: unsupported.join(","),
-        });
-    }
     let Some(user_id) = client_metadata.get("user_id") else {
         return Ok(None);
     };

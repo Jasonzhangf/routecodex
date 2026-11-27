@@ -124,21 +124,28 @@ fn openai_responses_function_tool_redacted_schema_placeholders_pass_through() {
 }
 
 #[test]
-fn openai_chat_tool_search_rejects_unmapped_builtin_tool() {
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
-        "model": "glm-5.2",
-        "messages": [{"role": "user", "content": "search"}],
-        "tools": [{
-            "type": "tool_search",
-            "name": "tool_search",
-            "parameters": "invalid"
-        }]
-    }))
-    .expect_err("Responses builtin tool_search must not be emulated on OpenAI Chat wire");
+fn openai_chat_tool_search_drops_unmapped_builtin_field_and_projects_function() {
+    let (wire, drops) = build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+        &json!({
+            "model": "glm-5.2",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [{
+                "type": "tool_search",
+                "name": "tool_search",
+                "parameters": "invalid"
+            }]
+        }),
+        &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+    )
+    .expect(
+        "tool_search unmapped field must emit drop record and continue with function projection",
+    );
 
+    assert_eq!(wire["tools"][0]["type"], "function");
+    assert_eq!(wire["tools"][0]["function"]["name"], "tool_search");
     assert!(
-        error.contains("UnmappedOutboundFields target_protocol=openai_chat paths=$.tools[0].name"),
-        "{error}"
+        drops.iter().any(|drop| drop.json_path == "$.tools[0].name"),
+        "expected drop record for $.tools[0].name: {drops:?}"
     );
 }
 
