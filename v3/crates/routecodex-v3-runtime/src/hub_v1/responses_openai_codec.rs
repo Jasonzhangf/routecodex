@@ -137,7 +137,19 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                 turn_assistant_tail_index = Some(messages.len() - 1);
             }
             "reasoning" => {
-                if let Some(message) = build_v3_openai_chat_assistant_reasoning_message(item) {
+                if let Some(mut message) = build_v3_openai_chat_assistant_reasoning_message(item) {
+                    if native_responses {
+                        let extension = &mut message["routecodex_chat_extension"];
+                        if extension.get(RESPONSES_REASONING_ITEMS_EXTENSION).is_none() {
+                            extension[RESPONSES_REASONING_ITEMS_EXTENSION] = json!([item]);
+                        }
+                        for entry in extension[RESPONSES_REASONING_ITEMS_EXTENSION]
+                            .as_array_mut()
+                            .unwrap()
+                        {
+                            entry["source_input_order"] = json!(input_index);
+                        }
+                    }
                     append_v3_openai_chat_message_preserving_tool_adjacency(
                         &mut messages,
                         &mut pending_tool_message_index,
@@ -1133,12 +1145,7 @@ fn build_v3_openai_chat_tool_result_message(
     }
     if native_responses
         && item_type == "function_call_output"
-        && (output.is_string()
-            || output.as_array().is_some_and(|parts| {
-                parts
-                    .iter()
-                    .all(|part| part["type"] == "input_text" && part["text"].is_string())
-            }))
+        && (output.is_string() || output.is_array())
     {
         extension.insert("responses_tool_output_content".to_string(), output.clone());
     }

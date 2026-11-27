@@ -1663,6 +1663,21 @@ async fn earlier_turn_image_stays_in_history_and_selects_default() {
     }
 }
 
+#[tokio::test]
+async fn paired_historical_inline_image_tool_result_projects_to_text_placeholder() {
+    let _guard = TEST_LOCK.lock().await;
+    assert_isolated_image_boundary(
+        "/v1/responses",
+        json!({
+            "type":"function_call_output",
+            "call_id":"bare_data",
+            "output":"data:image/png;base64,AAAA"
+        }),
+        true,
+    )
+    .await;
+}
+
 const CONSECUTIVE_IMAGE: &str = "https://example.test/consecutive-turn.png";
 
 fn chat_completion_bytes(model: &str) -> Vec<u8> {

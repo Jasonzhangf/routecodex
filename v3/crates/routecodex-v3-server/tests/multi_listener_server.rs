@@ -6247,6 +6247,77 @@ async fn issue4a0b3aa_responses_relay_forwards_orphan_text_content_array_to_firs
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_r3","status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"history preserved"}]}]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r3-fixture");
+    let manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let cases = [
+        json!([
+            {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"between call and result"}]},
+            {"type":"reasoning","id":"rs_source","summary":[{"type":"summary_text","text":"reasoning after user"}]},
+            {"type":"function_call_output","call_id":"call_x","output":"orphan result"},
+            {"type":"function_call_output","call_id":"call_a","output":"paired result"}
+        ]),
+        json!([{"type":"function_call_output","call_id":"call_literal_image","output":r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#}]),
+        json!([{"type":"function_call_output","call_id":"call_literal_text","output":r#"[{"type":"input_text","text":"literal"}]"#}]),
+        json!([{"type":"function_call_output","call_id":"call_file","output":[{"type":"input_file","file_id":"file-123"}]}]),
+        json!([
+            {"type":"function_call","id":"fc_image","name":"read_image","call_id":"call_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_image","output":"data:image/png;base64,AAAA"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous answer"}]},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"later text turn"}]}
+        ]),
+    ];
+    let mut results = Vec::new();
+    for (index, input) in cases.into_iter().enumerate() {
+        let response = reqwest::Client::new()
+            .post(&endpoint)
+            .json(&json!({"model":"client-test","input":input,"stream":false}))
+            .send()
+            .await;
+        let capture = timeout(Duration::from_secs(2), captures.recv()).await;
+        let mut expected = input;
+        if index == 4 {
+            expected[1]["output"] = json!("[Image]");
+        }
+        results.push((index, expected, response, capture));
+    }
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    for (index, expected, response, capture) in results {
+        let capture = capture
+            .expect("first Provider capture timeout")
+            .expect("Provider capture");
+        assert_eq!(capture.request_path.as_deref(), Some("/v1/responses"));
+        assert_eq!(capture.body["input"], expected, "R3 case {index}");
+        let response = response.expect("Provider result must reach client");
+        assert_eq!(response.status(), StatusCode::OK, "R3 case {index}");
+        assert_eq!(
+            response.json::<Value>().await.unwrap()["output"],
+            provider_body["output"]
+        );
+    }
+    assert!(
+        captures.try_recv().is_err(),
+        "one Provider attempt per case"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

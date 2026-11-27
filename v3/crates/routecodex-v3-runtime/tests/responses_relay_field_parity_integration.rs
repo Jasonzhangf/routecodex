@@ -507,10 +507,11 @@ async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
 }
 
 #[tokio::test]
-async fn issue4a0b3aa_responses_interleaved_plain_message_keeps_source_order() {
+async fn issue4a0b3aa_responses_interleaved_reasoning_and_message_keep_source_order() {
     let input = serde_json::json!([
         {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
         {"type":"message","role":"user","content":[{"type":"input_text","text":"between call and result"}]},
+        {"type":"reasoning","id":"rs_source","summary":[{"type":"summary_text","text":"reasoning after user"}]},
         {"type":"function_call_output","call_id":"call_x","output":"orphan result"},
         {"type":"function_call_output","call_id":"call_a","output":"parent result"}
     ]);
@@ -539,11 +540,66 @@ async fn issue4a0b3aa_responses_interleaved_plain_message_keeps_source_order() {
     assert_eq!(provider_input, input.as_array().unwrap());
     assert_eq!(provider_input[0]["call_id"], "call_a");
     assert_eq!(provider_input[1]["role"], "user");
-    assert_eq!(provider_input[2]["call_id"], "call_x");
-    assert_eq!(provider_input[3]["call_id"], "call_a");
-    for index in [2, 3] {
+    assert_eq!(provider_input[2]["id"], "rs_source");
+    assert_eq!(provider_input[3]["call_id"], "call_x");
+    assert_eq!(provider_input[4]["call_id"], "call_a");
+    for index in [3, 4] {
         assert!(provider_input[index].get("id").is_none());
     }
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_orphan_file_array_keeps_exact_first_provider_item() {
+    let input = serde_json::json!([{
+        "type":"function_call_output","call_id":"call_file",
+        "output":[{"type":"input_file","file_id":"file-123"}]
+    }]);
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-file","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input(
+            "req-file-array",
+            serde_json::json!({"input":input.clone(),"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("file-bearing orphan must reach Provider");
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(provider_projection_body(&captures[0])["input"], input);
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_paired_historical_inline_image_projects_on_text_responses_target() {
+    let input = serde_json::json!([
+        {"type":"function_call","id":"fc_image","call_id":"call_image","name":"read_image","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_image","output":"data:image/png;base64,AAAA"},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous answer"}]},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"later text turn"}]}
+    ]);
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-history-image","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input(
+            "req-history-image",
+            serde_json::json!({"input":input.clone(),"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("historical image must reach text Provider as placeholder");
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let mut expected = input;
+    expected[1]["output"] = serde_json::json!("[Image]");
+    assert_eq!(provider_projection_body(&captures[0])["input"], expected);
 }
 
 #[tokio::test]

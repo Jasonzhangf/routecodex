@@ -20,6 +20,17 @@ pub(super) fn project_default_text_attempt_images(
     let Some(messages) = payload.get_mut(messages).and_then(Value::as_array_mut) else {
         return;
     };
+    let tool_call_ids: std::collections::HashSet<String> = messages
+        .iter()
+        .filter(|item| {
+            protocol == V3HubProviderWireProtocol::Responses
+                && matches!(
+                    item["type"].as_str(),
+                    Some("function_call" | "custom_tool_call")
+                )
+        })
+        .filter_map(|item| item["call_id"].as_str().map(str::to_owned))
+        .collect();
     for message in messages {
         let text_type = match protocol {
             V3HubProviderWireProtocol::Responses if message["role"] == "assistant" => "output_text",
@@ -31,8 +42,13 @@ pub(super) fn project_default_text_attempt_images(
             Some("function_call_output" | "custom_tool_call_output")
         ) && protocol == V3HubProviderWireProtocol::Responses
         {
+            // Paired results can carry encoded media parts. An orphan native
+            // string remains literal, even when it parses as content parts.
+            let paired = message["call_id"]
+                .as_str()
+                .is_some_and(|id| tool_call_ids.contains(id));
             if let Some(output) = message.get_mut("output") {
-                project_tool_output(output, text_type, false);
+                project_tool_output(output, text_type, paired);
             }
         }
         if protocol == V3HubProviderWireProtocol::OpenAiChat && message["role"] == "tool" {
@@ -76,13 +92,12 @@ fn project_tool_output_parts(
             project(part);
         }
     } else if let Some(text) = output.as_str() {
-        // A Responses string is source business text, even when it parses as
-        // content parts. Only a real array can carry projected image parts.
-        if !project_string_parts {
-            return;
-        }
         if is_v3_inline_image_reference(text) {
             *output = json!(IMAGE_PLACEHOLDER);
+            return;
+        }
+        // Unpaired native Responses strings remain literal.
+        if !project_string_parts {
             return;
         }
         // Responses may carry the tool's content-part array as JSON text.
@@ -182,4 +197,59 @@ fn project_gemini_image_part(part: &mut Value) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod provider_req_compat_06_image_placeholder_tests {
+    use super::*;
+
+    #[test]
+    fn paired_responses_encoded_image_parts_project_without_changing_opaque_parts() {
+        let parts = json!([
+            {"type":"input_text","text":"image result","vendor_text":{"count":9}},
+            {"type":"input_image","image_url":"data:image/png;base64,AAAA","vendor_image":{"count":7}},
+            {"type":"input_file","file_id":"file-opaque"},
+            {"type":"vendor_part","value":{"count":7}}
+        ]);
+        let mut payload = json!({"input":[
+            {"type":"function_call","call_id":"paired","name":"read_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"paired","output":parts.to_string()},
+            {"type":"function_call_output","call_id":"orphan","output":parts.to_string()},
+            {"role":"user","content":[{"type":"input_text","text":"later turn"}]}
+        ]});
+        let original = payload.clone();
+        project_default_text_attempt_images(&mut payload, V3HubProviderWireProtocol::Responses);
+        let mut expected = parts;
+        expected[1] = json!({"type":"input_text","text":"[Image]","vendor_image":{"count":7}});
+        assert_eq!(payload["input"][1]["output"], expected.to_string());
+        for index in [0, 2, 3] {
+            assert_eq!(payload["input"][index], original["input"][index]);
+        }
+    }
+
+    #[test]
+    fn responses_literal_json_strings_stay_literal_and_inline_images_project() {
+        for literal in [
+            r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#,
+            r#"[{"type":"input_text","text":"literal"}]"#,
+        ] {
+            let mut payload = json!({"input":[{"type":"function_call_output","call_id":"orphan","output":literal}]});
+            let original = payload.clone();
+            project_default_text_attempt_images(&mut payload, V3HubProviderWireProtocol::Responses);
+            assert_eq!(payload, original);
+        }
+        let mut payload = json!({"input":[
+            {"type":"function_call_output","call_id":"image","output":"data:image/png;base64,AAAA"},
+            {"type":"function_call_output","call_id":"array","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_file","file_id":"file-123"}]}
+        ]});
+        project_default_text_attempt_images(&mut payload, V3HubProviderWireProtocol::Responses);
+        assert_eq!(payload["input"][0]["output"], "[Image]");
+        assert_eq!(
+            payload["input"][1]["output"],
+            json!([
+                {"type":"input_text","text":"[Image]"},
+                {"type":"input_file","file_id":"file-123"}
+            ])
+        );
+    }
 }

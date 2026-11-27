@@ -1214,11 +1214,17 @@ pub(crate) fn build_responses_input_from_chat_messages(
         }
         if role.eq_ignore_ascii_case("assistant") {
             if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row)? {
-                match reasoning {
-                    Value::Array(reasoning_items) => {
-                        output.extend(reasoning_items.into_iter().map(|item| (None, item)))
-                    }
-                    reasoning_item => output.push((None, reasoning_item)),
+                let reasoning_items = match reasoning {
+                    Value::Array(items) => items,
+                    item => vec![item],
+                };
+                for (index, item) in reasoning_items.into_iter().enumerate() {
+                    let order = message
+                        .pointer("/routecodex_chat_extension/responses_reasoning_items")
+                        .and_then(|items| items.get(index))
+                        .and_then(|entry| entry.get("source_input_order"))
+                        .and_then(Value::as_u64);
+                    output.push((order, item));
                 }
             }
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
