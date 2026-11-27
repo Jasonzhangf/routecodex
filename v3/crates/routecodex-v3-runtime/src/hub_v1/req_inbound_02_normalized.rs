@@ -579,9 +579,31 @@ fn merge_responses_chat_histories(
     }
     // Legacy public hook callers supply preceding Chat calls and current Responses
     // results. Decode the results first; Req04 still owns id/kind pairing.
-    if decoded.iter().all(|message| message["role"] == "tool") {
+    let all_decoded_are_legacy_tool_outputs =
+        decoded.iter().enumerate().all(|(dec_idx, message)| {
+            message["role"] == "tool"
+                || is_decoder_proven_named_tool_output(
+                    message,
+                    decoded_provenance.message_entries.get(dec_idx),
+                )
+        });
+    if all_decoded_are_legacy_tool_outputs {
         let original_source_len = sanitized_source.len();
-        let mut source_matched = vec![false; original_source_len];
+        let mut source_reserved = vec![false; original_source_len];
+        let mut reserved_source_for_decoded = vec![None; decoded.len()];
+        for (dec_idx, result) in decoded.iter().enumerate() {
+            let Some(incoming_id) = tool_output_item_id(result) else {
+                continue;
+            };
+            if let Some(pos) = (0..original_source_len).find(|&idx| {
+                !source_reserved[idx]
+                    && same_legacy_tool_output_identity(&sanitized_source[idx], result)
+                    && tool_output_item_id(&sanitized_source[idx]) == Some(incoming_id)
+            }) {
+                source_reserved[pos] = true;
+                reserved_source_for_decoded[dec_idx] = Some(pos);
+            }
+        }
         let mut merged = sanitized_source;
         let mut merged_entries =
             vec![V3HubMessageHistoryProvenance::default(); original_source_len];
@@ -592,31 +614,24 @@ fn merge_responses_chat_histories(
                 .cloned()
                 .unwrap_or_default();
             let result_item_id = tool_output_item_id(result);
-            let is_candidate_row = |idx: usize| {
-                !source_matched[idx]
-                    && merged[idx]["role"] == "tool"
-                    && merged[idx].get("tool_call_id") == result.get("tool_call_id")
+            let is_unreserved_candidate = |idx: usize| {
+                !source_reserved[idx] && same_legacy_tool_output_identity(&merged[idx], result)
             };
-            let matched_pos = if let Some(incoming_id) = result_item_id {
-                (0..original_source_len)
-                    .find(|&idx| {
-                        is_candidate_row(idx)
-                            && tool_output_item_id(&merged[idx]) == Some(incoming_id)
-                    })
-                    .or_else(|| {
-                        (0..original_source_len).find(|&idx| {
-                            is_candidate_row(idx) && tool_output_item_id(&merged[idx]).is_none()
-                        })
-                    })
+            let matched_pos = if let Some(pos) = reserved_source_for_decoded[dec_idx] {
+                Some(pos)
+            } else if result_item_id.is_some() {
+                (0..original_source_len).find(|&idx| {
+                    is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
+                })
             } else {
                 (0..original_source_len)
                     .find(|&idx| {
-                        is_candidate_row(idx) && tool_output_item_id(&merged[idx]).is_none()
+                        is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
                     })
-                    .or_else(|| (0..original_source_len).find(|&idx| is_candidate_row(idx)))
+                    .or_else(|| (0..original_source_len).find(|&idx| is_unreserved_candidate(idx)))
             };
             if let Some(pos) = matched_pos {
-                source_matched[pos] = true;
+                source_reserved[pos] = true;
                 let existing = &mut merged[pos];
                 *existing = merge_equivalent_chat_value(existing, result).ok_or_else(|| {
                     "Responses inbound canonicalization failed: conflicting tool output representations".to_string()
@@ -850,6 +865,46 @@ fn tool_output_item_id(message: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn tool_output_name(message: &Value) -> Option<&str> {
+    message
+        .pointer("/routecodex_chat_extension/responses_tool_output_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn tool_output_namespace(message: &Value) -> Option<&str> {
+    message
+        .pointer("/routecodex_chat_extension/responses_tool_output_namespace")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn is_decoder_proven_named_tool_output(
+    message: &Value,
+    provenance: Option<&V3HubMessageHistoryProvenance>,
+) -> bool {
+    message["role"] == "user"
+        && message.get("tool_call_id").is_none()
+        && tool_output_name(message).is_some()
+        && provenance.is_some_and(|entry| entry.decoder_native_tool_output)
+}
+
+fn same_legacy_tool_output_identity(source_row: &Value, decoded_row: &Value) -> bool {
+    if decoded_row["role"] == "tool" {
+        source_row["role"] == "tool"
+            && source_row.get("tool_call_id") == decoded_row.get("tool_call_id")
+    } else if let Some(decoded_name) = tool_output_name(decoded_row) {
+        source_row["role"] == "user"
+            && source_row.get("tool_call_id").is_none()
+            && tool_output_name(source_row) == Some(decoded_name)
+            && tool_output_namespace(source_row) == tool_output_namespace(decoded_row)
+    } else {
+        false
+    }
 }
 
 /// The complete business contribution inbound accepts for a Responses payload.
@@ -1785,6 +1840,168 @@ mod tests {
         assert_eq!(
             messages[1]["content"],
             json!(serde_json::to_string(&tool_two).unwrap())
+        );
+    }
+
+    #[test]
+    fn dual_history_idless_input_before_exact_twin_tool_search_reserves_exact_item_id() {
+        let tool_one =
+            json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+        let tool_two =
+            json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_two).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_item_id": "tso_2",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                }],
+                "input": [
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_1",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": tool_one
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "id": "tso_2",
+                        "call_id": "call_1",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": tool_two
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("ID-less incoming receipt before exact twin must not steal exact item_id");
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(messages.len(), 2, "{messages:#?}");
+        assert_eq!(
+            messages[0]["routecodex_chat_extension"]["responses_item_id"],
+            json!("tso_2")
+        );
+        assert_eq!(
+            normalized.explicit_history_pairing.message_order(0),
+            Some(1)
+        );
+        assert!(messages[1]["routecodex_chat_extension"]
+            .get("responses_item_id")
+            .is_none());
+        assert_eq!(
+            normalized.explicit_history_pairing.message_order(1),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn dual_history_named_tool_output_merges_in_legacy_merge_and_respects_identity() {
+        let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+        let empty_messages_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [],
+                "input": [{
+                    "type": "function_call_output",
+                    "name": "send_message_to_thread",
+                    "namespace": "codex_tui",
+                    "output": encoded_image
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let empty_normalized =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(empty_messages_raw)
+                .expect("named orphan output with empty messages must merge cleanly");
+        let empty_merged = empty_normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(empty_merged.len(), 1, "{empty_merged:#?}");
+        assert_eq!(empty_merged[0]["role"], "user");
+        assert_eq!(
+            empty_merged[0]["routecodex_chat_extension"]["responses_tool_output_name"],
+            json!("send_message_to_thread")
+        );
+        assert_eq!(
+            empty_merged[0]["routecodex_chat_extension"]["responses_tool_output_namespace"],
+            json!("codex_tui")
+        );
+        let prov = empty_normalized
+            .explicit_history_pairing
+            .message_entry(0)
+            .expect("named orphan provenance");
+        assert!(prov.decoder_native_tool_output);
+        assert!(prov.decoder_captured_responses_tool_output);
+        assert_eq!(prov.message_input_order, Some(0));
+
+        // Prior named output with exact item_id is reserved for exact incoming twin so an
+        // earlier ID-less named output appends without conflict.
+        let twin_and_idless_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "user",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_name": "send_message_to_thread",
+                        "responses_tool_output_namespace": "codex_tui",
+                        "responses_item_id": "fco_2"
+                    }
+                }],
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "name": "send_message_to_thread",
+                        "namespace": "codex_tui",
+                        "output": "first-output"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fco_2",
+                        "name": "send_message_to_thread",
+                        "namespace": "codex_tui",
+                        "output": "second-output"
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let twin_normalized =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(twin_and_idless_raw)
+                .expect("named tool output exact item_id must reserve before ID-less match");
+        let twin_messages = twin_normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(twin_messages.len(), 2, "{twin_messages:#?}");
+        assert_eq!(twin_messages[0]["content"], json!("second-output"));
+        assert_eq!(
+            twin_normalized.explicit_history_pairing.message_order(0),
+            Some(1)
+        );
+        assert_eq!(twin_messages[1]["content"], json!("first-output"));
+        assert_eq!(
+            twin_normalized.explicit_history_pairing.message_order(1),
+            Some(0)
         );
     }
 }
