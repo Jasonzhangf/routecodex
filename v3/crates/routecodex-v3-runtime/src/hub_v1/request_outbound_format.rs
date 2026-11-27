@@ -36,8 +36,11 @@ use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
     validate_openai_metadata,
 };
-use super::responses_openai_codec::responses_tool_output_content;
-use super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION;
+use super::responses_openai_codec::{
+    fold_v3_openai_chat_message_contents, responses_tool_output_content,
+    v3_openai_chat_content_is_empty, RESPONSES_ASSISTANT_ITEMS_EXTENSION,
+    RESPONSES_REASONING_ITEMS_EXTENSION,
+};
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
 #[path = "signature_target_projection.rs"]
@@ -1228,22 +1231,86 @@ pub(crate) fn build_responses_input_from_chat_messages(
                     output.push((order, item));
                 }
             }
+            let tool_calls_present = row
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some_and(|calls| !calls.is_empty());
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
                 for call in tool_calls {
                     if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
                         output.push((source_order(call), item));
                     }
                 }
-                if !tool_calls.is_empty()
-                    && !(source_order(message).is_some()
-                        && row.get("content").is_some_and(|content| match content {
-                            Value::String(text) => !text.trim().is_empty(),
-                            Value::Array(parts) => !parts.is_empty(),
-                            _ => false,
-                        }))
-                {
-                    continue;
+            }
+            if let Some(assistant_items) = row
+                .get("routecodex_chat_extension")
+                .and_then(|extension| extension.get(RESPONSES_ASSISTANT_ITEMS_EXTENSION))
+                .and_then(Value::as_array)
+                .filter(|items| !items.is_empty())
+            {
+                let mut entry_contents = Vec::with_capacity(assistant_items.len());
+                let mut valid = true;
+                for entry in assistant_items {
+                    let Some(chat_content) =
+                        entry.as_object().and_then(|obj| obj.get("chat_content"))
+                    else {
+                        valid = false;
+                        break;
+                    };
+                    entry_contents.push(chat_content.clone());
                 }
+                let expected_content = valid
+                    .then(|| fold_v3_openai_chat_message_contents(&entry_contents))
+                    .flatten();
+                let matches_canonical = expected_content.as_ref().is_some_and(|expected| {
+                    let actual = row.get("content").unwrap_or(&Value::Null);
+                    super::req_inbound_02_normalized::comparable_chat_content(actual)
+                        == super::req_inbound_02_normalized::comparable_chat_content(expected)
+                });
+                if matches_canonical {
+                    let mut emitted = false;
+                    for entry in assistant_items {
+                        let chat_content = &entry["chat_content"];
+                        if tool_calls_present && v3_openai_chat_content_is_empty(chat_content) {
+                            continue;
+                        }
+                        let content = chat_content_to_responses_content(chat_content, role)?;
+                        let mut item = Map::from_iter([
+                            ("type".to_string(), Value::String("message".to_string())),
+                            (
+                                "role".to_string(),
+                                Value::String(
+                                    if role.is_empty() { "user" } else { role }.to_string(),
+                                ),
+                            ),
+                            ("content".to_string(), content),
+                        ]);
+                        if let Some(item_id) = entry.get("id").and_then(Value::as_str) {
+                            item.insert("id".to_string(), Value::String(item_id.to_string()));
+                        }
+                        if let Some(status) = entry.get("status").filter(|value| !value.is_null()) {
+                            item.insert("status".to_string(), status.clone());
+                        }
+                        output.push((
+                            entry.get("source_input_order").and_then(Value::as_u64),
+                            Value::Object(item),
+                        ));
+                        emitted = true;
+                    }
+                    if emitted || tool_calls_present {
+                        continue;
+                    }
+                }
+            }
+            if tool_calls_present
+                && !(source_order(message).is_some()
+                    && row.get("content").is_some_and(|content| match content {
+                        Value::String(text) => !text.trim().is_empty(),
+                        Value::Array(parts) => !parts.is_empty(),
+                        _ => false,
+                    }))
+            {
+                continue;
             }
         }
         let content = row

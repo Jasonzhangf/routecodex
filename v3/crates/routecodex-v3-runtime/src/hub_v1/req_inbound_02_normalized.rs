@@ -293,12 +293,26 @@ fn merge_responses_chat_histories(
     decoded: &[Value],
 ) -> Result<Vec<Value>, String> {
     if source.len() == decoded.len() {
-        if let Some(merged) = source
-            .iter()
-            .zip(decoded)
-            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded))
-            .collect::<Option<Vec<_>>>()
-        {
+        let mut seen_call_ids = std::collections::HashSet::new();
+        let mut merged = Vec::with_capacity(source.len());
+        let mut all_matched = true;
+        for (src, dec) in source.iter().zip(decoded) {
+            let orphan_tool_in_source = src.get("role").and_then(Value::as_str) == Some("tool")
+                && !src
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| seen_call_ids.contains(id));
+            if let Some(value) = merge_equivalent_chat_value(src, dec, orphan_tool_in_source) {
+                merged.push(value);
+                seen_call_ids.extend(
+                    super::responses_openai_codec::collect_v3_openai_chat_tool_call_ids(src),
+                );
+            } else {
+                all_matched = false;
+                break;
+            }
+        }
+        if all_matched {
             return Ok(merged);
         }
     }
@@ -311,7 +325,15 @@ fn merge_responses_chat_histories(
                 message["role"] == "tool"
                     && message.get("tool_call_id") == result.get("tool_call_id")
             }) {
-                *existing = merge_equivalent_chat_value(existing, result).ok_or_else(|| {
+                let call_id = existing.get("tool_call_id").and_then(Value::as_str);
+                let orphan_tool_in_source = !call_id.is_some_and(|id| {
+                    source.iter().any(|message| {
+                        super::responses_openai_codec::collect_v3_openai_chat_tool_call_ids(message)
+                            .iter()
+                            .any(|call| call == id)
+                    })
+                });
+                *existing = merge_equivalent_chat_value(existing, result, orphan_tool_in_source).ok_or_else(|| {
                     "Responses inbound canonicalization failed: conflicting tool output representations".to_string()
                 })?;
             } else {
@@ -326,7 +348,11 @@ fn merge_responses_chat_histories(
     )
 }
 
-fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value> {
+fn merge_equivalent_chat_value(
+    source: &Value,
+    decoded: &Value,
+    allow_orphan_tool_literal_content: bool,
+) -> Option<Value> {
     match (source, decoded) {
         (Value::Object(source), Value::Object(decoded)) => {
             let empty_assistant_content = |object: &serde_json::Map<String, Value>| {
@@ -376,14 +402,21 @@ fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value>
                     // Chat assistant tool calls permit absent/null content; the
                     // Responses codec spells that same empty content as "".
                 } else if key == "content"
-                    && comparable_chat_content(&source[key]) == comparable_chat_content(value)
+                    && (comparable_chat_content(&source[key]) == comparable_chat_content(value)
+                        || (allow_orphan_tool_literal_content
+                            && source[key].is_string()
+                            && decoded
+                                .get("routecodex_chat_extension")
+                                .and_then(|ext| ext.get("responses_tool_output_content"))
+                                == Some(&source[key])))
                 {
                     // Preserve the source representation; only singleton plain text
-                    // is equivalent to its scalar Chat spelling.
+                    // is equivalent to its scalar Chat spelling, and genuinely
+                    // orphaned tool results keep their literal string.
                 } else {
                     merged.insert(
                         key.clone(),
-                        merge_equivalent_chat_value(&source[key], value)?,
+                        merge_equivalent_chat_value(&source[key], value, false)?,
                     );
                 }
             }
@@ -392,7 +425,7 @@ fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value>
         (Value::Array(source), Value::Array(decoded)) if source.len() == decoded.len() => source
             .iter()
             .zip(decoded)
-            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded))
+            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded, false))
             .collect::<Option<Vec<_>>>()
             .map(Value::Array),
         _ if source == decoded => Some(source.clone()),
@@ -400,7 +433,7 @@ fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value>
     }
 }
 
-fn comparable_chat_content(content: &Value) -> &Value {
+pub(super) fn comparable_chat_content(content: &Value) -> &Value {
     if let Some(parts) = content.as_array() {
         if parts.len() == 1
             && parts[0].as_object().is_some_and(|part| part.len() == 2)
@@ -415,7 +448,7 @@ fn comparable_chat_content(content: &Value) -> &Value {
 
 fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
     let mut canonical =
-        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
+        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_merge(raw)
             .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
     if let Some(source) = raw.get("messages").filter(|value| !value.is_null()) {
         let source = source.as_array().ok_or_else(|| {
@@ -425,6 +458,9 @@ fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
             .as_array()
             .expect("codec Chat messages");
         canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
+    }
+    if let Some(messages) = canonical.get_mut("messages").and_then(Value::as_array_mut) {
+        super::responses_openai_codec::resolve_orphan_responses_tool_output_media(messages);
     }
     Ok(canonical)
 }

@@ -70,11 +70,12 @@ impl Operator for AdjustProviderPrivateRequestOperator {
     }
 
     fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
-        let result = apply_v3_provider_req_compat_to_provider_payload(
+        let result = apply_v3_provider_req_compat_to_provider_payload_with_policy(
             input,
             &self.selected_target,
             self.provider_protocol,
             &self.profile,
+            self.execution_mode == super::V3HubExecutionMode::Relay,
         )
         .map(|(mut payload, custom_tool_function_binding)| {
             let opencode_zen_tcm_bridge = if self
@@ -209,10 +210,26 @@ pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> 
 }
 
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
+    payload: Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    profile: &V3ProviderCompatProfileId,
+) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
+    apply_v3_provider_req_compat_to_provider_payload_with_policy(
+        payload,
+        selected,
+        provider_protocol,
+        profile,
+        false,
+    )
+}
+
+fn apply_v3_provider_req_compat_to_provider_payload_with_policy(
     mut payload: Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
+    preserve_orphan_responses_json_strings: bool,
 ) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let custom_tool_function_binding = (profile
@@ -251,7 +268,11 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         .is_some_and(|pool| pool == "default")
         && !selected.supports_vision()
     {
-        image_placeholder::project_default_text_attempt_images(&mut result, provider_protocol);
+        image_placeholder::project_default_text_attempt_images_with_policy(
+            &mut result,
+            provider_protocol,
+            preserve_orphan_responses_json_strings,
+        );
     }
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);

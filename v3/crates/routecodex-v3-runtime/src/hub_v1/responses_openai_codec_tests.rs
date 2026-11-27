@@ -23,13 +23,63 @@ fn responses_reasoning_invalid_carriers_return_errors_and_valid_input_still_deco
     }
     let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "input":[{"type":"reasoning","id":"rs_owned","summary":[{"type":"summary_text","text":"thought"}],
-            "routecodex_chat_extension":{"responses_reasoning_items":[{"id":"rs_client"}]}}]
+            "routecodex_chat_extension":{"responses_reasoning_items":[{"id":"rs_client","encrypted_content":"enc_client"}]}}]
     })).unwrap();
     let entries =
         &canonical["messages"][0]["routecodex_chat_extension"][RESPONSES_REASONING_ITEMS_EXTENSION];
-    assert_eq!(entries.as_array().unwrap().len(), 1);
-    assert_eq!(entries[0]["id"], "rs_owned");
-    assert_eq!(entries[0]["source_input_order"], 0);
+    assert_eq!(entries.as_array().unwrap().len(), 2);
+    assert_eq!(entries[0]["id"], "rs_client");
+    assert_eq!(entries[0]["encrypted_content"], "enc_client");
+    assert!(entries[0].get("source_input_order").is_none());
+    assert_eq!(entries[1]["id"], "rs_owned");
+    assert_eq!(entries[1]["source_input_order"], 0);
+}
+
+#[test]
+fn responses_pending_assistant_items_keep_boundaries_and_dual_history_equivalence() {
+    let input = json!([
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"before call"}]},
+        {"type":"function_call","id":"fc_1","name":"lookup","call_id":"call_1","arguments":"{}"},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"while pending"}]},
+        {"type":"function_call_output","call_id":"call_1","output":"done"}
+    ]);
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": input.clone()
+    }))
+    .unwrap();
+    let messages = canonical["messages"].as_array().unwrap();
+    assert_eq!(
+        messages.len(),
+        2,
+        "must keep grouped Chat row count: {canonical}"
+    );
+    let projected =
+        super::super::request_outbound_format::build_v3_openai_responses_standard_request_from_chat_canonical(
+            &canonical,
+        )
+        .unwrap();
+    assert_eq!(projected["input"], input);
+}
+
+#[test]
+fn responses_custom_tool_call_output_preserves_structured_array_content() {
+    let input = json!([{
+        "type":"custom_tool_call_output",
+        "call_id":"call_custom_orphan",
+        "output":[{"type":"input_text","text":"structured custom"}]
+    }]);
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": input.clone()
+    }))
+    .unwrap();
+    let projected =
+        super::super::request_outbound_format::build_v3_openai_responses_standard_request_from_chat_canonical(
+            &canonical,
+        )
+        .unwrap();
+    assert_eq!(projected["input"], input);
 }
 use serde_json::{json, Value};
 

@@ -6333,6 +6333,14 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
             {"type":"function_call_output","id":"fco_extra","call_id":"call_orphan","output":"orphan result"},
             {"type":"function_call_output","call_id":"call_pending","output":"paired result"}
         ]),
+        json!([
+            {"type":"custom_tool_call_output","call_id":"call_custom_orphan","output":[{"type":"input_text","text":"structured custom orphan"}]}
+        ]),
+        json!([
+            {"type":"reasoning","id":"rs_owned","summary":[{"type":"summary_text","text":"thought"}],
+                "routecodex_chat_extension":{"responses_reasoning_items":[{"id":"rs_client","summary":[{"type":"summary_text","text":"client summary"}]}]}},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"after reasoning"}]}
+        ]),
     ];
     let mut results = Vec::new();
     for (index, input) in cases.into_iter().enumerate() {
@@ -6347,9 +6355,34 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
             expected[1]["output"] = json!("[Image]");
         } else if index == 4 {
             expected[0]["output"][0] = json!({"type":"input_text","text":"[Image]"});
+        } else if index == 9 {
+            expected = json!([
+                {"type":"reasoning","id":"rs_client","summary":[{"type":"summary_text","text":"client summary"}]},
+                {"type":"reasoning","id":"rs_owned","summary":[{"type":"summary_text","text":"thought"}]},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"after reasoning"}]}
+            ]);
         }
         results.push((index, expected, response, capture));
     }
+    // P1-1: same assistant-text + tool_calls history WITH equivalent messages twin
+    let twin_input = json!([
+        {"type":"function_call","id":"fc_pending","name":"lookup","call_id":"call_pending","arguments":"{}"},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible while call is pending"}]},
+        {"type":"function_call_output","id":"fco_extra","call_id":"call_orphan","output":"orphan result"},
+        {"type":"function_call_output","call_id":"call_pending","output":"paired result"}
+    ]);
+    let twin_messages = json!([
+        {"role":"assistant","content":"visible while call is pending","tool_calls":[{"id":"call_pending","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+        {"role":"tool","tool_call_id":"call_orphan","content":"orphan result"},
+        {"role":"tool","tool_call_id":"call_pending","content":"paired result"}
+    ]);
+    let twin_response = reqwest::Client::new()
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":twin_input,"messages":twin_messages,"stream":false}))
+        .send()
+        .await;
+    let twin_capture = timeout(Duration::from_secs(2), captures.recv()).await;
+    results.push((10, twin_input, twin_response, twin_capture));
     handle.shutdown().await;
     let _ = shutdown.send(());
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -6369,6 +6402,350 @@ async fn issue4a0b3aa_r3_responses_history_reaches_first_provider_faithfully() {
     assert!(
         captures.try_recv().is_err(),
         "one Provider attempt per case"
+    );
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r8_messages_twin_paired_media_reaches_vision_and_sets_receipt() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_r8_twin_media","status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"vision ok"}]}]
+    });
+    let (vision_url, mut vision_captures, vision_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&provider_body).unwrap(),
+        )
+        .await;
+    let (text_url, mut text_captures, text_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r8-twin-media-key");
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &text_url);
+    let mut vision = manifest.providers.values().next().unwrap().clone();
+    vision.id = "vision_provider".into();
+    vision.base_url = vision_url.clone();
+    vision.interfaces.get_mut("default").unwrap().base_url = vision_url;
+    vision
+        .models
+        .values_mut()
+        .next()
+        .unwrap()
+        .capabilities
+        .push("vision".into());
+    manifest.providers.insert(vision.id.clone(), vision);
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    group.pools.remove("client_test");
+    let mut multimodal = group.pools["default"].clone();
+    multimodal.id = "multimodal".into();
+    multimodal.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
+        precedence: 10,
+        entry_protocol: None,
+        models: Vec::new(),
+        required_capabilities: vec!["vision".into()],
+        min_input_tokens: None,
+        max_input_tokens: None,
+    });
+    multimodal.targets[0].provider = Some("vision_provider".into());
+    group.pools.insert("multimodal".into(), multimodal);
+
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let session_meta = json!({
+        "session_id": "issue4a0b3aa-r8-twin-media-session",
+        "thread_id": "issue4a0b3aa-r8-twin-media-thread"
+    });
+    let encoded_media = json!([{"type":"input_image","image_url":png}]).to_string();
+
+    // 1. Paired result whose parent call lives in the legacy Chat `messages` twin.
+    // Must reach the vision Provider as structured media and record an image receipt.
+    let first = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "client_metadata": session_meta,
+            "messages": [{
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_twin_media",
+                    "type": "function",
+                    "function": {"name": "read_image", "arguments": "{}"}
+                }]
+            }],
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_twin_media",
+                "output": encoded_media
+            }]
+        }))
+        .send()
+        .await
+        .expect("paired twin media request must succeed");
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_capture = timeout(Duration::from_secs(2), vision_captures.recv())
+        .await
+        .expect("vision provider must receive twin-paired media")
+        .expect("vision capture");
+    assert_eq!(
+        first_capture.body["input"][1]["output"],
+        json!([{"type":"input_image","image_url":png}]),
+        "paired result from messages twin must reach first vision Provider as structured media: {}",
+        first_capture.body
+    );
+
+    // 2. Follow-up turn in the same session with that historical paired result and a new
+    // text user turn: because turn 1 recorded an image receipt, it routes to the text
+    // Provider and projects the historical image to [Image].
+    let followup = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "client_metadata": session_meta,
+            "input": [
+                {"type":"function_call","call_id":"call_twin_media","name":"read_image","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_twin_media","output":encoded_media},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"vision ok"}]},
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"next text turn"}]}
+            ]
+        }))
+        .send()
+        .await
+        .expect("same-session follow-up must succeed");
+    assert_eq!(followup.status(), StatusCode::OK);
+    let followup_capture = timeout(Duration::from_secs(2), text_captures.recv())
+        .await
+        .expect("text provider must receive follow-up after image receipt")
+        .expect("text capture");
+    assert_eq!(
+        followup_capture.body["input"][1]["output"],
+        json!([{"type":"input_text","text":"[Image]"}]),
+        "same-session receipt must enable historical placeholder: {}",
+        followup_capture.body
+    );
+
+    // 3. Genuinely orphaned JSON-encoded image string remains literal on the Provider wire.
+    let orphan = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_genuine_orphan",
+                "output": encoded_media
+            }]
+        }))
+        .send()
+        .await
+        .expect("genuinely orphaned string must succeed");
+    assert_eq!(orphan.status(), StatusCode::OK);
+    let orphan_capture = timeout(Duration::from_secs(2), vision_captures.recv())
+        .await
+        .expect("provider must receive orphan literal")
+        .expect("orphan capture");
+    assert_eq!(
+        orphan_capture.body["input"][0]["output"],
+        json!(encoded_media),
+        "genuinely orphaned string must stay literal: {}",
+        orphan_capture.body
+    );
+
+    handle.shutdown().await;
+    let _ = vision_shutdown.send(());
+    let _ = text_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r8_direct_continuation_projects_json_image_while_relay_keeps_orphan_literal()
+{
+    let _test_guard = TEST_LOCK.lock().await;
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_r8_p5","status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r8-p5-key");
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "issue4a0b3aa-r8-p5-key");
+
+    // Direct mode against text-only default pool Provider
+    let mut direct_manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &provider_url,
+        r#""direct""#,
+    );
+    direct_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let direct_handle = spawn_v3_server_aggregate(direct_manifest).await.unwrap();
+    let direct_endpoint = format!("http://{}/v1/responses", direct_handle.listeners[0].addr);
+    let direct_response = reqwest::Client::new()
+        .post(&direct_endpoint)
+        .json(&json!({
+            "model": "wire-protocol",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_direct_continuation",
+                "output": encoded_image
+            }]
+        }))
+        .send()
+        .await
+        .expect("Direct continuation must reach text-only default Provider");
+    let direct_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("Direct provider capture timeout")
+        .expect("Direct provider capture");
+    direct_handle.shutdown().await;
+    assert_eq!(direct_response.status(), StatusCode::OK);
+    assert_eq!(
+        direct_capture.body["input"][0]["output"],
+        json!([{"type":"input_text","text":"[Image]"}]).to_string(),
+        "Direct continuation on text-only default Provider must project JSON image output to [Image]: {}",
+        direct_capture.body
+    );
+
+    // Relay mode against text-only default pool Provider
+    let mut relay_manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    relay_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let relay_handle = spawn_v3_server_aggregate(relay_manifest).await.unwrap();
+    let relay_endpoint = format!("http://{}/v1/responses", relay_handle.listeners[0].addr);
+    let relay_response = reqwest::Client::new()
+        .post(&relay_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_relay_orphan",
+                "output": encoded_image
+            }]
+        }))
+        .send()
+        .await
+        .expect("Relay orphan literal must reach text-only default Provider");
+    let relay_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("Relay provider capture timeout")
+        .expect("Relay provider capture");
+    relay_handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+    assert_eq!(relay_response.status(), StatusCode::OK);
+    assert_eq!(
+        relay_capture.body["input"][0]["output"],
+        json!(encoded_image),
+        "Relay orphan JSON image string must remain literal on text-only default Provider: {}",
+        relay_capture.body
+    );
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r8_reasoning_carrier_retains_both_encrypted_entries_on_first_provider() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_r8_reasoning","status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r8-reasoning-key");
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    {
+        let provider = manifest.providers.values_mut().next().unwrap();
+        let mut model = provider.models.remove("test").unwrap();
+        model.id = "gpt-5.5".into();
+        model.wire_name = "gpt-5.5".into();
+        provider.default_model = "gpt-5.5".into();
+        provider.models.insert("gpt-5.5".into(), model);
+    }
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        for target in &mut pool.targets {
+            target.model = Some("gpt-5.5".into());
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "stream": false,
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_owned",
+                    "encrypted_content": "enc_owned",
+                    "summary": [{"type": "summary_text", "text": "thought"}],
+                    "routecodex_chat_extension": {
+                        "responses_reasoning_items": [
+                            {"id": "rs_client", "encrypted_content": "enc_client"}
+                        ]
+                    }
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "after reasoning"}]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("reasoning carrier request must reach first Provider");
+    let capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("provider capture timeout")
+        .expect("provider capture");
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        capture.body["input"],
+        json!([
+            {"type":"reasoning","id":"rs_client","encrypted_content":"enc_client"},
+            {"type":"reasoning","id":"rs_owned","encrypted_content":"enc_owned","summary":[{"type":"summary_text","text":"thought"}]},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"after reasoning"}]}
+        ])
     );
 }
 
