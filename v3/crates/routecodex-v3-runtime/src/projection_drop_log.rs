@@ -18,6 +18,8 @@ use std::sync::Arc;
 
 /// stage-3 target output-protocol whitelist projection 的 stage 标签。
 pub const V3_PROJECTION_DROP_STAGE3: &str = "outbound_target_protocol_projection";
+/// 响应侧目标协议投影省略诊断的 stage 标签。
+pub const V3_PROJECTION_DROP_STAGE_RESPONSE: &str = "response_target_protocol_projection";
 
 /// 一条 stage-3 出站投影丢弃记录。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,6 +70,29 @@ impl V3ProjectionDropRecord {
         }
     }
 
+    /// 响应侧不可表示字段省略记录：保留 Provider 原样 `source_value`（而非请求原值）。
+    pub fn new_response_drop(
+        target_protocol: impl Into<String>,
+        json_path: impl Into<String>,
+        reason: impl Into<String>,
+        source_value: Value,
+        canonical_value: Value,
+        drop_site: impl Into<String>,
+    ) -> Self {
+        Self {
+            ts: 0,
+            request_id: String::new(),
+            entry_port: String::new(),
+            target_protocol: target_protocol.into(),
+            stage: V3_PROJECTION_DROP_STAGE_RESPONSE.to_string(),
+            json_path: json_path.into(),
+            reason: reason.into(),
+            source_value,
+            canonical_value,
+            drop_site: drop_site.into(),
+        }
+    }
+
     pub fn to_json_line(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|error| {
             format!("{{\"error\":\"projection drop record serialization failed: {error}\"}}")
@@ -79,12 +104,18 @@ impl V3ProjectionDropRecord {
 ///
 /// `client_original` 是 ReqInbound01 的客户端原始 payload 句柄（Arc），因此
 /// stage 3 只看到 canonical payload 时仍能取到 `source_value`。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct V3ProjectionDropContext {
     pub request_id: String,
     pub entry_port: String,
     pub log_file: Option<String>,
     client_original: Arc<Value>,
+}
+
+impl Default for V3ProjectionDropContext {
+    fn default() -> Self {
+        Self::disabled()
+    }
 }
 
 impl V3ProjectionDropContext {
@@ -155,6 +186,18 @@ impl V3ProjectionDropContext {
             record.request_id = self.request_id.clone();
             record.entry_port = self.entry_port.clone();
             record.source_value = self.source_value_at(&record.json_path);
+        }
+        self.emit(records);
+    }
+
+    /// 用请求身份补齐响应侧省略记录并落盘（保留响应原样 `source_value`）。
+    pub fn restamp_response_and_emit(&self, records: &mut [V3ProjectionDropRecord]) {
+        if records.is_empty() {
+            return;
+        }
+        for record in records.iter_mut() {
+            record.request_id = self.request_id.clone();
+            record.entry_port = self.entry_port.clone();
         }
         self.emit(records);
     }

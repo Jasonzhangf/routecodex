@@ -405,9 +405,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             V3AnthropicResponsesProjectionContext::from_chat_canonical_request(
                 &provider_semantic_body,
             )
-            .map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
-            })?;
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string()))?
+            .with_projection_drop_context(projection_drop_context.clone());
         let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
         let request_tool_thinking_turn_context =
             request_outcome.tool_thinking_turn_context().clone();
@@ -1001,7 +1000,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ) {
                             Ok(value) => value,
                             Err(error) => {
-                                let failure = handle_error_before_resp03!(
+                                let mut failure = handle_error_before_resp03!(
                                     provider_response_stream_relay_failure(
                                         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                                             error.to_string(),
@@ -1010,6 +1009,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         &selected_target_provider_id,
                                         Some(selected_observability.clone()),
                                     )
+                                );
+                                failure.provider_status = Some(provider_status);
+                                failure.source_stage = "V3ProviderResp14Raw";
+                                failure.response_processing_code = Some(
+                                    routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
                                 );
                                 let terminal_failure = handle_error_before_resp03!(
                                     handle_v3_responses_relay_provider_failure(

@@ -1030,6 +1030,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         }
     }
     let mut consumed_hosted_result_ids = HashSet::new();
+    let mut response_drops = Vec::<V3ProjectionDropRecord>::new();
     for (index, kind, part) in &classified_blocks {
         if *kind == V3AnthropicResponseContentBlockKind::Unknown || kind.is_source_roundtrip_only()
         {
@@ -1040,6 +1041,14 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             eprintln!(
                 "[v3-response-warning] protocol=anthropic stage=responses_projection index={index} content_type={content_type:?} reason=unrepresentable_block_omitted"
             );
+            response_drops.push(V3ProjectionDropRecord::new_response_drop(
+                "responses",
+                format!("$.content[{index}]"),
+                "unrepresentable_target_protocol_field_omitted",
+                (*part).clone(),
+                json!({ "type": content_type }),
+                "project_v3_anthropic_message_as_responses_response_with_context",
+            ));
             continue;
         }
         match kind {
@@ -1101,6 +1110,14 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                     eprintln!(
                         "[v3-response-warning] protocol=anthropic stage=responses_projection index={index} server_tool_use_name={name:?} reason=unsupported_server_tool_use_omitted"
                     );
+                    response_drops.push(V3ProjectionDropRecord::new_response_drop(
+                        "responses",
+                        format!("$.content[{index}]"),
+                        "unrepresentable_target_protocol_field_omitted",
+                        (*part).clone(),
+                        json!({ "type": "server_tool_use", "name": name }),
+                        "project_v3_anthropic_message_as_responses_response_with_context",
+                    ));
                     continue;
                 }
                 let call_id = part
@@ -1275,6 +1292,15 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     }
     if let Some(stop_sequence) = terminal.stop_sequence {
         response.insert("stop_sequence".to_string(), Value::String(stop_sequence));
+    } else if let Some(extra_stop_sequence) = object.get("stop_sequence").filter(|v| !v.is_null()) {
+        response_drops.push(V3ProjectionDropRecord::new_response_drop(
+            "responses",
+            "$.stop_sequence",
+            "unrepresentable_target_protocol_field_omitted",
+            extra_stop_sequence.clone(),
+            extra_stop_sequence.clone(),
+            "project_v3_anthropic_message_as_responses_response_with_context",
+        ));
     }
     if let Some(stop_details) = terminal.stop_details {
         response.insert("stop_details".to_string(), stop_details);
@@ -1282,6 +1308,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     if let Some(metadata) = context.metadata() {
         response.insert("metadata".to_string(), metadata.clone());
     }
+    context.record_response_drops(&mut response_drops);
     Ok(Value::Object(response))
 }
 

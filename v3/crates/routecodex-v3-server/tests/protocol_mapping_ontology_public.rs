@@ -460,16 +460,50 @@ targets = [
         "MAP-001 Inbound must pass all metadata keys and exact untrimmed values through Chat Process"
     );
 
-    // Verify scoped projection drop log contains recorded drops for store & prompt_cache_key.
+    // Verify scoped projection drop log contains BOTH request-side drops (store & prompt_cache_key)
+    // AND response-side omitted unrepresentable blocks (container_upload, bash_code_execution_tool_result)
+    // bound to the same request_id.
     let drops_raw = std::fs::read_to_string(&drop_log)
         .expect("projection-drops.jsonl must persist scoped MAP-002 drop diagnostics");
+    let drop_rows: Vec<Value> = drops_raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).expect("valid projection drop JSONL row"))
+        .collect();
+    let req1_id = drop_rows
+        .iter()
+        .find(|row| {
+            row["json_path"] == "$.prompt_cache_key" && row["canonical_value"] == "cache-k1"
+        })
+        .and_then(|row| row["request_id"].as_str())
+        .expect("expected request-side prompt_cache_key drop for cache-k1")
+        .to_string();
     assert!(
-        drops_raw.contains("store") && drops_raw.contains("prompt_cache_key"),
-        "expected store and prompt_cache_key in drop log: {drops_raw}"
+        drop_rows
+            .iter()
+            .any(|row| row["request_id"] == req1_id && row["json_path"] == "$.store"),
+        "expected same-request store drop: {drops_raw}"
     );
     assert!(
-        drops_raw.contains("unmapped_target_protocol_field_unrepresentable"),
-        "expected unmapped_target_protocol_field_unrepresentable reason: {drops_raw}"
+        drop_rows.iter().any(|row| row["request_id"] == req1_id
+            && row["stage"] == "response_target_protocol_projection"
+            && row["json_path"] == "$.content[0]"
+            && row["source_value"]["type"] == "container_upload"),
+        "expected same-request response-side container_upload drop record: {drops_raw}"
+    );
+    assert!(
+        drop_rows.iter().any(|row| row["request_id"] == req1_id
+            && row["stage"] == "response_target_protocol_projection"
+            && row["json_path"] == "$.content[2]"
+            && row["source_value"]["type"] == "bash_code_execution_tool_result"),
+        "expected same-request response-side bash_code_execution_tool_result drop record: {drops_raw}"
+    );
+    let json_text_dump = json_body.to_string();
+    assert!(
+        !json_text_dump.contains("container_upload")
+            && !json_text_dump.contains("file_unknown")
+            && !json_text_dump.contains("bash_code_execution_tool_result"),
+        "omitted unrepresentable response blocks must not enter client payload: {json_body}"
     );
 
     drop(server);
@@ -2855,7 +2889,7 @@ async fn web_search_backup_anthropic(
 async fn map002_public_unpaired_web_search_tool_result_triggers_recovery_while_paired_succeeds() {
     let _lock = LOCK.lock().await;
     hub_v1_fixture::pin_test_process_refill_off();
-    let _home = Home::new("map002-ws-pairing");
+    let home = Home::new("map002-ws-pairing");
     std::env::set_var("ONTOLOGY_WS_KEY", "ws-secret");
 
     let primary_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2892,6 +2926,7 @@ async fn map002_public_unpaired_web_search_tool_result_triggers_recovery_while_p
     });
 
     let listen_port = test_ports::free_port();
+    let exhausted_port = test_ports::free_port();
     let source = format!(
         r#"
 version = 3
@@ -2901,6 +2936,14 @@ version = 3
 bind = "127.0.0.1"
 port = {}
 routing_group = "default"
+endpoints = ["responses"]
+
+{}
+
+[servers.exhausted]
+bind = "127.0.0.1"
+port = {}
+routing_group = "exhausted_only"
 endpoints = ["responses"]
 
 {}
@@ -2940,15 +2983,40 @@ targets = [
   {{ kind = "provider_model", provider = "anthropic_primary", model = "anthropic-wire", key = "key", priority = 2 }},
   {{ kind = "provider_model", provider = "anthropic_backup", model = "anthropic-backup-wire", key = "key", priority = 1 }}
 ]
+
+[route_groups.exhausted_only.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "anthropic_primary", model = "anthropic-wire", key = "key", priority = 1 }}
+]
 "#,
         relay_all_entry_protocols_declaration(),
         listen_port,
         hub_v1_fixture::hub_v1_server_execution("a"),
+        exhausted_port,
+        hub_v1_fixture::hub_v1_server_execution("exhausted"),
     );
 
-    let manifest =
+    let mut manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    manifest.debug.codex_samples = true;
     let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let recovery_samples = home
+        .path
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join(listen_port.to_string());
+    let exhausted_samples = home
+        .path
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join(exhausted_port.to_string());
+    let mut seen_recovery_dirs = std::collections::HashSet::<std::path::PathBuf>::new();
+    let mut seen_exhausted_dirs = std::collections::HashSet::<std::path::PathBuf>::new();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -3000,6 +3068,80 @@ targets = [
     );
     assert_eq!(state.primary_hits.load(Ordering::SeqCst), 2);
     assert_eq!(state.backup_hits.load(Ordering::SeqCst), 1);
+
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("recovered unpaired ws attempt sample must persist");
+    let recovery_evidence =
+        read_next_failed_attempt_evidence(&recovery_samples, &mut seen_recovery_dirs).await;
+    assert_eq!(
+        recovery_evidence["attempts"][0]["provider_status"], 200,
+        "upstream HTTP 200 must stay distinct from internal failure: {recovery_evidence}"
+    );
+    assert_eq!(
+        recovery_evidence["attempts"][0]["status"], 502,
+        "{recovery_evidence}"
+    );
+    assert_eq!(
+        recovery_evidence["attempts"][0]["action"], "switch_provider",
+        "{recovery_evidence}"
+    );
+    assert_eq!(
+        recovery_evidence["attempts"][0]["diagnostic_source"]["source_kind"], "runtime_failure",
+        "{recovery_evidence}"
+    );
+    assert_eq!(
+        recovery_evidence["attempts"][0]["diagnostic_source"]["source_stage"],
+        "V3ProviderResp14Raw",
+        "{recovery_evidence}"
+    );
+
+    // 3) Exhausted single candidate with unpaired web_search_tool_result -> detectable transport abort,
+    // retaining internal runtime_failure source and real upstream provider_status=200.
+    let exhausted_resp = client
+        .post(format!("http://127.0.0.1:{exhausted_port}/v1/responses"))
+        .json(&json!({
+            "model": "ws-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "unpaired_ws"}]}],
+            "stream": false
+        }))
+        .send()
+        .await;
+    assert_hard_json_failure(
+        "unpaired_ws_exhausted",
+        exhausted_resp,
+        &[
+            "UnpairedWebSearchToolResult",
+            "srvtoolu_orphan",
+            "companion prose",
+        ],
+    )
+    .await;
+    assert_eq!(state.primary_hits.load(Ordering::SeqCst), 3);
+    assert_eq!(state.backup_hits.load(Ordering::SeqCst), 1);
+    server
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("exhausted unpaired ws failure sample must persist");
+    let exhausted_evidence =
+        read_next_failed_attempt_evidence(&exhausted_samples, &mut seen_exhausted_dirs).await;
+    assert_eq!(
+        exhausted_evidence["attempts"][0]["provider_status"], 200,
+        "{exhausted_evidence}"
+    );
+    assert_eq!(
+        exhausted_evidence["attempts"][0]["status"], 502,
+        "{exhausted_evidence}"
+    );
+    assert_eq!(
+        exhausted_evidence["terminal_source"]["source_kind"], "runtime_failure",
+        "{exhausted_evidence}"
+    );
+    assert_eq!(
+        exhausted_evidence["terminal_source"]["source_stage"], "V3ProviderResp14Raw",
+        "{exhausted_evidence}"
+    );
 
     drop(server);
     let _ = p_sd.send(());
