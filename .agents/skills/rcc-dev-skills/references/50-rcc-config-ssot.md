@@ -36,11 +36,12 @@ Redact credentials. Do not infer provider/model/endpoint from names or old memor
 rccv3 config check -c <active-config>
 ```
 
-4. After verified source gates, install and restart once:
+4. After verified source gates and merging to latest `main`, build, install, and restart once:
 
 ```bash
-npm run install:v3
+npm run build:v3 && npm run install:v3
 rccv3 --version
+rccv3 config check -c <active-config>
 rccv3 restart -c <active-config>
 ```
 
