@@ -5263,7 +5263,7 @@ flowchart TD
         <span class="summary-sub">3 edges · <code>v3.direct_sse_accept_skeleton</code> · V3DirectSseAccept01ClientChannel → V3DirectResp14TypedHookCatalog</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.</p>
+        <p class="chain-summary">Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes. Runtime buffers each attempt until accepted business frames can cross once; Error may instead qualify a complete real non-2xx response from the actual exhausted final identity for entry-protocol projection before business commit. A transport-only head is not business commit. All other terminal failures abort only the affected transport without a fabricated error frame, reparsed HTTP JSON or completion.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.direct_sse_accept_skeleton</code></span>
           <span>modules: <code>v3-runtime · v3-server</code></span>
