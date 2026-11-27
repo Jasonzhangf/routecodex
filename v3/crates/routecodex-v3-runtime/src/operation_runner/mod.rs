@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 mod error_decision;
+pub(crate) mod field_walker;
 mod operators;
 #[cfg(test)]
 pub(crate) use operators::err01_execution_count_for_test;
