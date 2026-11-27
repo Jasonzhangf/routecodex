@@ -109,7 +109,10 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
                     .unwrap_or("user")
                     .trim()
                     .eq_ignore_ascii_case("assistant");
-                let message = build_v3_openai_chat_message_from_responses_message(item)?;
+                let mut message = build_v3_openai_chat_message_from_responses_message(item)?;
+                if native_responses {
+                    set_v3_responses_tool_input_order(&mut message, input_index);
+                }
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
@@ -167,8 +170,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
             | "tool_message" => {
                 let mut message = build_v3_openai_chat_tool_result_message(item, native_responses)?;
                 if native_responses {
-                    message["routecodex_chat_extension"]["responses_tool_input_order"] =
-                        json!(input_index);
+                    set_v3_responses_tool_input_order(&mut message, input_index);
                 }
                 append_v3_openai_chat_tool_result_message(
                     &mut messages,
@@ -447,6 +449,10 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
+fn set_v3_responses_tool_input_order(message: &mut Value, input_index: usize) {
+    message["routecodex_chat_extension"]["responses_tool_input_order"] = json!(input_index);
+}
+
 pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
@@ -1127,11 +1133,12 @@ fn build_v3_openai_chat_tool_result_message(
     }
     if native_responses
         && item_type == "function_call_output"
-        && output.as_array().is_some_and(|parts| {
-            parts
-                .iter()
-                .all(|part| part["type"] == "input_text" && part["text"].is_string())
-        })
+        && (output.is_string()
+            || output.as_array().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .all(|part| part["type"] == "input_text" && part["text"].is_string())
+            }))
     {
         extension.insert("responses_tool_output_content".to_string(), output.clone());
     }

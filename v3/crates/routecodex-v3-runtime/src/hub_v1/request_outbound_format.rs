@@ -1239,7 +1239,7 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .transpose()?
             .unwrap_or_else(|| Value::Array(Vec::new()));
         output.push((
-            None,
+            source_order(message),
             Value::Object(Map::from_iter([
                 ("type".to_string(), Value::String("message".to_string())),
                 (
@@ -1251,7 +1251,7 @@ pub(crate) fn build_responses_input_from_chat_messages(
         ));
     }
     // Canonical Chat groups pending calls, while Responses represents separate
-    // items. Restore their source order within each native tool-item run.
+    // items. Restore their source order together with native history messages.
     for group in output.chunk_by_mut(|left, right| left.0.is_some() && right.0.is_some()) {
         group.sort_by_key(|(order, _)| *order);
     }

@@ -32,12 +32,12 @@ pub(super) fn project_default_text_attempt_images(
         ) && protocol == V3HubProviderWireProtocol::Responses
         {
             if let Some(output) = message.get_mut("output") {
-                project_tool_output(output, text_type);
+                project_tool_output(output, text_type, false);
             }
         }
         if protocol == V3HubProviderWireProtocol::OpenAiChat && message["role"] == "tool" {
             if let Some(output) = message.get_mut(content) {
-                project_tool_output(output, text_type);
+                project_tool_output(output, text_type, true);
             }
             continue;
         }
@@ -50,7 +50,7 @@ pub(super) fn project_default_text_attempt_images(
                 if protocol == V3HubProviderWireProtocol::Anthropic && part["type"] == "tool_result"
                 {
                     if let Some(output) = part.get_mut("content") {
-                        project_tool_output(output, text_type);
+                        project_tool_output(output, text_type, true);
                     }
                 } else {
                     project_image_part(part, text_type);
@@ -60,16 +60,27 @@ pub(super) fn project_default_text_attempt_images(
     }
 }
 
-fn project_tool_output(output: &mut Value, text_type: &str) {
-    project_tool_output_parts(output, |part| project_image_part(part, text_type));
+fn project_tool_output(output: &mut Value, text_type: &str, project_string_parts: bool) {
+    project_tool_output_parts(output, project_string_parts, |part| {
+        project_image_part(part, text_type)
+    });
 }
 
-fn project_tool_output_parts(output: &mut Value, mut project: impl FnMut(&mut Value) -> bool) {
+fn project_tool_output_parts(
+    output: &mut Value,
+    project_string_parts: bool,
+    mut project: impl FnMut(&mut Value) -> bool,
+) {
     if let Some(parts) = output.as_array_mut() {
         for part in parts {
             project(part);
         }
     } else if let Some(text) = output.as_str() {
+        // A Responses string is source business text, even when it parses as
+        // content parts. Only a real array can carry projected image parts.
+        if !project_string_parts {
+            return;
+        }
         if is_v3_inline_image_reference(text) {
             *output = json!(IMAGE_PLACEHOLDER);
             return;
@@ -130,7 +141,7 @@ fn project_gemini_parts(parts: &mut Vec<Value>) {
                 .get_mut("response")
                 .and_then(|response| response.get_mut("output"))
             {
-                project_tool_output_parts(output, |part| {
+                project_tool_output_parts(output, true, |part| {
                     project_gemini_image_part(part) || project_image_part(part, "text")
                 });
             }

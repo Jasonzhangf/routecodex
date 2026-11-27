@@ -264,6 +264,47 @@ async fn issue4a0b3aa_orphan_text_content_array_keeps_responses_shape_without_id
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_orphan_json_image_text_keeps_responses_string_without_id() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"resp-orphan-string",
+            "object":"response",
+            "status":"completed",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]
+        }),
+    };
+    let output = r#"[{"type":"input_image","image_url":"https://example.com/image.png"}]"#;
+    let input = serde_json::json!([{
+        "type":"function_call_output",
+        "call_id":"call_orphan_string",
+        "output":output
+    }]);
+
+    let outcome = execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input(
+            "req-orphan-string-shape",
+            serde_json::json!({"input":input.clone(),"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("parseable orphan output must reach the Responses provider");
+
+    assert_eq!(outcome.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let provider_input = provider_projection_body(&captures[0])["input"]
+        .as_array()
+        .expect("Responses input array");
+    assert_eq!(provider_input, input.as_array().unwrap());
+    assert_eq!(provider_input[0]["output"], output);
+    assert_eq!(provider_input[0]["call_id"], "call_orphan_string");
+    assert!(provider_input[0].get("id").is_none());
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_normalization_preserves_failure_boundaries() {
     // Non-array `tools` is deliberately NOT in this failure-boundary list. It is an
     // openai_chat field that cannot be represented compatibly, so stage-3 output
@@ -462,6 +503,46 @@ async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
                 assert!(actual.get("id").is_none());
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_responses_interleaved_plain_message_keeps_source_order() {
+    let input = serde_json::json!([
+        {"type":"function_call","id":"fc_source","name":"lookup","call_id":"call_a","arguments":"{}"},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"between call and result"}]},
+        {"type":"function_call_output","call_id":"call_x","output":"orphan result"},
+        {"type":"function_call_output","call_id":"call_a","output":"parent result"}
+    ]);
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-interleaved","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+
+    let outcome = execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input(
+            "req-interleaved-message",
+            serde_json::json!({"input":input.clone(),"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("Responses history with an interleaved message must reach the provider");
+
+    assert_eq!(outcome.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let provider_input = provider_projection_body(&captures[0])["input"]
+        .as_array()
+        .expect("Responses input array");
+    assert_eq!(provider_input, input.as_array().unwrap());
+    assert_eq!(provider_input[0]["call_id"], "call_a");
+    assert_eq!(provider_input[1]["role"], "user");
+    assert_eq!(provider_input[2]["call_id"], "call_x");
+    assert_eq!(provider_input[3]["call_id"], "call_a");
+    for index in [2, 3] {
+        assert!(provider_input[index].get("id").is_none());
     }
 }
 

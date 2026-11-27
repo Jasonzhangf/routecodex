@@ -311,7 +311,9 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             "output".to_string(),
             if let Some(content) = extension
                 .and_then(|fields| fields.get("responses_tool_output_content"))
-                .filter(|content| content.is_array() && output == content.to_string())
+                .filter(|content| {
+                    content.is_string() || (content.is_array() && output == content.to_string())
+                })
             {
                 content.clone()
             } else if let Some(content) = row.get("content").filter(|content| {
