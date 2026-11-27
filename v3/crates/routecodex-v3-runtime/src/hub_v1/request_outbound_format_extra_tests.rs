@@ -2030,4 +2030,82 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
             .any(|drop| drop.json_path == "$.tool_choice"),
         "{incapable_offline_drops:?}"
     );
+
+    // Offline restriction must apply deterministically regardless of declaration order
+    // (before or after conflicting live declarations), record every omitted hosted
+    // declaration, and preserve the colocated callable `read_file` function.
+    let (offline_after_conflict_wire, offline_after_conflict_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "read file offline"}],
+                "tools": [
+                    {"type": "web_search", "search_context_size": "high"},
+                    {"type": "web_search_preview", "search_context_size": "low"},
+                    {"type": "web_search", "external_web_access": false},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("offline declaration after conflicting live sizes must still omit all hosted searches");
+    assert!(offline_after_conflict_wire
+        .get("web_search_options")
+        .is_none());
+    assert_eq!(offline_after_conflict_wire["tool_choice"], "required");
+    assert_eq!(
+        offline_after_conflict_wire["tools"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        offline_after_conflict_wire["tools"][0]["function"]["name"],
+        "read_file"
+    );
+    for path in ["$.tools[0]", "$.tools[1]", "$.tools[2]"] {
+        assert!(
+            offline_after_conflict_drops
+                .iter()
+                .any(|drop| drop.json_path == path),
+            "expected drop for {path}: {offline_after_conflict_drops:?}"
+        );
+    }
+
+    let (offline_first_wire, offline_first_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "read file offline"}],
+                "tools": [
+                    {"type": "web_search", "external_web_access": false},
+                    {"type": "web_search", "search_context_size": "high"},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("offline declaration first must omit all later hosted declarations with drops");
+    assert!(offline_first_wire.get("web_search_options").is_none());
+    assert_eq!(offline_first_wire["tool_choice"], "required");
+    assert_eq!(offline_first_wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        offline_first_wire["tools"][0]["function"]["name"],
+        "read_file"
+    );
+    for path in ["$.tools[0]", "$.tools[1]"] {
+        assert!(
+            offline_first_drops
+                .iter()
+                .any(|drop| drop.json_path == path),
+            "expected drop for {path}: {offline_first_drops:?}"
+        );
+    }
 }

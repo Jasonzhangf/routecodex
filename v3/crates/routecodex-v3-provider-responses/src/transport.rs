@@ -1820,9 +1820,27 @@ async fn read_json_disguised_as_sse_or_stream(
         prefetched.push(chunk);
     }
 
+    let elapsed = sniff_started.elapsed();
+    sse_first_frame_timeout_error_if_elapsed(
+        elapsed,
+        sse_first_frame_budget,
+        status,
+        &request_id,
+        &provider_id,
+        &headers,
+    )?;
+
     if matches!(first_non_ws, Some(b'{') | Some(b'[')) {
         if let Some(deadline) = deadline {
-            remaining_timeout(deadline, &request_id, &provider_id)?;
+            if Instant::now() >= deadline {
+                return Err(response_body_read_error(
+                    status,
+                    &request_id,
+                    &provider_id,
+                    headers,
+                    "provider request budget exhausted while reading response body".to_string(),
+                ));
+            }
         }
         let mut body = Vec::new();
         for chunk in prefetched {
@@ -1848,15 +1866,6 @@ async fn read_json_disguised_as_sse_or_stream(
         );
     }
 
-    let elapsed = sniff_started.elapsed();
-    sse_first_frame_timeout_error_if_elapsed(
-        elapsed,
-        sse_first_frame_budget,
-        status,
-        &request_id,
-        &provider_id,
-        &headers,
-    )?;
     let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
     let replayed = stream::iter(prefetched.into_iter().map(Ok)).chain(byte_stream);
     let stream = validated_sse_stream(

@@ -327,6 +327,15 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     let mut web_search_options = Map::new();
     let mut has_web_search = false;
     let mut forbids_live_web_search = false;
+    for (index, tool) in tools.iter().enumerate() {
+        if matches!(
+            tool.get("type").and_then(Value::as_str),
+            Some("web_search" | "web_search_preview" | "web_search_20250305")
+        ) && tool_forbids_live_web_search(tool, &format!("$.tools[{index}]"))?
+        {
+            forbids_live_web_search = true;
+        }
+    }
     let mut dropped_hosted_tool_search = false;
     for (index, tool) in tools.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
@@ -349,17 +358,15 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             tool_type,
             Some("web_search" | "web_search_preview" | "web_search_20250305")
         ) {
-            if tool_forbids_live_web_search(tool, &format!("$.tools[{index}]"))? {
-                forbids_live_web_search = true;
-                has_web_search = false;
+            if forbids_live_web_search {
                 drops.push(V3ProjectionDropRecord::new(
                     "openai_chat",
                     format!("$.tools[{index}]"),
                     "unmapped_target_protocol_field_unrepresentable",
                     tool.clone(),
-                    "merge_openai_chat_web_search_options",
+                    "project_openai_chat_provider_tools_for_web_search_mode_recording",
                 ));
-            } else if has_web_search_capability && !forbids_live_web_search {
+            } else if has_web_search_capability {
                 merge_openai_chat_web_search_options(
                     &mut web_search_options,
                     tool,

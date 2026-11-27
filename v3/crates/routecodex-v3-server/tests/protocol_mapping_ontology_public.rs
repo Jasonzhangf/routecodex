@@ -4485,15 +4485,6 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                 }
 
                 let messages = body.get("messages").and_then(Value::as_array);
-                let has_matched_tool_result = messages.is_some_and(|items| {
-                    items.iter().any(|msg| {
-                        msg.get("role").and_then(Value::as_str) == Some("tool")
-                            && msg.get("tool_call_id").and_then(Value::as_str)
-                                == Some("call_read_file_case3")
-                            && msg.get("content").and_then(Value::as_str)
-                                == Some("contract verified")
-                    })
-                });
                 let has_read_file_tool = body
                     .get("tools")
                     .and_then(Value::as_array)
@@ -4503,7 +4494,62 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                                 == Some("read_file")
                         })
                     });
-                let is_case3_first_turn = !has_matched_tool_result
+                let has_any_tool_role = messages.is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|msg| msg.get("role").and_then(Value::as_str) == Some("tool"))
+                });
+                let has_preceding_assistant_call = messages.is_some_and(|items| {
+                    items.iter().any(|msg| {
+                        msg.get("role").and_then(Value::as_str) == Some("assistant")
+                            && msg
+                                .get("tool_calls")
+                                .and_then(Value::as_array)
+                                .is_some_and(|calls| {
+                                    calls.iter().any(|call| {
+                                        call.get("id").and_then(Value::as_str)
+                                            == Some("call_read_file_case3")
+                                            && call.pointer("/function/name").and_then(Value::as_str)
+                                                == Some("read_file")
+                                            && call
+                                                .pointer("/function/arguments")
+                                                .and_then(Value::as_str)
+                                                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                                                .is_some_and(|args| {
+                                                    args.get("path").and_then(Value::as_str)
+                                                        == Some("case3-fixture.txt")
+                                                })
+                                    })
+                                })
+                    })
+                });
+                let has_matched_tool_result = messages.is_some_and(|items| {
+                    items.iter().any(|msg| {
+                        msg.get("role").and_then(Value::as_str) == Some("tool")
+                            && msg.get("tool_call_id").and_then(Value::as_str)
+                                == Some("call_read_file_case3")
+                            && msg.get("content").and_then(Value::as_str)
+                                == Some("case3-fixture-content-verified")
+                    })
+                });
+                if has_any_tool_role
+                    && !(has_read_file_tool && has_preceding_assistant_call && has_matched_tool_result)
+                {
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "error": {
+                                    "message": "missing read_file declaration, assistant tool_calls pair, or matched tool output",
+                                    "type": "invalid_request_error"
+                                }
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap();
+                }
+                let is_case3_first_turn = !has_any_tool_role
                     && has_read_file_tool
                     && body.get("tool_choice").and_then(Value::as_str) == Some("required");
 
@@ -4524,7 +4570,7 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                                     "type": "function",
                                     "function": {
                                         "name": "read_file",
-                                        "arguments": "{\"path\":\"AGENTS.md\"}"
+                                        "arguments": "{\"path\":\"case3-fixture.txt\"}"
                                     }
                                 }]
                             }
@@ -4756,6 +4802,8 @@ targets = [
 
     // Case 3: `external_web_access=false` alongside a retained function tool preserves
     // `tool_choice="required"` + `read_file` on wire and completes matched client tool follow-up.
+    let fixture_file = home.path.join("case3-fixture.txt");
+    std::fs::write(&fixture_file, "case3-fixture-content-verified").unwrap();
     let resp3 = client
         .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
         .json(&json!({
@@ -4763,7 +4811,15 @@ targets = [
             "input": "call retained function",
             "tools": [
                 {"type": "web_search", "external_web_access": false},
-                {"type": "function", "name": "read_file", "parameters": {"type": "object"}}
+                {
+                    "type": "function",
+                    "name": "read_file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"]
+                    }
+                }
             ],
             "tool_choice": "required",
             "stream": false
@@ -4775,7 +4831,15 @@ targets = [
     let body3: Value = resp3.json().await.unwrap();
     assert_eq!(body3["output"][0]["type"], "function_call");
     assert_eq!(body3["output"][0]["name"], "read_file");
-    assert_eq!(body3["output"][0]["call_id"], "call_read_file_case3");
+    let returned_call_id = body3["output"][0]["call_id"]
+        .as_str()
+        .expect("returned function_call must expose call_id")
+        .to_string();
+    assert_eq!(returned_call_id, "call_read_file_case3");
+    let returned_args: Value =
+        serde_json::from_str(body3["output"][0]["arguments"].as_str().unwrap()).unwrap();
+    let requested_rel_path = returned_args["path"].as_str().unwrap();
+    let executed_file_output = std::fs::read_to_string(home.path.join(requested_rel_path)).unwrap();
     {
         let wires = captured_wires.lock().unwrap();
         assert_eq!(wires.len(), 3);
@@ -4793,11 +4857,19 @@ targets = [
             "input": [
                 {"type": "message", "role": "user", "content": "call retained function"},
                 body3["output"][0].clone(),
-                {"type": "function_call_output", "call_id": "call_read_file_case3", "output": "contract verified"}
+                {"type": "function_call_output", "call_id": returned_call_id, "output": executed_file_output}
             ],
             "tools": [
                 {"type": "web_search", "external_web_access": false},
-                {"type": "function", "name": "read_file", "parameters": {"type": "object"}}
+                {
+                    "type": "function",
+                    "name": "read_file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"]
+                    }
+                }
             ],
             "stream": false
         }))
@@ -4814,10 +4886,28 @@ targets = [
         let wires = captured_wires.lock().unwrap();
         assert_eq!(wires.len(), 4);
         assert!(wires[3].get("web_search_options").is_none());
-        assert!(wires[3]["messages"].as_array().unwrap().iter().any(|msg| {
+        let followup_tools = wires[3]["tools"].as_array().unwrap();
+        assert_eq!(followup_tools.len(), 1);
+        assert_eq!(followup_tools[0]["function"]["name"], "read_file");
+        let followup_msgs = wires[3]["messages"].as_array().unwrap();
+        assert!(followup_msgs.iter().any(|msg| {
+            msg.get("role").and_then(Value::as_str) == Some("assistant")
+                && msg
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_some_and(|calls| {
+                        calls.iter().any(|call| {
+                            call.get("id").and_then(Value::as_str) == Some("call_read_file_case3")
+                                && call.pointer("/function/name").and_then(Value::as_str)
+                                    == Some("read_file")
+                        })
+                    })
+        }));
+        assert!(followup_msgs.iter().any(|msg| {
             msg.get("role").and_then(Value::as_str) == Some("tool")
                 && msg.get("tool_call_id").and_then(Value::as_str) == Some("call_read_file_case3")
-                && msg.get("content").and_then(Value::as_str) == Some("contract verified")
+                && msg.get("content").and_then(Value::as_str)
+                    == Some("case3-fixture-content-verified")
         }));
     }
 

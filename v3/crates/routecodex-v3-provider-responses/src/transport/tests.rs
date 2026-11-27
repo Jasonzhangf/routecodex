@@ -1430,4 +1430,125 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         }
         other => panic!("expected ResponseBodyUnreadable preserving HTTP 200 head, got {other:?}"),
     }
+
+    // 7. End-to-end transport: mislabeled text/event-stream delivering JSON past
+    // sse_first_frame_timeout_ms (even while request_timeout_ms is still open) fails
+    // with ResponseBodyUnreadable retaining status 200 and upstream x-request-id.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: up-late-json-prefix-200\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let json_body = r#"{"id":"resp_late_json_rejected"}"#;
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-late-json-prefix-200",
+            "late-json-prefix-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-late-json".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(5_000)),
+            5_000,
+            Some(25),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("delayed JSON past sse_first_frame_timeout_ms must fail");
+    server.abort();
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-late-json-prefix-200"
+                }),
+                "expected retained upstream x-request-id: {headers:?}"
+            );
+            assert!(
+                reason.contains("did not produce a first frame"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
+
+    // 8. End-to-end transport: mislabeled JSON whose `{` arrives within
+    // sse_first_frame_timeout_ms but whose request_timeout_ms expires mid-body
+    // fails with ResponseBodyUnreadable retaining status 200 and x-request-id.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: up-json-body-deadline-200\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        conn.write_all(b"1\r\n{\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(90)).await;
+        let _ = conn.write_all(b"1\r\n}\r\n0\r\n\r\n").await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-json-body-deadline-200",
+            "json-body-deadline-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-json-deadline".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(35)),
+            35,
+            Some(500),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("truncated JSON past request_timeout_ms must fail cleanly");
+    server.abort();
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-json-body-deadline-200"
+                }),
+                "expected retained upstream x-request-id: {headers:?}"
+            );
+            assert!(
+                reason.contains("budget exhausted"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
 }
