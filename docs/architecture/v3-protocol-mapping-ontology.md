@@ -113,7 +113,7 @@ Approval source: user clarification at
 - Owner: Inbound codec and Chat Process.
 - Approval: `approved_bound`.
 - Evidence: user clarification cited above and `v3/crates/routecodex-v3-server/tests/protocol_mapping_ontology_public.rs`.
-- Governance: bound by `v3.protocol_conversion_field_parity` (`npm run verify:v3-protocol-conversion-field-parity`), `anthropic_inbound_preserves_multikey_metadata_losslessly`, and public `/v1/messages` entry capture.
+- Governance: bound by `v3.protocol_conversion_field_parity` (`npm run verify:v3-protocol-conversion-field-parity` and `npm --prefix v3 run test:v3-protocol-conversion-field-parity`), `anthropic_inbound_preserves_multikey_metadata_losslessly`, and public `/v1/messages` entry capture.
 - Legal case: missing conversion remains observable in Chat/extension and reaches Chat Process.
 - Illegal case: field is omitted or request rejected before Chat Process.
 - Observation: public `/v1/messages` inbound capture in `map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks` plus `anthropic_inbound_preserves_multikey_metadata_losslessly`.
@@ -132,7 +132,7 @@ Approval source: user clarification at
 - Owner: adjacent Outbound codec and its diagnostic side channel.
 - Approval: `approved_bound`.
 - Evidence: user clarification cited above, `v3/crates/routecodex-v3-runtime/src/projection_drop_log.rs`, and `v3/crates/routecodex-v3-server/tests/protocol_mapping_ontology_public.rs`.
-- Governance: bound by `v3.protocol_conversion_field_parity` (`npm run verify:v3-protocol-conversion-field-parity`), `target_protocol_unmapped_field_continues_first_attempt_without_reselection`, and `map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks`.
+- Governance: bound by `v3.protocol_conversion_field_parity` (`npm run verify:v3-protocol-conversion-field-parity` and `npm --prefix v3 run test:v3-protocol-conversion-field-parity`), `target_protocol_unmapped_field_continues_first_attempt_without_reselection`, `map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks`, and `map001_map002_public_hard_errors_reject_malformed_cross_protocol_and_empty_attempts`.
 - Legal case: one complete unmatched optional business field is omitted while a strict provider accepts mapped remainder on first attempt.
 - Illegal case: allowlist absence causes local error, provider reselection, synthetic response, or whole-request failure.
-- Observation: public JSON/SSE `/v1/responses` -> `anthropic` entry test asserting `[v3-projection-drop]` diagnostic emission, provider-wire omission (`store`, `prompt_cache_key`), zero fallback hits (`openai_fallback == 0`), and first-attempt HTTP 200 delivery.
+- Observation: public JSON/SSE `/v1/responses` -> `anthropic` entry test asserting `projection-drops.jsonl` diagnostic emission, provider-wire omission (`store`, `prompt_cache_key`) on both JSON and SSE, zero fallback hits (`openai_fallback == 0`), first-attempt HTTP 200 delivery, plus public negative rejection of malformed fields, cross-protocol SSE leakage, missing content block `type`, missing `stop_sequence`, and empty deliverable attempts.

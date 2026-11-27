@@ -983,3 +983,50 @@ fn gemini_native_request_inverse_preserves_associations_and_governed_text() {
         "associations must be consumed instead of copied to the provider wire: {canonical}"
     );
 }
+
+#[test]
+fn gemini_selected_target_without_reasoning_validates_malformed_first_and_strips_native_thinking_config(
+) {
+    let malformed = json!({
+        "model": "gemini-flash",
+        "messages": [{"role": "user", "content": "hi"}],
+        "reasoning_effort": 42
+    });
+    let err = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &malformed,
+        V3OutboundTargetProtocol::Gemini,
+        &["text".to_string()],
+    )
+    .expect_err("non-string reasoning_effort must fail MalformedOutboundField even without reasoning capability");
+    assert!(err.contains("MalformedOutboundField"), "{err}");
+
+    let native_source = json!({
+        "contents": [{"role": "user", "parts": [{"text": "native thinking"}]}],
+        "generationConfig": {
+            "maxOutputTokens": 256,
+            "thinkingConfig": {
+                "includeThoughts": true,
+                "thinkingBudget": 2048,
+                "thinkingLevel": "HIGH"
+            }
+        }
+    });
+    let canonical = crate::hub_v1::build_v3_chat_canonical_request_from_gemini_payload(&native_source)
+        .expect("Gemini inbound normalizes native thinkingConfig");
+    let (wire, drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &canonical,
+        V3OutboundTargetProtocol::Gemini,
+        &["text".to_string()],
+    )
+    .expect("target without reasoning capability must omit native thinkingConfig cleanly");
+    assert!(
+        wire.pointer("/generationConfig/thinkingConfig").is_none(),
+        "thinkingConfig must not leak to target without reasoning capability: {wire}"
+    );
+    assert!(
+        drops.iter().any(|d| d.reason == "missing_target_capability_reasoning"
+            && (d.json_path.contains("thinkingBudget")
+                || d.json_path.contains("reasoning_budget_tokens"))),
+        "expected capability drop diagnostic: {drops:?}"
+    );
+}

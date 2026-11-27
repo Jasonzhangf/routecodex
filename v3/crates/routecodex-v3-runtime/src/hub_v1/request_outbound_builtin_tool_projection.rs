@@ -442,17 +442,21 @@ fn merge_openai_chat_web_search_options(
             ));
         }
     }
-    if let Some(external_web_access) = row
-        .get("external_web_access")
-        .filter(|value| *value != true)
-    {
-        drops.push(V3ProjectionDropRecord::new(
-            "openai_chat",
-            format!("{path}.external_web_access"),
-            "unmapped_target_protocol_field_unrepresentable",
-            external_web_access.clone(),
-            "merge_openai_chat_web_search_options",
-        ));
+    if let Some(external_web_access) = row.get("external_web_access") {
+        let Some(enabled) = external_web_access.as_bool() else {
+            return Err(format!(
+                "MalformedOutboundField target_protocol=openai_chat path={path}.external_web_access"
+            ));
+        };
+        if !enabled {
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                format!("{path}.external_web_access"),
+                "unmapped_target_protocol_field_unrepresentable",
+                external_web_access.clone(),
+                "merge_openai_chat_web_search_options",
+            ));
+        }
     }
     if let Some(search_content_types) = row.get("search_content_types") {
         let values = search_content_types.as_array().ok_or_else(|| {
@@ -462,9 +466,19 @@ fn merge_openai_chat_web_search_options(
         })?;
         // openai_chat hosted web_search 只能表达文本结果（web_search_options 无
         // search_content_types 字段）。非 "text"/"image" 内容类型在无对应映射时
-        // 仅记录投影诊断并省略，不阻断 web_search_options 主体投影。
+        // 仅记录投影诊断并省略，不阻断 web_search_options 主体投影；非字符串或空元素
+        // 仍按已注册字段格式错误拦截。
         for value in values {
-            if !matches!(value.as_str(), Some("text" | "image")) {
+            let content_type = value
+                .as_str()
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .ok_or_else(|| {
+                    format!(
+                        "MalformedOutboundField target_protocol=openai_chat path={path}.search_content_types"
+                    )
+                })?;
+            if !matches!(content_type, "text" | "image") {
                 drops.push(V3ProjectionDropRecord::new(
                     "openai_chat",
                     format!("{path}.search_content_types"),
@@ -585,17 +599,23 @@ fn normalize_openai_chat_tool_search(
             ));
         }
     }
-    if let Some(execution) = row
-        .get("execution")
-        .filter(|value| value.as_str() != Some("client"))
-    {
-        drops.push(V3ProjectionDropRecord::new(
-            "openai_chat",
-            format!("{path}.execution"),
-            "unmapped_target_protocol_field_unrepresentable",
-            execution.clone(),
-            "normalize_openai_chat_tool_search",
-        ));
+    if let Some(execution) = row.get("execution") {
+        let mode = execution
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                format!("MalformedOutboundField target_protocol=openai_chat path={path}.execution")
+            })?;
+        if mode != "client" {
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                format!("{path}.execution"),
+                "unmapped_target_protocol_field_unrepresentable",
+                execution.clone(),
+                "normalize_openai_chat_tool_search",
+            ));
+        }
     }
     let mut function_row = Map::new();
     function_row.insert("type".to_string(), Value::String("function".to_string()));

@@ -16,8 +16,31 @@ fn project_gemini_compatible_fields_for_selected_target(
     model_capabilities: &[String],
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
-    validate_gemini_thinking_config_for_selected_target(source, model_capabilities, drops)?;
-    project_gemini_compatible_fields_inner(source, drops)
+    let root_effort = source.get("reasoning_effort").cloned();
+    let root_budget = source.get("reasoning_budget_tokens").cloned();
+    let root_include = source.get("reasoning_include_thoughts").cloned();
+    let had_native_thinking_level = source
+        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+        .is_some();
+    let had_native_thinking_budget = source
+        .pointer("/generationConfig/thinkingConfig/thinkingBudget")
+        .is_some();
+    let had_native_include_thoughts = source
+        .pointer("/generationConfig/thinkingConfig/includeThoughts")
+        .is_some();
+    validate_gemini_preprojection_thinking_fields(source, drops)?;
+    project_gemini_compatible_fields_inner(source, drops)?;
+    validate_gemini_thinking_config_for_selected_target(
+        source,
+        model_capabilities,
+        drops,
+        root_effort.as_ref(),
+        root_budget.as_ref(),
+        root_include.as_ref(),
+        had_native_thinking_level,
+        had_native_thinking_budget,
+        had_native_include_thoughts,
+    )
 }
 
 fn project_gemini_compatible_fields_inner(
@@ -923,27 +946,33 @@ fn insert_at_path(target: &mut Value, path: &[&str], value: Value) {
     }
 }
 
-fn validate_gemini_thinking_config_for_selected_target(
+fn validate_gemini_preprojection_thinking_fields(
     source: &mut Value,
-    model_capabilities: &[String],
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
-    let mut requested = Vec::new();
-    if let Some(effort) = source.get("reasoning_effort") {
-        requested.push(("$.reasoning_effort", effort.clone()));
+    if let Some(budget) = source.get("reasoning_budget_tokens") {
+        if budget.as_u64().is_none() {
+            return Err(
+                "MalformedOutboundField target_protocol=gemini path=$.reasoning_budget_tokens"
+                    .to_string(),
+            );
+        }
+    }
+    if let Some(include_thoughts) = source.get("reasoning_include_thoughts") {
+        if include_thoughts.as_bool().is_none() {
+            return Err(
+                "MalformedOutboundField target_protocol=gemini path=$.reasoning_include_thoughts"
+                    .to_string(),
+            );
+        }
     }
     let mut drop_invalid_thinking_level = false;
     if let Some(level) = source.pointer("/generationConfig/thinkingConfig/thinkingLevel") {
-        if validate_gemini_thinking_level_value(
+        if !validate_gemini_thinking_level_value(
             level,
             "$.generationConfig.thinkingConfig.thinkingLevel",
             drops,
         )? {
-            requested.push((
-                "$.generationConfig.thinkingConfig.thinkingLevel",
-                level.clone(),
-            ));
-        } else {
             drop_invalid_thinking_level = true;
         }
     }
@@ -957,13 +986,117 @@ fn validate_gemini_thinking_config_for_selected_target(
                     .to_string(),
             );
         }
-        requested.push((
-            "$.generationConfig.thinkingConfig.thinkingBudget",
-            budget.clone(),
-        ));
     }
-    if requested.is_empty() || gemini_selected_target_supports_reasoning(model_capabilities) {
+    if let Some(include_thoughts) =
+        source.pointer("/generationConfig/thinkingConfig/includeThoughts")
+    {
+        if include_thoughts.as_bool().is_none() {
+            return Err(
+                "MalformedOutboundField target_protocol=gemini path=$.generationConfig.thinkingConfig.includeThoughts"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_gemini_thinking_config_for_selected_target(
+    source: &mut Value,
+    model_capabilities: &[String],
+    drops: &mut Vec<V3ProjectionDropRecord>,
+    root_effort: Option<&Value>,
+    root_budget: Option<&Value>,
+    root_include: Option<&Value>,
+    had_native_thinking_level: bool,
+    had_native_thinking_budget: bool,
+    had_native_include_thoughts: bool,
+) -> Result<(), String> {
+    let mut drop_invalid_thinking_level = false;
+    if let Some(level) = source.pointer("/generationConfig/thinkingConfig/thinkingLevel") {
+        if !validate_gemini_thinking_level_value(
+            level,
+            "$.generationConfig.thinkingConfig.thinkingLevel",
+            drops,
+        )? {
+            drop_invalid_thinking_level = true;
+        }
+    }
+    if drop_invalid_thinking_level {
+        remove_gemini_thinking_config_field(source, "thinkingLevel");
+    }
+    if let Some(budget) = source.pointer("/generationConfig/thinkingConfig/thinkingBudget") {
+        if budget.as_u64().is_none() {
+            return Err(
+                "MalformedOutboundField target_protocol=gemini path=$.generationConfig.thinkingConfig.thinkingBudget"
+                    .to_string(),
+            );
+        }
+    }
+    if let Some(include_thoughts) =
+        source.pointer("/generationConfig/thinkingConfig/includeThoughts")
+    {
+        if include_thoughts.as_bool().is_none() {
+            return Err(
+                "MalformedOutboundField target_protocol=gemini path=$.generationConfig.thinkingConfig.includeThoughts"
+                    .to_string(),
+            );
+        }
+    }
+    if gemini_selected_target_supports_reasoning(model_capabilities) {
         return Ok(());
+    }
+    let mut requested = Vec::new();
+    let has_thinking_level = source
+        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+        .is_some();
+    let has_thinking_budget = source
+        .pointer("/generationConfig/thinkingConfig/thinkingBudget")
+        .is_some();
+    let has_include_thoughts = source
+        .pointer("/generationConfig/thinkingConfig/includeThoughts")
+        .is_some();
+    if let Some(value) = source.pointer("/reasoning_effort").or(root_effort.filter(|_| has_thinking_level)) {
+        requested.push(("$.reasoning_effort", value.clone()));
+    }
+    if let Some(value) = source
+        .pointer("/reasoning_budget_tokens")
+        .or(root_budget.filter(|_| has_thinking_budget))
+    {
+        requested.push(("$.reasoning_budget_tokens", value.clone()));
+    }
+    if let Some(value) = source
+        .pointer("/reasoning_include_thoughts")
+        .or(root_include.filter(|_| has_include_thoughts))
+    {
+        requested.push(("$.reasoning_include_thoughts", value.clone()));
+    }
+    if let Some(value) = source.pointer("/reasoning_thinking_mode") {
+        requested.push(("$.reasoning_thinking_mode", value.clone()));
+    }
+    if had_native_thinking_level || root_effort.is_none() {
+        if let Some(value) = source.pointer("/generationConfig/thinkingConfig/thinkingLevel") {
+            requested.push((
+                "$.generationConfig.thinkingConfig.thinkingLevel",
+                value.clone(),
+            ));
+        }
+    }
+    if had_native_thinking_budget || root_budget.is_none() {
+        if let Some(value) = source.pointer("/generationConfig/thinkingConfig/thinkingBudget") {
+            requested.push((
+                "$.generationConfig.thinkingConfig.thinkingBudget",
+                value.clone(),
+            ));
+        }
+    }
+    if had_native_include_thoughts || root_include.is_none() {
+        if let Some(value) = source.pointer("/generationConfig/thinkingConfig/includeThoughts") {
+            requested.push((
+                "$.generationConfig.thinkingConfig.includeThoughts",
+                value.clone(),
+            ));
+        }
     }
     for (path, value) in requested {
         drops.push(V3ProjectionDropRecord::new(
@@ -976,9 +1109,13 @@ fn validate_gemini_thinking_config_for_selected_target(
     }
     if let Some(root) = source.as_object_mut() {
         root.remove("reasoning_effort");
+        root.remove("reasoning_budget_tokens");
+        root.remove("reasoning_include_thoughts");
+        root.remove("reasoning_thinking_mode");
     }
     remove_gemini_thinking_config_field(source, "thinkingLevel");
     remove_gemini_thinking_config_field(source, "thinkingBudget");
+    remove_gemini_thinking_config_field(source, "includeThoughts");
     Ok(())
 }
 

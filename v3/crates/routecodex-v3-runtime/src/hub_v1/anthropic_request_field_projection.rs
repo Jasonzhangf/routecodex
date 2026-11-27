@@ -108,6 +108,13 @@ pub(super) fn validate_responses_cache_and_store_for_anthropic(
                 field: "routecodex_chat_extension.responses_request.prompt_cache_key",
             });
         }
+        drops.push(V3ProjectionDropRecord::new(
+            "anthropic",
+            "$.prompt_cache_key",
+            "unmapped_target_protocol_field_unrepresentable",
+            prompt_cache_key.clone(),
+            "validate_responses_cache_and_store_for_anthropic",
+        ));
     }
     if let Some(store) = extension.get("store") {
         let Some(enabled) = store.as_bool() else {
@@ -301,6 +308,9 @@ fn responses_public_metadata_user_id(
     let Some(user_id) = metadata.get("user_id") else {
         return Ok(None);
     };
+    if user_id.is_null() {
+        return Ok(None);
+    }
     let user_id = user_id
         .as_str()
         .map(str::trim)

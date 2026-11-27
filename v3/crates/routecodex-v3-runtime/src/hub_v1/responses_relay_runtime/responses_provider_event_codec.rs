@@ -121,15 +121,39 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     if let Some(error) = extract_v3_provider_event_error(&event) {
         return Err(error);
     }
-    if !event
+    let event_type = event
         .get("type")
         .and_then(Value::as_str)
-        .is_some_and(|event_type| !event_type.trim().is_empty())
-    {
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "Responses semantic SSE event payload is missing type".to_string(),
+            )
+        })?;
+    if crate::hub_v1::is_v3_cross_protocol_anthropic_sse_event_type(event_type) {
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            "Responses semantic SSE event payload is missing type".to_string(),
+            format!(
+                "provider Responses SSE event type {event_type:?} belongs to Anthropic protocol"
+            ),
         ));
     }
+    if matches!(
+        event_type,
+        "response.output_item.added" | "response.output_item.done"
+    ) {
+        if let Some(item) = event.get("item").filter(|value| !value.is_null()) {
+            if let Err(V3ResponsesSseTreeError::UnsupportedItemType { item_type }) =
+                classify_v3_responses_sse_output_item(item)
+            {
+                eprintln!(
+                    "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec item_type={item_type:?} reason=unregistered_output_item_ignored"
+                );
+                return Ok(None);
+            }
+        }
+    }
+    filter_unknown_responses_output_items_in_event_response(&mut event)?;
     let transport_object = V3ResponsesSseTransportObject::new(
         object.event_name().map(ToOwned::to_owned),
         event.clone(),
@@ -161,19 +185,20 @@ fn apply_v3_typed_responses_event(
     if let Some(error) = extract_v3_provider_event_error(event) {
         return Err(error);
     }
-    if event
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|event_type| !is_supported_typed_responses_event(event_type))
-    {
-        let event_type = event
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        eprintln!(
-            "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec event_type={event_type:?} reason=unregistered_event_ignored"
-        );
-        return Ok(None);
+    if let Some(event_type) = event.get("type").and_then(Value::as_str).map(str::trim) {
+        if crate::hub_v1::is_v3_cross_protocol_anthropic_sse_event_type(event_type) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!(
+                    "provider Responses SSE event type {event_type:?} belongs to Anthropic protocol"
+                ),
+            ));
+        }
+        if !is_supported_typed_responses_event(event_type) {
+            eprintln!(
+                "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec event_type={event_type:?} reason=unregistered_event_ignored"
+            );
+            return Ok(None);
+        }
     }
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
@@ -197,6 +222,37 @@ fn apply_v3_typed_responses_event(
         }
         None => Ok(None),
     }
+}
+
+fn filter_unknown_responses_output_items_in_event_response(
+    event: &mut Value,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(output) = event
+        .get_mut("response")
+        .and_then(Value::as_object_mut)
+        .and_then(|response| response.get_mut("output"))
+        .and_then(Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    let mut retained = Vec::with_capacity(output.len());
+    for item in output.drain(..) {
+        match classify_v3_responses_sse_output_item(&item) {
+            Ok(_) => retained.push(item),
+            Err(V3ResponsesSseTreeError::UnsupportedItemType { item_type }) => {
+                eprintln!(
+                    "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec item_type={item_type:?} reason=unregistered_output_item_ignored"
+                );
+            }
+            Err(error) => {
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    error.to_string(),
+                ));
+            }
+        }
+    }
+    *output = retained;
+    Ok(())
 }
 
 fn is_supported_typed_responses_event(event_type: &str) -> bool {

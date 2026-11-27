@@ -27,6 +27,7 @@ use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
 pub(crate) use reasoning_projection::project_v3_responses_reasoning_item_as_anthropic_content;
 use response_projection::{
+    anthropic_history_reasoning_part_as_responses_reasoning,
     anthropic_reasoning_part_as_responses_reasoning,
     flush_v3_anthropic_text_content_as_responses_message,
     project_v3_anthropic_terminal_as_responses_terminal, V3AnthropicResponseContentBlockKind,
@@ -349,24 +350,7 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
         let metadata = metadata
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
-        let mut preserved = metadata.clone();
-        if let Some(user_id) = metadata.get("user_id") {
-            if user_id.is_null() {
-                preserved.remove("user_id");
-            } else {
-                let user_id = user_id
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .ok_or(V3AnthropicCodecError::MalformedField {
-                        field: "metadata.user_id",
-                    })?;
-                preserved.insert("user_id".to_string(), Value::String(user_id.to_string()));
-            }
-        }
-        if !preserved.is_empty() {
-            responses_request_extension.insert("metadata".to_string(), Value::Object(preserved));
-        }
+        responses_request_extension.insert("metadata".to_string(), Value::Object(metadata.clone()));
     }
     if let Some(format) = object
         .get("output_config")

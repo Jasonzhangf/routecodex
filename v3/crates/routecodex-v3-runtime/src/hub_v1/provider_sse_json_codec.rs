@@ -4,7 +4,9 @@ use serde_json::Value;
 use super::{V3HubProviderWireProtocol, V3RuntimeStreamObservation};
 #[path = "provider_responses_event_classification.rs"]
 mod provider_responses_event_classification;
-pub(crate) use provider_responses_event_classification::classify_v3_provider_responses_json_event;
+pub(crate) use provider_responses_event_classification::{
+    classify_v3_provider_responses_json_event, is_v3_cross_protocol_anthropic_sse_event_type,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3ProviderResponsesJsonFrameOutcome {
@@ -386,7 +388,12 @@ pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<boo
     let item = item
         .as_object()
         .ok_or_else(|| "provider Responses output item must be an object".to_string())?;
-    match item.get("type").and_then(Value::as_str) {
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match item_type {
         Some("message") => {
             if item.get("content").is_none()
                 && ["text", "reasoning", "reasoning_content", "reasoning_text"]
@@ -1033,7 +1040,12 @@ fn direct_responses_item_has_visible_text(item: &Value) -> bool {
     if !direct_responses_item_is_complete(item) {
         return false;
     }
-    match item.get("type").and_then(Value::as_str) {
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match item_type {
         Some("text" | "output_text") => item
             .get("text")
             .and_then(Value::as_str)

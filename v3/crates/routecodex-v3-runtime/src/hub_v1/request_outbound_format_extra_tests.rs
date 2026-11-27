@@ -1654,3 +1654,45 @@ fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residu
         assert_eq!(source, original);
     }
 }
+
+#[test]
+fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
+    let bad_external = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [{"type": "web_search", "external_web_access": "yes"}]
+    });
+    let err = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &bad_external,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect_err("non-bool external_web_access must remain MalformedOutboundField");
+    assert!(err.contains("external_web_access"), "{err}");
+
+    let bad_content_types = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [{"type": "web_search", "search_content_types": ["text", 123]}]
+    });
+    let err = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &bad_content_types,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect_err("non-string member in search_content_types must fail MalformedOutboundField");
+    assert!(err.contains("search_content_types"), "{err}");
+
+    let bad_tool_search_exec = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search tools"}],
+        "tools": [{"type": "tool_search", "execution": 7}]
+    });
+    let err = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &bad_tool_search_exec,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect_err("non-string tool_search.execution must fail MalformedOutboundField");
+    assert!(err.contains("execution"), "{err}");
+}

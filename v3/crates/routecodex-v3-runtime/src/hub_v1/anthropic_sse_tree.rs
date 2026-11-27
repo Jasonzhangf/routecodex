@@ -224,6 +224,9 @@ impl V3AnthropicSseReducerState {
                 self.terminal = Some(V3AnthropicSseTerminalState::MessageStop);
                 Ok(())
             }
+            _ if protocol.event_type.starts_with("response.") => Err(
+                V3AnthropicSseTreeError::CrossProtocolEvent(protocol.event_type),
+            ),
             _ => {
                 self.extensions.extend(object_extensions(
                     event,
@@ -605,11 +608,13 @@ fn parse_block(
     let object = value
         .as_object()
         .ok_or(V3AnthropicSseTreeError::ContentBlockNotObject)?;
-    let kind = match object
+    let content_type = object
         .get("type")
         .and_then(Value::as_str)
-        .unwrap_or("extension")
-    {
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(V3AnthropicSseTreeError::MissingContentBlockType(index))?;
+    let kind = match content_type {
         "text" => V3AnthropicSseBlockKind::Text,
         "tool_use" => V3AnthropicSseBlockKind::ToolUse,
         "thinking" => V3AnthropicSseBlockKind::Thinking,
@@ -763,6 +768,10 @@ pub(crate) enum V3AnthropicSseTreeError {
     ThinkingDeltaRequired,
     #[error("Anthropic signature_delta requires signature")]
     SignatureDeltaRequired,
+    #[error("Anthropic content_block[{0}] is missing non-empty string type")]
+    MissingContentBlockType(usize),
+    #[error("Anthropic SSE stream received cross-protocol event '{0}'")]
+    CrossProtocolEvent(String),
     #[error("Anthropic provider error: {0}")]
     ProviderError(String),
 }
@@ -840,5 +849,45 @@ mod tests {
             Err(V3AnthropicSseTreeError::ProviderError(_))
         ));
         assert_eq!(state.terminal, Some(V3AnthropicSseTerminalState::Error));
+    }
+
+    #[test]
+    fn missing_content_block_type_and_cross_protocol_event_are_rejected() {
+        let mut missing_type_state = V3AnthropicSseReducerState::default();
+        missing_type_state
+            .apply_event(&json!({
+                "type": "message_start",
+                "message": {"id": "m1", "type": "message", "role": "assistant", "content": []}
+            }))
+            .unwrap();
+        missing_type_state
+            .apply_event(&json!({
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": "valid"}
+            }))
+            .unwrap();
+        let err = missing_type_state
+            .apply_event(&json!({
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"text": "missing type"}
+            }))
+            .expect_err("content_block without non-empty string type must fail SSE reducer");
+        assert!(matches!(
+            err,
+            V3AnthropicSseTreeError::MissingContentBlockType(1)
+        ));
+
+        let cross_err = missing_type_state
+            .apply_event(&json!({
+                "type": "response.output_text.delta",
+                "delta": "foreign frame"
+            }))
+            .expect_err("cross-protocol response.* event must fail Anthropic SSE reducer");
+        assert!(matches!(
+            cross_err,
+            V3AnthropicSseTreeError::CrossProtocolEvent(_)
+        ));
     }
 }

@@ -2529,7 +2529,7 @@ fn anthropic_inbound_preserves_multikey_metadata_losslessly() {
         "model": "claude-test",
         "max_tokens": 128,
         "metadata": {
-            "user_id": "u-1",
+            "user_id": "  u-1  ",
             "session_tag": "s-2",
             "custom_flag": true
         },
@@ -2538,9 +2538,57 @@ fn anthropic_inbound_preserves_multikey_metadata_losslessly() {
     .expect("Inbound Anthropic conversion must preserve all metadata keys losslessly");
 
     let metadata = &canonical["routecodex_chat_extension"]["responses_request"]["metadata"];
-    assert_eq!(metadata["user_id"], "u-1");
+    assert_eq!(metadata["user_id"], "  u-1  ");
     assert_eq!(metadata["session_tag"], "s-2");
     assert_eq!(metadata["custom_flag"], true);
+
+    let with_null_and_empty = [
+        json!({
+            "model": "claude-test",
+            "max_tokens": 128,
+            "metadata": {"user_id": null, "trace": "t-1"},
+            "messages": [{"role": "user", "content": "hello"}]
+        }),
+        json!({
+            "model": "claude-test",
+            "max_tokens": 128,
+            "metadata": {},
+            "messages": [{"role": "user", "content": "hello"}]
+        }),
+    ];
+    for payload in with_null_and_empty {
+        let encoded = encode_v3_anthropic_request_as_responses_semantic(payload.clone()).expect(
+            "Inbound Anthropic conversion must preserve null user_id and empty metadata losslessly",
+        );
+        assert_eq!(
+            encoded["routecodex_chat_extension"]["responses_request"]["metadata"],
+            payload["metadata"]
+        );
+    }
+
+    let history_with_empty_unsigned = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model": "claude-test",
+        "max_tokens": 128,
+        "messages": [{
+            "role": "assistant",
+            "content": [{"type": "thinking", "thinking": "", "cache_control": {"type": "ephemeral"}}]
+        }]
+    }))
+    .expect("Inbound Anthropic request history must preserve empty unsigned thinking with extension fields losslessly");
+    assert_eq!(
+        history_with_empty_unsigned["input"],
+        json!([{
+            "type": "reasoning",
+            "summary": [],
+            "routecodex_chat_extension": {
+                "anthropic_reasoning": {
+                    "type": "thinking",
+                    "thinking": "",
+                    "cache_control": {"type": "ephemeral"}
+                }
+            }
+        }])
+    );
 }
 
 #[test]
@@ -2858,12 +2906,22 @@ fn anthropic_terminal_projection_rejects_missing_or_non_string_and_tolerates_qui
             "content":[{"type":"text","text":"malformed"}],
             "stop_reason":42
         }),
+        json!({
+            "id":"msg_missing_sequence",
+            "role":"assistant",
+            "content":[{"type":"text","text":"sequence"}],
+            "stop_reason":"stop_sequence"
+        }),
     ];
 
     for payload in malformed {
         let error = project_v3_anthropic_message_as_responses_response(&payload)
-            .expect_err("missing or non-string stop_reason must fail at the Anthropic codec owner");
-        assert!(error.to_string().contains("stop_reason"), "{error}");
+            .expect_err("missing/non-string stop_reason or missing stop_sequence must fail at the Anthropic codec owner");
+        let message = error.to_string();
+        assert!(
+            message.contains("stop_reason") || message.contains("stop_sequence"),
+            "{message}"
+        );
     }
 
     for tolerated in [
@@ -2872,12 +2930,6 @@ fn anthropic_terminal_projection_rejects_missing_or_non_string_and_tolerates_qui
             "role":"assistant",
             "content":[{"type":"text","text":"unknown"}],
             "stop_reason":"future_reason"
-        }),
-        json!({
-            "id":"msg_missing_sequence",
-            "role":"assistant",
-            "content":[{"type":"text","text":"sequence"}],
-            "stop_reason":"stop_sequence"
         }),
         json!({
             "id":"msg_contradictory_sequence",

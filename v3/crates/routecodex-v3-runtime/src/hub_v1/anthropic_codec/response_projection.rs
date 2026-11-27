@@ -155,10 +155,10 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
             Some(value.clone())
         }
         (V3AnthropicTerminalKind::StopSequence, _) => {
-            eprintln!(
-                "[v3-response-warning] protocol=anthropic stage=terminal_projection stop_reason={stop_reason:?} reason=missing_or_empty_stop_sequence"
-            );
-            None
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_sequence",
+                reason: "stop_reason=stop_sequence requires a non-empty string".to_string(),
+            })
         }
         (_, None | Some(Value::Null)) => None,
         (_, Some(_)) => {
@@ -210,9 +210,24 @@ pub(super) fn flush_v3_anthropic_text_content_as_responses_message(
     }));
 }
 
+pub(super) fn anthropic_history_reasoning_part_as_responses_reasoning(
+    part: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    anthropic_reasoning_part_as_responses_reasoning_with_omission(part, None, false)?
+        .ok_or(V3AnthropicCodecError::MalformedField { field: "thinking" })
+}
+
 pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
     part: &Value,
     summary_policy: Option<&str>,
+) -> Result<Option<Value>, V3AnthropicCodecError> {
+    anthropic_reasoning_part_as_responses_reasoning_with_omission(part, summary_policy, true)
+}
+
+fn anthropic_reasoning_part_as_responses_reasoning_with_omission(
+    part: &Value,
+    summary_policy: Option<&str>,
+    allow_empty_unsigned_omission: bool,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
     let object = part
         .as_object()
@@ -238,6 +253,11 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
             if thinking.trim().is_empty() {
                 if object.contains_key("text") {
                     return Err(V3AnthropicCodecError::MalformedField { field: "thinking" });
+                }
+                if !allow_empty_unsigned_omission {
+                    let mut item = json!({"type":"reasoning","summary":[]});
+                    preserve_anthropic_reasoning_extensions(object, &[], &mut item);
+                    return Ok(Some(item));
                 }
                 eprintln!(
                     "[v3-response-warning] protocol=anthropic stage=reasoning_projection reason=empty_unsigned_thinking_omitted"

@@ -296,14 +296,17 @@ terminality on the wire is `status` (plus `incomplete_details` /
 | `stop_sequence` | `stop_sequence`, canonical `finish_reason=stop_sequence` | `status=completed`, exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
 | `pause_turn` | `pause_turn`, canonical `finish_reason=pause_turn` | `status=in_progress` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
 | `refusal` | `content_filter`, canonical `finish_reason=content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
-| `model_context_window_exceeded` | `context_window_exceeded` | no exact Responses incomplete reason | `unsupported_fail_fast` | Fail with the exact source value; never relabel input-context exhaustion as `max_output_tokens`. |
+| `model_context_window_exceeded` | `context_window_exceeded` | `status=incomplete` without invented `max_output_tokens` reason | `mapped_compatible_registered` | Preserves context-window exhaustion without relabeling it as `max_output_tokens`. |
+| other non-empty string `stop_reason` | warning + fallback `stop` when deliverable output exists | `status=completed` | `unmapped_tolerant` | Unknown `stop_reason` values warn and do not drop deliverable content; missing/null/non-string `stop_reason` fails at the same terminal owner. |
 
 `stop_reason=null` is valid only on the Anthropic streaming `message_start`
 shape. A materialized final message, whether sourced from JSON or SSE, requires
-a listed non-null value. Unknown/non-string values, contradictory
-`stop_sequence`, and non-object `stop_details` fail at the same terminal owner.
-The SSE transport may only frame the resulting canonical response; it does not
-own another stop-reason mapping.
+a non-empty string `stop_reason`. When `stop_reason=stop_sequence`, a non-empty
+string `stop_sequence` is required and fails at the terminal owner if missing
+or malformed. Extraneous `stop_sequence` on other terminal kinds warns and is
+omitted without blocking deliverable output; non-object `stop_details` fails at
+the same terminal owner. The SSE transport may only frame the resulting
+canonical response; it does not own another stop-reason mapping.
 
 ### Typed tool-result error projection
 
@@ -332,19 +335,22 @@ MetadataCenter are forbidden inference sources.
 | `thinking` | Responses reasoning summary/signature projection | `mapped_compatible_registered` |
 | `redacted_thinking` | opaque Responses reasoning encrypted content | `mapped_compatible_registered` |
 | `tool_use` | typed Responses function/custom tool call | `mapped_exact` or governed custom compatibility wrapper |
-| `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; other names fail |
-| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; missing/duplicate/unpaired identity or unsupported result shape fails |
-| `web_fetch_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `bash_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `text_editor_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `tool_search_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `container_upload` | no registered Responses mapping | `unsupported_fail_fast` |
+| `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; unsupported non-empty `name` warns and omits block |
+| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; unpaired identity warns and omits without blocking text |
+| `web_fetch_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `bash_code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `text_editor_code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `tool_search_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `container_upload` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| unknown complete block (`type` is non-empty string) | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
 
-Missing and unknown `content[].type` values are distinct malformed/unknown
-errors. Every unsupported diagnostic includes the exact
-`response.content[index].type` path and source type; silent skip, generic
-`provider response content type`, and text fallback are forbidden.
+Missing or non-string `content[].type` values remain hard errors at the
+response block parser (`MalformedResponseContentBlockType` /
+`MissingContentBlockType`). If after tolerating unknown/roundtrip-only/empty
+unsigned blocks an attempt carries no deliverable business result, the complete
+attempt fails via `GovernedAttemptEmpty` into the typed Error chain without
+fabricating an empty completion.
 
 ## Exact protocol projections
 

@@ -1438,3 +1438,48 @@ fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
             "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
         );
 }
+
+#[tokio::test]
+async fn responses_sse_materializer_rejects_cross_protocol_midstream_and_tolerates_unknown_items_with_text(
+) {
+    let cross_protocol_stream = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"valid body\"}\n\n".to_vec()),
+        Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mix\",\"status\":\"completed\"}}\n\n".to_vec()),
+    ]));
+    let cross_err = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        cross_protocol_stream,
+    )
+    .await
+    .expect_err("cross-protocol Anthropic SSE frame mid-stream must fail Responses attempt");
+    assert!(cross_err.to_string().contains("Anthropic"), "{cross_err}");
+
+    let unknown_item_with_text = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_item\",\"id\":\"fi_1\"}}\n\n".to_vec()),
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok text\"}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"status\":\"completed\"}}\n\n".to_vec()),
+    ]));
+    let materialized = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        unknown_item_with_text,
+    )
+    .await
+    .expect("complete unknown output item alongside deliverable text must succeed");
+    assert_eq!(materialized["output"][0]["text"], "ok text");
+
+    let unknown_item_only = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_item\",\"id\":\"fi_only\"}}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[{\"type\":\"future_item\",\"id\":\"fi_only\"}]}}\n\n".to_vec()),
+    ]));
+    let empty_err = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        unknown_item_only,
+    )
+    .await
+    .expect_err("stream with only unknown non-deliverable item must fail GovernedAttemptEmpty");
+    assert!(
+        empty_err.to_string().contains("provider_response_empty"),
+        "{empty_err}"
+    );
+}

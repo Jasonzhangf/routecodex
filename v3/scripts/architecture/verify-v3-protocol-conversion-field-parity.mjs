@@ -260,8 +260,19 @@ for (const test of [
   'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input',
   'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
   'map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks',
+  'map001_map002_public_hard_errors_reject_malformed_cross_protocol_and_empty_attempts',
 ]) {
   if (!(verification?.required_blackbox ?? []).some((entry) => String(entry).includes(test))) failures.push(`${paths.verificationMap}: missing required_blackbox ${test}`);
+}
+const packageJson = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8'),
+);
+const parityGateCmd = String(packageJson?.scripts?.['test:v3-protocol-conversion-field-parity'] ?? '');
+if (!parityGateCmd.includes('protocol_mapping_ontology_public')) {
+  failures.push('v3/package.json: test:v3-protocol-conversion-field-parity must execute protocol_mapping_ontology_public');
+}
+if (!String(verification?.governance_clauses?.ontology_public_command ?? '').includes('protocol_mapping_ontology_public')) {
+  failures.push(`${paths.verificationMap}: v3.protocol_conversion_field_parity governance_clauses.ontology_public_command must reference protocol_mapping_ontology_public`);
 }
 
 for (const [protocol, section, fields] of [
