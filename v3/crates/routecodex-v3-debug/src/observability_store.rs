@@ -458,22 +458,29 @@ impl V3ProviderUsagePersistenceStore {
                     Err(error)
                 }
             })?;
+        let mut stable_set_written = false;
         if current_fact_bytes.saturating_add(encoded_line_bytes)
             > self.limits.physical_fact_log_bytes
         {
             if self.latest_encoded_bytes.saturating_add(encoded_line_bytes)
-                > self.limits.physical_fact_log_bytes
+                <= self.limits.physical_fact_log_bytes
             {
+                self.compact_provider_usage_facts()?;
+            } else if next_latest_bytes <= self.limits.physical_fact_log_bytes {
+                self.compact_provider_usage_facts_with_replacement(&identity, &fact)?;
+                stable_set_written = true;
+            } else {
                 return self.reject_fact_capacity(
                     fact.listener_id,
                     fact.request_started_epoch_ms,
                     V3ProviderUsageCapacityReason::PhysicalFactLogBytes,
                 );
             }
-            self.compact_provider_usage_facts()?;
         }
 
-        append_provider_usage_fact_line(&self.facts_path, &line)?;
+        if !stable_set_written {
+            append_provider_usage_fact_line(&self.facts_path, &line)?;
+        }
         self.apply_pending_repair_gaps_for(fact.listener_id);
         self.ensure_statistics_started(fact.listener_id, fact.request_started_epoch_ms);
         if old_encoded_bytes == 0 {
@@ -755,10 +762,56 @@ impl V3ProviderUsagePersistenceStore {
     fn compact_provider_usage_facts(&mut self) -> Result<(), V3WebuiObservabilityStoreError> {
         let mut bytes = Vec::new();
         for fact in self.facts.values() {
-            let line = provider_usage_fact_line(fact)?;
-            bytes.extend_from_slice(&line);
-            bytes.push(b'\n');
+            append_provider_usage_fact_to_bytes(&mut bytes, fact, self.limits.complete_fact_bytes)?;
         }
+        self.write_compacted_provider_usage_facts(&bytes)
+    }
+
+    fn compact_provider_usage_facts_with_replacement(
+        &mut self,
+        identity: &str,
+        replacement: &V3ProviderUsageFact,
+    ) -> Result<(), V3WebuiObservabilityStoreError> {
+        let mut bytes = Vec::new();
+        let mut replacement_written = false;
+        for (stored_identity, fact) in &self.facts {
+            if !replacement_written && identity < stored_identity.as_str() {
+                append_provider_usage_fact_to_bytes(
+                    &mut bytes,
+                    replacement,
+                    self.limits.complete_fact_bytes,
+                )?;
+                replacement_written = true;
+            }
+            if stored_identity == identity {
+                append_provider_usage_fact_to_bytes(
+                    &mut bytes,
+                    replacement,
+                    self.limits.complete_fact_bytes,
+                )?;
+                replacement_written = true;
+            } else {
+                append_provider_usage_fact_to_bytes(
+                    &mut bytes,
+                    fact,
+                    self.limits.complete_fact_bytes,
+                )?;
+            }
+        }
+        if !replacement_written {
+            append_provider_usage_fact_to_bytes(
+                &mut bytes,
+                replacement,
+                self.limits.complete_fact_bytes,
+            )?;
+        }
+        self.write_compacted_provider_usage_facts(&bytes)
+    }
+
+    fn write_compacted_provider_usage_facts(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), V3WebuiObservabilityStoreError> {
         if bytes.len() as u64 > self.limits.physical_fact_log_bytes {
             return Err(V3WebuiObservabilityStoreError::ProviderUsageCapacity {
                 reason: V3ProviderUsageCapacityReason::PhysicalFactLogBytes,
@@ -1063,6 +1116,22 @@ fn provider_usage_fact_line(
         "fact": fact,
     }))
     .map_err(|error| V3WebuiObservabilityStoreError::ProviderUsageFact(error.to_string()))
+}
+
+fn append_provider_usage_fact_to_bytes(
+    bytes: &mut Vec<u8>,
+    fact: &V3ProviderUsageFact,
+    complete_fact_bytes: u64,
+) -> Result<(), V3WebuiObservabilityStoreError> {
+    let line = provider_usage_fact_line(fact)?;
+    if line.len() as u64 > complete_fact_bytes {
+        return Err(V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+            reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+        });
+    }
+    bytes.extend_from_slice(&line);
+    bytes.push(b'\n');
+    Ok(())
 }
 
 fn encoded_provider_usage_fact_line_len(line_bytes: &[u8]) -> u64 {
@@ -1486,7 +1555,13 @@ fn read_provider_usage_facts_path(
                 reason: V3ProviderUsageCapacityReason::FactKeys,
             });
         }
-        let encoded_bytes = encoded_provider_usage_fact_line_len(&provider_usage_fact_line(&fact)?);
+        let line = provider_usage_fact_line(&fact)?;
+        if line.len() as u64 > limits.complete_fact_bytes {
+            return Err(V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+            });
+        }
+        let encoded_bytes = encoded_provider_usage_fact_line_len(&line);
         latest_encoded_bytes = latest_encoded_bytes.saturating_add(encoded_bytes);
         latest.insert(identity, fact);
     }
@@ -3461,7 +3536,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_usage_recovery_keeps_the_physical_log_limit_strict() {
+    fn provider_usage_recovery_accepts_non_growing_replacement_at_physical_cap() {
         let dir = temp_dir("usage-latest-physical-cap");
         let path = dir.join("records.jsonl");
         let facts_path = v3_provider_usage_facts_path(&path);
@@ -3489,13 +3564,95 @@ mod tests {
         let limits = bounded_limits(encoded_latest_bytes - 1, 64, encoded_latest_bytes, 4_096);
         let mut recovered =
             V3ProviderUsagePersistenceStore::open_with_limits(&path, limits).unwrap();
-        let before = recovered.facts["request:4444:4444:r-physical-a:"].clone();
-        let error = recovered
+        recovered
             .append_fact(usage_fact(
                 "4444:r-physical-a",
                 11,
                 V3ProviderUsageFactResult::Success,
-                Some(&format!("p-physical-a-{}", "x".repeat(256))),
+                Some(&format!("p-physical-c-{}", "x".repeat(256))),
+                Vec::new(),
+            ))
+            .expect("a non-growing replacement must fit the compacted stable set");
+        assert_eq!(
+            recovered.facts["request:4444:4444:r-physical-a:"]
+                .provider_id
+                .as_deref(),
+            Some(format!("p-physical-c-{}", "x".repeat(256)).as_str())
+        );
+        assert_eq!(
+            fs::metadata(&facts_path).unwrap().len(),
+            encoded_latest_bytes
+        );
+        assert_eq!(jsonl_line_count(&facts_path), 2);
+        assert!(!provider_usage_facts_temp_path(&facts_path).exists());
+        recovered.close_generation().unwrap();
+        drop(recovered);
+
+        let restarted = V3ProviderUsagePersistenceStore::open_with_limits(&path, limits).unwrap();
+        assert_eq!(restarted.facts.len(), 2);
+        assert_eq!(
+            restarted.facts["request:4444:4444:r-physical-a:"]
+                .provider_id
+                .as_deref(),
+            Some(format!("p-physical-c-{}", "x".repeat(256)).as_str())
+        );
+        drop(restarted);
+
+        let read = v3_webui_observability_read_provider_usage_with_limits(&path, limits).unwrap();
+        assert_eq!(read.facts.len(), 2);
+        assert_eq!(
+            read.facts
+                .iter()
+                .find(|fact| fact.request_key == "4444:r-physical-a")
+                .and_then(|fact| fact.provider_id.as_deref()),
+            Some(format!("p-physical-c-{}", "x".repeat(256)).as_str())
+        );
+        assert!(read
+            .coverage_for(4444)
+            .unwrap()
+            .gaps
+            .iter()
+            .any(|gap| gap == "provider_usage_fact_capacity_latest_recovered"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_recovery_rejects_unrepresentable_stable_set() {
+        let dir = temp_dir("usage-unrepresentable-stable-set");
+        let path = dir.join("records.jsonl");
+        let facts_path = v3_provider_usage_facts_path(&path);
+        let roomy_limits = bounded_limits(65_536, 64, 65_536, 4_096);
+        let mut store =
+            V3ProviderUsagePersistenceStore::open_with_limits(&path, roomy_limits).unwrap();
+        for (request_key, provider_id) in [
+            ("4444:r-unrepresentable-a", "p-unrepresentable-a"),
+            ("4444:r-unrepresentable-b", "p-unrepresentable-b"),
+        ] {
+            store
+                .append_fact(usage_fact(
+                    request_key,
+                    10,
+                    V3ProviderUsageFactResult::Success,
+                    Some(&format!("{provider_id}-{}", "x".repeat(256))),
+                    Vec::new(),
+                ))
+                .unwrap();
+        }
+        store.close_generation().unwrap();
+        drop(store);
+
+        let encoded_latest_bytes = fs::metadata(&facts_path).unwrap().len();
+        let before_log = fs::read(&facts_path).unwrap();
+        let limits = bounded_limits(65_536, 64, encoded_latest_bytes, 4_096);
+        let mut recovered =
+            V3ProviderUsagePersistenceStore::open_with_limits(&path, limits).unwrap();
+        let before = recovered.facts["request:4444:4444:r-unrepresentable-a:"].clone();
+        let error = recovered
+            .append_fact(usage_fact(
+                "4444:r-unrepresentable-a",
+                11,
+                V3ProviderUsageFactResult::Success,
+                Some(&format!("p-unrepresentable-c-{}", "x".repeat(512))),
                 Vec::new(),
             ))
             .unwrap_err();
@@ -3505,11 +3662,11 @@ mod tests {
                 reason: V3ProviderUsageCapacityReason::PhysicalFactLogBytes,
             }
         ));
-        assert_eq!(recovered.facts["request:4444:4444:r-physical-a:"], before);
         assert_eq!(
-            fs::metadata(&facts_path).unwrap().len(),
-            encoded_latest_bytes
+            recovered.facts["request:4444:4444:r-unrepresentable-a:"],
+            before
         );
+        assert_eq!(fs::read(&facts_path).unwrap(), before_log);
         assert!(recovered
             .coverage
             .get(&4444)
@@ -3517,6 +3674,74 @@ mod tests {
             .gaps
             .iter()
             .any(|gap| gap == "provider_usage_fact_capacity_physical"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_replay_rejects_merged_record_above_complete_fact_cap() {
+        let dir = temp_dir("usage-merged-complete-cap");
+        let path = dir.join("records.jsonl");
+        let facts_path = v3_provider_usage_facts_path(&path);
+        let gap_a = "a".repeat(256);
+        let gap_b = "b".repeat(256);
+        let first = usage_fact(
+            "4444:r-merged-complete",
+            10,
+            V3ProviderUsageFactResult::Unknown,
+            None,
+            vec![gap_a.as_str()],
+        );
+        let mut second = usage_fact(
+            "4444:r-merged-complete",
+            11,
+            V3ProviderUsageFactResult::Unknown,
+            None,
+            vec![gap_b.as_str()],
+        );
+        let first_line = provider_usage_fact_line(&first).unwrap();
+        let second_line = provider_usage_fact_line(&second).unwrap();
+        let complete_fact_bytes = first_line.len().max(second_line.len()) as u64;
+        let previous = first.clone();
+        merge_provider_usage_fact(&previous, &mut second);
+        let merged_line = provider_usage_fact_line(&second).unwrap();
+        assert!(
+            merged_line.len() as u64 > complete_fact_bytes,
+            "merged={} first={} second={}",
+            merged_line.len(),
+            complete_fact_bytes,
+            second_line.len()
+        );
+
+        let mut journal = first_line;
+        journal.push(b'\n');
+        journal.extend_from_slice(&second_line);
+        journal.push(b'\n');
+        fs::write(&facts_path, &journal).unwrap();
+        let before = fs::read(&facts_path).unwrap();
+        let limits = bounded_limits(65_536, 64, journal.len() as u64, complete_fact_bytes);
+        let error = match V3ProviderUsagePersistenceStore::open_with_limits(&path, limits) {
+            Ok(_) => panic!("a merged fact over the complete-fact cap must fail store open"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+            }
+        ));
+        assert_eq!(fs::read(&facts_path).unwrap(), before);
+
+        let error = match v3_webui_observability_read_provider_usage_with_limits(&path, limits) {
+            Ok(_) => panic!("a merged fact over the complete-fact cap must fail public read"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            V3WebuiObservabilityStoreError::ProviderUsageCapacity {
+                reason: V3ProviderUsageCapacityReason::CompleteFactBytes,
+            }
+        ));
+        assert_eq!(fs::read(&facts_path).unwrap(), before);
         let _ = fs::remove_dir_all(dir);
     }
 
