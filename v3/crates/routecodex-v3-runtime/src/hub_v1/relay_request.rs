@@ -586,7 +586,11 @@ fn govern_chat_tool_outputs_at_req04(
     for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
         match message.get("role").and_then(Value::as_str) {
             Some("assistant") => {
-                expected_outputs.clear();
+                // A Responses continuation may contain further receipts for
+                // earlier calls after an intervening assistant group.
+                if !allow_missing_parent {
+                    expected_outputs.clear();
+                }
                 if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
                     for call in calls {
                         if let Some((call_id, expected_kind)) =

@@ -303,6 +303,66 @@ async fn responses_openai_chat_field_parity_equivalent_tool_histories_merge_anno
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind() {
+    let input = serde_json::json!([
+        {"type":"function_call","name":"first","call_id":"call_a","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_a","output":"first result"},
+        {"type":"function_call","name":"second","call_id":"call_b","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_a","output":[{"type":"input_text","text":"late array"}]},
+        {"type":"function_call","name":"third","call_id":"call_c","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_b","output":"second result"},
+        {"type":"function_call_output","call_id":"call_c","output":"third result"}
+    ]);
+    let manifest = manifest_provider_wire("responses");
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-late","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    let mut wrong_kind = input.clone();
+    wrong_kind[3]["type"] = serde_json::json!("custom_tool_call_output");
+    let rejected = execute_v3_responses_relay_runtime(
+        &manifest,
+        responses_relay_input(
+            "req-late-wrong-kind",
+            serde_json::json!({"input":wrong_kind,"stream":false}),
+        ),
+        &transport,
+    )
+    .await;
+    assert!(
+        rejected.is_err(),
+        "known cross-group mismatch must fail Req04"
+    );
+    assert!(transport.captures.lock().unwrap().is_empty());
+
+    let outcome = execute_v3_responses_relay_runtime(
+        &manifest,
+        responses_relay_input(
+            "req-late-ordered",
+            serde_json::json!({"input":input,"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let wire = provider_projection_body(&captures[0]);
+    let actual = wire["input"].as_array().unwrap();
+    let expected = input.as_array().unwrap();
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual["type"], expected["type"]);
+        assert_eq!(actual["call_id"], expected["call_id"]);
+        assert_eq!(actual.get("output"), expected.get("output"));
+        if expected.get("output").is_some() {
+            assert!(actual.get("id").is_none());
+        }
+    }
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_then_drop_on_chat_wire(
 ) {
     let payload = serde_json::json!({

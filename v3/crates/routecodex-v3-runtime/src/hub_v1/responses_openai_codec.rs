@@ -480,7 +480,15 @@ fn append_v3_openai_chat_tool_call_message(
         messages.push(message);
         return Ok(());
     }
-    if let Some(index) = *pending_tool_message_index {
+    if let Some(index) = pending_tool_message_index.filter(|&index| {
+        let group = collect_v3_openai_chat_tool_call_ids(&messages[index]);
+        !messages[index + 1..].iter().any(|message| {
+            message
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !group.iter().any(|call_id| call_id == id))
+        })
+    }) {
         merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
     } else if let Some(tail_index) = turn_assistant_tail_index {
         if messages.len() == tail_index + 1 {
@@ -1095,8 +1103,18 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         .unwrap_or("function_call_output");
     let mut extension = Map::new();
     extension.insert("responses_tool_output_type".to_string(), json!(item_type));
-    if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
-        extension.insert("responses_item_id".to_string(), json!(item_id));
+    extension.insert(
+        "responses_item_id".to_string(),
+        json!(read_v3_non_empty_str(item.get("id"))),
+    );
+    if item_type == "function_call_output"
+        && output.as_array().is_some_and(|parts| {
+            parts
+                .iter()
+                .all(|part| part["type"] == "input_text" && part["text"].is_string())
+        })
+    {
+        extension.insert("responses_tool_output_content".to_string(), output.clone());
     }
     let extra_fields: Map<String, Value> = item
         .iter()

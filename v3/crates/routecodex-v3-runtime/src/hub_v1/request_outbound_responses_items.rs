@@ -309,7 +309,12 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         ),
         (
             "output".to_string(),
-            if let Some(content) = row.get("content").filter(|content| {
+            if let Some(content) = extension
+                .and_then(|fields| fields.get("responses_tool_output_content"))
+                .filter(|content| content.is_array() && output == content.to_string())
+            {
+                content.clone()
+            } else if let Some(content) = row.get("content").filter(|content| {
                 content.as_array().is_some_and(|parts| {
                     parts.iter().any(|part| {
                         matches!(
@@ -327,10 +332,9 @@ pub(super) fn chat_tool_result_to_responses_input_item(
     ]);
     if let Some(call_id) = call_id {
         // Responses-derived outputs retain an absent item id through the round trip.
-        if responses_item_id_from_chat_extension(row).is_some()
-            || extension
-                .and_then(|fields| fields.get("responses_tool_output_type"))
-                .is_none()
+        if !extension
+            .and_then(|fields| fields.get("responses_item_id"))
+            .is_some_and(Value::is_null)
         {
             let item_id = if responses_tool_output_type == "custom_tool_call_output" {
                 responses_custom_item_id(row, call_id)

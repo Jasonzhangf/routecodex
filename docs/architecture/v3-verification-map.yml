@@ -787,9 +787,11 @@ features:
   - every Req01 through Req04 owner operation emits deterministic entry and exit hook evidence
   - required hook failures and malformed tool outputs are explicit fail-fast errors
   - Responses-derived orphan tool outputs pass Req04 unchanged when only parent history is absent; malformed identity and actual kind mismatch retain their separate checks
+  - Responses late outputs retain known prior call-kind evidence and native output order and shape on Responses wire; Chat-derived results keep generated Responses IDs
   - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400 -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_field_parity_integration issue4a0b3aa_late_responses_results_preserve_order_shape_and_known_kind
   - npm run test:v3-relay-request-semantics
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
