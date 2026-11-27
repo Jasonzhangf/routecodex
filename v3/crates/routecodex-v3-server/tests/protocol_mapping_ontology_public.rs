@@ -139,7 +139,7 @@ async fn anthropic_upstream(
                 "content": [
                     {"type": "container_upload", "file_id": "file_unknown"},
                     {"type": "thinking", "thinking": ""},
-                    {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_unpaired", "content": []},
+                    {"type": "bash_code_execution_tool_result", "tool_use_id": "srvtoolu_unmapped", "content": {"type": "bash_code_execution_result", "stdout": "ok"}},
                     {"type": "text", "text": "first attempt preserved"}
                 ],
                 "stop_reason": "end_turn",
@@ -709,16 +709,20 @@ async fn negative_responses_upstream(
         .unwrap()
 }
 
-async fn assert_hard_json_failure(
+async fn check_hard_json_failure(
     label: &str,
     result: Result<reqwest::Response, reqwest::Error>,
     leaked_markers: &[&str],
-) {
+) -> Result<(), String> {
     match result {
-        Err(err) => assert!(
-            !err.is_timeout(),
-            "{label}: expected transport abort, got timeout: {err}"
-        ),
+        Err(err) => {
+            if err.is_timeout() {
+                return Err(format!(
+                    "{label}: expected transport abort, got timeout: {err}"
+                ));
+            }
+            Ok(())
+        }
         Ok(mut resp) => {
             let status = resp.status();
             let mut bytes = Vec::new();
@@ -734,17 +738,40 @@ async fn assert_hard_json_failure(
                 }
             }
             let body = String::from_utf8_lossy(&bytes);
-            assert!(
-                status != StatusCode::OK && stream_err.is_some(),
-                "{label}: expected detectable transport abort instead of synthetic payload or 200: status={status} body={body}"
-            );
-            for marker in leaked_markers {
-                assert!(
-                    !body.contains(marker),
-                    "{label}: aborted failure leaked '{marker}': status={status} body={body}"
-                );
+            if status != StatusCode::OK {
+                return Err(format!(
+                    "{label}: synthetic error HTTP status is disallowed for internal failure: status={status} stream_err={stream_err:?} body={body}"
+                ));
             }
+            if !stream_err.as_ref().is_some_and(|err| !err.is_timeout()) {
+                return Err(format!(
+                    "{label}: expected non-timeout transport abort after headers, got clean EOF or timeout: status={status} stream_err={stream_err:?} body={body}"
+                ));
+            }
+            if !bytes.is_empty() {
+                return Err(format!(
+                    "{label}: aborted JSON response leaked body bytes before abort: status={status} body={body}"
+                ));
+            }
+            for marker in leaked_markers {
+                if body.contains(marker) {
+                    return Err(format!(
+                        "{label}: aborted failure leaked '{marker}': status={status} body={body}"
+                    ));
+                }
+            }
+            Ok(())
         }
+    }
+}
+
+async fn assert_hard_json_failure(
+    label: &str,
+    result: Result<reqwest::Response, reqwest::Error>,
+    leaked_markers: &[&str],
+) {
+    if let Err(reason) = check_hard_json_failure(label, result, leaked_markers).await {
+        panic!("{reason}");
     }
 }
 
@@ -2186,8 +2213,9 @@ async fn map002_public_gemini_outbound_preserves_unmapped_drop_malformed_and_cap
     let home = Home::new("map002-gemini-public");
     std::env::set_var("ONTOLOGY_GEM_KEY", "gem-secret");
 
-    // Verify synthetic 502 + clean EOF AND synthetic 502 + post-header stream abort are BOTH
-    // rejected by the shared check_hard_sse_failure predicate.
+    // Verify synthetic 502 + clean EOF, synthetic 502 + post-header stream abort, and synthetic
+    // 502 + partial error body + abort are ALL rejected by check_hard_sse_failure and
+    // check_hard_json_failure.
     let synthetic_app = Router::new().route(
         "/synthetic",
         post(|| async {
@@ -2208,22 +2236,33 @@ async fn map002_public_gemini_outbound_preserves_unmapped_drop_malformed_and_cap
             .await
             .unwrap();
     });
-    let abort_502_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let abort_502_addr = abort_502_listener.local_addr().unwrap();
-    let abort_502_task = tokio::spawn(async move {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        if let Ok((mut sock, _)) = abort_502_listener.accept().await {
-            let mut buf = [0u8; 1024];
-            let _ = sock.read(&mut buf).await;
-            let _ = sock
-                .write_all(
-                    b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n",
-                )
-                .await;
-            let _ = sock.shutdown().await;
-            drop(sock);
-        }
-    });
+    let spawn_502_abort_server = |payload: &'static [u8]| async move {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(payload).await;
+                let _ = sock.shutdown().await;
+                drop(sock);
+            }
+        });
+        (addr, task)
+    };
+    let (abort_502_addr, abort_502_task) = spawn_502_abort_server(
+        b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n",
+    )
+    .await;
+    let (json_abort_502_addr, json_abort_502_task) = spawn_502_abort_server(
+        b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n",
+    )
+    .await;
+    let (partial_502_addr, partial_502_task) = spawn_502_abort_server(
+        b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\na\r\n{\"error\":\"\r\n5\r\n",
+    )
+    .await;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -2238,6 +2277,16 @@ async fn map002_public_gemini_outbound_preserves_unmapped_drop_malformed_and_cap
             .is_err(),
         "shared SSE predicate must reject synthetic 502 with clean EOF"
     );
+    let eof_502_json_res = client
+        .post(format!("http://{syn_addr}/synthetic"))
+        .send()
+        .await;
+    assert!(
+        check_hard_json_failure("synthetic_eof_502_json", eof_502_json_res, &[])
+            .await
+            .is_err(),
+        "shared JSON predicate must reject synthetic 502 with clean EOF"
+    );
     let abort_502_res = client
         .post(format!("http://{abort_502_addr}/synthetic-abort"))
         .send()
@@ -2248,9 +2297,31 @@ async fn map002_public_gemini_outbound_preserves_unmapped_drop_malformed_and_cap
             .is_err(),
         "shared SSE predicate must reject synthetic 502 even if body stream aborts after headers"
     );
+    let json_abort_502_res = client
+        .post(format!("http://{json_abort_502_addr}/synthetic-json-abort"))
+        .send()
+        .await;
+    assert!(
+        check_hard_json_failure("synthetic_abort_502_json", json_abort_502_res, &[])
+            .await
+            .is_err(),
+        "shared JSON predicate must reject synthetic 502 with post-header abort"
+    );
+    let partial_502_res = client
+        .post(format!("http://{partial_502_addr}/synthetic-partial-abort"))
+        .send()
+        .await;
+    assert!(
+        check_hard_json_failure("synthetic_partial_502_json", partial_502_res, &[])
+            .await
+            .is_err(),
+        "shared JSON predicate must reject partial error body + post-header abort"
+    );
     let _ = syn_sd.send(());
     let _ = syn_task.await;
     let _ = abort_502_task.await;
+    let _ = json_abort_502_task.await;
+    let _ = partial_502_task.await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2382,7 +2453,16 @@ targets = [
         .send()
         .await;
     assert_eq!(state.requests.lock().unwrap().len(), 1);
-    assert_hard_json_failure("gemini_empty_effort", bad_empty, &[]).await;
+    assert_hard_json_failure(
+        "gemini_empty_effort",
+        bad_empty,
+        &[
+            "MalformedOutboundField",
+            "invalid_responses_request",
+            "reasoning.effort",
+        ],
+    )
+    .await;
     server
         .wait_for_codex_sample_persistence()
         .await
@@ -2418,7 +2498,16 @@ targets = [
         .send()
         .await;
     assert_eq!(state.requests.lock().unwrap().len(), 1);
-    assert_hard_json_failure("gemini_missing_capability", bad_cap, &[]).await;
+    assert_hard_json_failure(
+        "gemini_missing_capability",
+        bad_cap,
+        &[
+            "missing_capability",
+            "network_error",
+            "UnmappedOutboundFields",
+        ],
+    )
+    .await;
     server
         .wait_for_codex_sample_persistence()
         .await
@@ -2489,4 +2578,432 @@ targets = [
     drop(server);
     let _ = shutdown.send(());
     let _ = task.await;
+}
+
+#[derive(Default)]
+struct RequiredToolChoiceChatState {
+    requests: Mutex<Vec<Value>>,
+}
+
+async fn strict_required_tool_choice_chat_upstream(
+    State(state): State<Arc<RequiredToolChoiceChatState>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    state.requests.lock().unwrap().push(body.clone());
+    let has_tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|t| !t.is_empty());
+    let has_tool_choice = body.get("tool_choice").is_some();
+    if !has_tools && has_tool_choice {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"error": {"message": format!("orphaned tool_choice without tools: {body}")}})
+                    .to_string(),
+            ))
+            .unwrap();
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id": "chatcmpl_required_choice",
+                "object": "chat.completion",
+                "model": "openai-wire",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": if has_tools { "callable_kept" } else { "hosted_omitted" }}
+                }],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn map002_public_omitted_hosted_tool_search_adjusts_orphaned_required_tool_choice() {
+    let _lock = LOCK.lock().await;
+    hub_v1_fixture::pin_test_process_refill_off();
+    let home = Home::new("map002-tool-search-required-choice");
+    std::env::set_var("ONTOLOGY_TS_REQ_KEY", "ts-req-secret");
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = Arc::new(RequiredToolChoiceChatState::default());
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post(strict_required_tool_choice_chat_upstream),
+        )
+        .with_state(state.clone());
+    let (shutdown, stop) = oneshot::channel();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let listen_port = test_ports::free_port();
+    let drop_log = home.path.join("tool-search-choice-drops.jsonl");
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.a]
+bind = "127.0.0.1"
+port = {}
+routing_group = "default"
+endpoints = ["responses"]
+
+{}
+
+[providers.openai_primary]
+type = "openai_chat"
+base_url = "http://{addr}/v1"
+default_model = "openai-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_TS_REQ_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.openai_primary.models."openai-wire"]
+wire_name = "openai-wire"
+aliases = ["ts-req-alias"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "openai_primary", model = "openai-wire", key = "key", priority = 1 }}
+]
+"#,
+        relay_all_entry_protocols_declaration(),
+        listen_port,
+        hub_v1_fixture::hub_v1_server_execution("a"),
+    );
+
+    let mut manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    manifest.debug.projection_drop_log_file = Some(drop_log.display().to_string());
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+
+    // 1) Hosted-only server tool_search + tool_choice="required" -> omits both tools & tool_choice.
+    let hosted_only = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ts-req-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "only hosted"}]}],
+            "tools": [{"type": "tool_search", "execution": "server"}],
+            "tool_choice": "required",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hosted_only.status(), StatusCode::OK);
+    let hosted_only_body: Value = hosted_only.json().await.unwrap();
+    assert_eq!(
+        hosted_only_body["output"][0]["content"][0]["text"],
+        "hosted_omitted"
+    );
+
+    // 2) Hosted server tool_search + callable function tool + tool_choice="required" -> retains function + required.
+    let with_fn = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ts-req-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "mixed"}]}],
+            "tools": [
+                {"type": "tool_search", "execution": "server"},
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+                }
+            ],
+            "tool_choice": "required",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(with_fn.status(), StatusCode::OK);
+    let with_fn_body: Value = with_fn.json().await.unwrap();
+    assert_eq!(
+        with_fn_body["output"][0]["content"][0]["text"],
+        "callable_kept"
+    );
+
+    let captured = state.requests.lock().unwrap();
+    assert_eq!(captured.len(), 2);
+    assert!(captured[0].get("tools").is_none(), "{}", captured[0]);
+    assert!(captured[0].get("tool_choice").is_none(), "{}", captured[0]);
+    assert_eq!(captured[1]["tools"][0]["function"]["name"], "lookup");
+    assert_eq!(captured[1]["tool_choice"], "required");
+
+    let drops_raw = std::fs::read_to_string(&drop_log)
+        .expect("hosted-only required tool_choice drop must persist locally");
+    assert!(
+        drops_raw.contains("$.tools[0]") && drops_raw.contains("$.tool_choice"),
+        "expected both tool and orphaned tool_choice drops: {drops_raw}"
+    );
+
+    drop(server);
+    let _ = shutdown.send(());
+    let _ = task.await;
+}
+
+#[derive(Default)]
+struct WebSearchPairingUpstreamState {
+    primary_hits: AtomicUsize,
+    backup_hits: AtomicUsize,
+}
+
+async fn web_search_primary_anthropic(
+    State(state): State<Arc<WebSearchPairingUpstreamState>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    state.primary_hits.fetch_add(1, Ordering::SeqCst);
+    let prompt = body["messages"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap_or("");
+    let content = match prompt {
+        "paired_ws" => json!([
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_1",
+                "name": "web_search",
+                "input": {"query": "MAP-002"}
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": [{"title": "Doc", "url": "https://example.test", "text": "matched result"}]
+            },
+            {"type": "text", "text": "paired ok"}
+        ]),
+        "unpaired_ws" => json!([
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_orphan",
+                "content": [{"title": "Orphan", "url": "https://example.test", "text": "orphan"}]
+            },
+            {"type": "text", "text": "companion prose"}
+        ]),
+        other => {
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(format!("unexpected prompt: {other}")))
+                .unwrap();
+        }
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id": "msg_ws_primary",
+                "type": "message",
+                "role": "assistant",
+                "model": "anthropic-wire",
+                "content": content,
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 5, "output_tokens": 5}
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+async fn web_search_backup_anthropic(
+    State(state): State<Arc<WebSearchPairingUpstreamState>>,
+) -> Response<Body> {
+    state.backup_hits.fetch_add(1, Ordering::SeqCst);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id": "msg_ws_backup",
+                "type": "message",
+                "role": "assistant",
+                "model": "anthropic-backup-wire",
+                "content": [{"type": "text", "text": "backup ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 4, "output_tokens": 2}
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn map002_public_unpaired_web_search_tool_result_triggers_recovery_while_paired_succeeds() {
+    let _lock = LOCK.lock().await;
+    hub_v1_fixture::pin_test_process_refill_off();
+    let _home = Home::new("map002-ws-pairing");
+    std::env::set_var("ONTOLOGY_WS_KEY", "ws-secret");
+
+    let primary_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let primary_addr = primary_listener.local_addr().unwrap();
+    let backup_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backup_addr = backup_listener.local_addr().unwrap();
+    let state = Arc::new(WebSearchPairingUpstreamState::default());
+
+    let (p_sd, p_stop) = oneshot::channel();
+    let p_state = state.clone();
+    let p_task = tokio::spawn(async move {
+        let app = Router::new()
+            .route("/v1/messages", post(web_search_primary_anthropic))
+            .with_state(p_state);
+        axum::serve(primary_listener, app)
+            .with_graceful_shutdown(async {
+                let _ = p_stop.await;
+            })
+            .await
+            .unwrap();
+    });
+    let (b_sd, b_stop) = oneshot::channel();
+    let b_state = state.clone();
+    let b_task = tokio::spawn(async move {
+        let app = Router::new()
+            .route("/v1/messages", post(web_search_backup_anthropic))
+            .with_state(b_state);
+        axum::serve(backup_listener, app)
+            .with_graceful_shutdown(async {
+                let _ = b_stop.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let listen_port = test_ports::free_port();
+    let source = format!(
+        r#"
+version = 3
+{}
+
+[servers.a]
+bind = "127.0.0.1"
+port = {}
+routing_group = "default"
+endpoints = ["responses"]
+
+{}
+
+[providers.anthropic_primary]
+type = "anthropic"
+base_url = "http://{primary_addr}"
+default_model = "anthropic-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_WS_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.anthropic_primary.models."anthropic-wire"]
+wire_name = "anthropic-wire"
+aliases = ["ws-alias"]
+capabilities = ["text", "tools", "web_search"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[providers.anthropic_backup]
+type = "anthropic"
+base_url = "http://{backup_addr}"
+default_model = "anthropic-backup-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "ONTOLOGY_WS_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+
+[providers.anthropic_backup.models."anthropic-backup-wire"]
+wire_name = "anthropic-backup-wire"
+capabilities = ["text", "tools", "web_search"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "anthropic_primary", model = "anthropic-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "anthropic_backup", model = "anthropic-backup-wire", key = "key", priority = 1 }}
+]
+"#,
+        relay_all_entry_protocols_declaration(),
+        listen_port,
+        hub_v1_fixture::hub_v1_server_execution("a"),
+    );
+
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let server = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+
+    // 1) Paired server_tool_use + web_search_tool_result + text -> succeeds on first attempt.
+    let paired = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ws-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "paired_ws"}]}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(paired.status(), StatusCode::OK);
+    let paired_body: Value = paired.json().await.unwrap();
+    let output = paired_body["output"].as_array().unwrap();
+    assert!(
+        output.iter().any(|item| item["type"] == "web_search_call"),
+        "{paired_body}"
+    );
+    assert!(
+        output
+            .iter()
+            .any(|item| item["type"] == "function_call_output" && item["call_id"] == "srvtoolu_1"),
+        "{paired_body}"
+    );
+    assert_eq!(state.primary_hits.load(Ordering::SeqCst), 1);
+    assert_eq!(state.backup_hits.load(Ordering::SeqCst), 0);
+
+    // 2) Unpaired web_search_tool_result even with companion prose -> enters candidate recovery to backup.
+    let unpaired = client
+        .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
+        .json(&json!({
+            "model": "ws-alias",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "unpaired_ws"}]}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unpaired.status(), StatusCode::OK);
+    let unpaired_body: Value = unpaired.json().await.unwrap();
+    assert_eq!(
+        unpaired_body["output"][0]["content"][0]["text"],
+        "backup ok"
+    );
+    assert_eq!(state.primary_hits.load(Ordering::SeqCst), 2);
+    assert_eq!(state.backup_hits.load(Ordering::SeqCst), 1);
+
+    drop(server);
+    let _ = p_sd.send(());
+    let _ = b_sd.send(());
+    let _ = p_task.await;
+    let _ = b_task.await;
 }

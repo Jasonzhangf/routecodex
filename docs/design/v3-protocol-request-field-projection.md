@@ -336,7 +336,7 @@ MetadataCenter are forbidden inference sources.
 | `redacted_thinking` | opaque Responses reasoning encrypted content | `mapped_compatible_registered` |
 | `tool_use` | typed Responses function/custom tool call | `mapped_exact` or governed custom compatibility wrapper |
 | `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; unsupported non-empty `name` warns and omits block |
-| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; unpaired identity warns and omits without blocking text |
+| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; invalid unpaired `tool_use_id` fails explicitly with `UnpairedWebSearchToolResult` |
 | `web_fetch_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
 | `code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
 | `bash_code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |

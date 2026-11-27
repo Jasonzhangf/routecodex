@@ -1800,4 +1800,50 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
             .any(|drop| drop.json_path == "$.tool_choice"),
         "ordinary function tool_choice must not be dropped: {mixed_fn_drops:?}"
     );
+
+    let (hosted_only_required_wire, hosted_only_required_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [{"type": "tool_search", "execution": "server"}],
+                "tool_choice": "required"
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("hosted-only tool_search with required tool_choice must omit orphaned choice");
+    assert!(hosted_only_required_wire.get("tools").is_none());
+    assert!(
+        hosted_only_required_wire.get("tool_choice").is_none(),
+        "orphaned required tool_choice must be omitted when no callable tools remain: {hosted_only_required_wire}"
+    );
+    assert!(
+        hosted_only_required_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "{hosted_only_required_drops:?}"
+    );
+
+    let (mixed_required_wire, mixed_required_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "lookup"}],
+                "tools": [
+                    {"type": "tool_search", "execution": "server"},
+                    {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("hosted tool_search alongside callable tool must retain required tool_choice");
+    assert_eq!(mixed_required_wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(mixed_required_wire["tool_choice"], "required");
+    assert!(
+        !mixed_required_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "{mixed_required_drops:?}"
+    );
 }

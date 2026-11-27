@@ -992,22 +992,56 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             continue;
                         }
                     };
-                    let hook_provider_value =
-                        if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                            handle_error_before_resp03!(
-                                project_v3_anthropic_message_as_responses_response_with_context(
-                                    &provider_value,
-                                    &anthropic_response_projection_context,
-                                )
-                                .map_err(|error| {
-                                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                                        error.to_string(),
+                    let hook_provider_value = if provider_wire_protocol
+                        == V3HubProviderWireProtocol::Anthropic
+                    {
+                        match project_v3_anthropic_message_as_responses_response_with_context(
+                            &provider_value,
+                            &anthropic_response_projection_context,
+                        ) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                let failure = handle_error_before_resp03!(
+                                    provider_response_stream_relay_failure(
+                                        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                            error.to_string(),
+                                        ),
+                                        &input.request_id,
+                                        &selected_target_provider_id,
+                                        Some(selected_observability.clone()),
                                     )
-                                })
-                            )
-                        } else {
-                            provider_value.clone()
-                        };
+                                );
+                                let terminal_failure = handle_error_before_resp03!(
+                                    handle_v3_responses_relay_provider_failure(
+                                        &failure_context,
+                                        selected,
+                                        failure,
+                                        &mut V3ResponsesRelayProviderRetryState {
+                                            failed_candidates: &mut failed_candidates,
+                                            same_candidate_retries: &mut same_candidate_retries,
+                                            retry_selected: &mut retry_selected,
+                                            provider_failure_events: &mut provider_failure_events,
+                                            provider_failure_event_sink:
+                                                provider_failure_event_sink.as_ref(),
+                                            selected_observability: &selected_observability,
+                                            trace: &mut trace,
+                                            last_external_http: &mut last_external_http,
+                                            active_keys: active_keys.as_deref(),
+                                            active_episode: active_episode.as_mut(),
+                                            active_attempt_dispatched,
+                                        },
+                                    )
+                                    .await
+                                );
+                                if let Some(failure) = terminal_failure {
+                                    return Ok(provider_failure_output(failure, trace, 0));
+                                }
+                                continue;
+                            }
+                        }
+                    } else {
+                        provider_value.clone()
+                    };
                     let hook_provider_protocol =
                         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                             V3HubProviderWireProtocol::Responses

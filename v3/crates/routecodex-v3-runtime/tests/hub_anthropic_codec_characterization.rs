@@ -3102,8 +3102,8 @@ fn anthropic_response_content_block_omits_unknown_and_roundtrip_only_while_prese
 }
 
 #[test]
-fn anthropic_unpaired_web_search_result_does_not_block_deliverable_text() {
-    let response = project_v3_anthropic_message_as_responses_response(&json!({
+fn anthropic_unpaired_web_search_result_fails_explicitly() {
+    let error = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_unpaired_search_result",
         "role":"assistant",
         "content":[
@@ -3119,12 +3119,12 @@ fn anthropic_unpaired_web_search_result_does_not_block_deliverable_text() {
         ],
         "stop_reason":"end_turn"
     }))
-    .expect("unpaired hosted search result must warn/omit without blocking deliverable text");
+    .expect_err("unpaired registered web_search_tool_result must remain explicit pairing failure");
 
-    assert_eq!(response["status"], "completed");
-    assert_eq!(
-        response["output"][0]["content"][0]["text"],
-        "search fallback answer"
+    let message = error.to_string();
+    assert!(
+        message.contains("web_search_tool_result") && message.contains("srvtoolu_missing"),
+        "unexpected error: {message}"
     );
 }
 

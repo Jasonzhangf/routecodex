@@ -392,7 +392,8 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
                 || item.get("name").and_then(Value::as_str) == Some("tool_search")
         });
         if root.get("tool_choice").is_some_and(|choice| {
-            is_explicit_hosted_tool_search_choice(choice)
+            normalized_tools.is_empty()
+                || is_explicit_hosted_tool_search_choice(choice)
                 || (!retains_function_tool_search && is_named_tool_search_choice(choice))
         }) {
             if let Some(choice) = root.remove("tool_choice") {

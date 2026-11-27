@@ -1220,9 +1220,10 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     );
     for (tool_use_id, (index, _)) in &hosted_results_by_call {
         if !consumed_hosted_result_ids.contains(tool_use_id) {
-            eprintln!(
-                "[v3-response-warning] protocol=anthropic stage=responses_projection index={index} tool_use_id={tool_use_id:?} reason=unpaired_web_search_tool_result_ignored"
-            );
+            return Err(V3AnthropicCodecError::UnpairedWebSearchToolResult {
+                index: *index,
+                tool_use_id: tool_use_id.clone(),
+            });
         }
     }
     // Expanded admission accepts ordinary business fields that happen to share
