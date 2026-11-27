@@ -440,6 +440,7 @@ mod tests {
                     request_client_model: Some("gemini-client".to_string()),
                     request_capabilities: BTreeSet::from(["text".to_string()]),
                     request_input_tokens: 1,
+                    estimated_history_turns: None,
                     hit_count: 1,
                 },
                 candidate: V3TargetCandidate {
@@ -478,6 +479,11 @@ mod tests {
                     priority: 0,
                     weight: 1,
                     pool_ids: vec!["default".to_string()],
+                    occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                        pool_id: "default".into(),
+                        tier_index: 0,
+                        plan_index: 0,
+                    }],
                     default_pool_member: true,
                     path: vec!["gemini-provider".to_string()],
                 },
@@ -485,6 +491,12 @@ mod tests {
                 unavailable_candidates: Vec::new(),
                 attempts: 0,
                 default_floor_protected: false,
+                occurrence: routecodex_v3_target::V3TargetOccurrence {
+                    pool_id: "default".into(),
+                    tier_index: 0,
+                    plan_index: 0,
+                },
+                active_selection: None,
             },
             request_id: "request-gemini".to_string(),
             request_body: json!({

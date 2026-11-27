@@ -17,6 +17,7 @@ fn directory_compilation_uses_referenced_models_only() {
                 max_context_tokens: None,
                 context_window: None,
                 context_token_estimate_scale_bps: 10_000,
+                exclude_at_estimated_turns: None,
                 web_search_execution_mode: None,
                 web_search_backend: None,
                 features: BTreeMap::new(),
@@ -37,6 +38,7 @@ fn directory_compilation_uses_referenced_models_only() {
                 max_context_tokens: None,
                 context_window: None,
                 context_token_estimate_scale_bps: 10_000,
+                exclude_at_estimated_turns: None,
                 web_search_execution_mode: None,
                 web_search_backend: None,
                 features: BTreeMap::new(),
@@ -96,6 +98,8 @@ contextTokenEstimateScaleBps = 17000
     let defaulted: V2ProviderModelConfig =
         toml::from_str("").expect("omitted scale must use the V2 compatibility default");
     assert_eq!(defaulted.context_token_estimate_scale_bps, 10_000);
+    assert_eq!(defaulted.exclude_at_estimated_turns, None);
+    assert!(toml::from_str::<V2ProviderModelConfig>("exclude_at_estimated_turns = 0").is_err());
 }
 
 #[test]
@@ -127,6 +131,7 @@ apiKey = "test-key"
 
 [provider.models.model]
 contextTokenEstimateScaleBps = 17000
+exclude_at_estimated_turns = 99
 "#,
     )
     .expect("parse");
@@ -168,6 +173,7 @@ apiKey = "test-key"
 
 [provider.models.model]
 contextTokenEstimateScaleBps = 17000
+exclude_at_estimated_turns = 99
 "#,
     )
     .expect("write");
@@ -187,6 +193,10 @@ contextTokenEstimateScaleBps = 17000
     assert_eq!(
         authoring.models["model"].context_token_estimate_scale_bps, 17_000,
         "V2→V3 end-to-end: provider model context scale must not be dropped"
+    );
+    assert_eq!(
+        authoring.models["model"].exclude_at_estimated_turns,
+        std::num::NonZeroU64::new(99)
     );
     std::fs::remove_dir_all(&tmp).ok();
 

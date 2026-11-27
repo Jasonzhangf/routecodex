@@ -1046,9 +1046,63 @@
         "version": 5
       },
       "version": 39
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我希望我们现在的多 key 调度支持 active queue 的模式：\n\n1. 进入 active 的queue的 key 可以按顺序用完额度后调度下一个，也就是active 的 key 理论上就是错误后重试三次还是不改变就换下一个 key，原 key 暂时不调度，进入冷却池，手动释放，或者排到当前 queue 末尾\n2. active 也可以支持当前的平均分配调度\n3. 也可以支持粘性调度：session 如果已经命中过，优选命中过的 key，新 session 默认命中新 key\n4. 可以配置 n 个账号只把部分设置为 active",
+          "role": "user",
+          "source": "Codex RouteCodex active queue request, current conversation, 2026-11-25"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261125-active-key-queue",
+        "requirement_id": "routecodex-active-key-queue",
+        "text": "多 key 调度增加显式启用的 active queue 模式。可以在已配置的多个账号/key 中只激活部分；未激活的账号不因 active queue 耗尽而自动加入。active 集合支持三种选择行为：按队列顺序持续使用当前 key、当前的平均分配、session 粘性。顺序模式中，当前 key 错误后重试三次仍未恢复则切换下一 key；失败 key 暂停调度，按配置等待手动释放或排到当前队尾。粘性模式中，已有 session 优先使用其已命中的 key，新 session 向其他 active key 分配，active 集合用过一轮后允许轮转复用。\n\n本次用户指令仅为新模式增加同 key 重试例外，不全局复活旧 retry-same 或等待恢复机制。没有启用 active 模式的配置继续遵守现有同一请求失败身份不重发规则。既有完整 listener/provider/interface/model/key 身份、声明路由边界、业务提交边界、typed Error 链、健康策略、真实最终 Provider HTTP 错误终点和请求独立性继续适用。队列挂起和手动释放是选择状态，不得伪装成或绕过 Provider 健康状态。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我希望我们现在的多 key 调度支持 active queue 的模式：\n\n1. 进入 active 的queue的 key 可以按顺序用完额度后调度下一个，也就是active 的 key 理论上就是错误后重试三次还是不改变就换下一个 key，原 key 暂时不调度，进入冷却池，手动释放，或者排到当前 queue 末尾\n2. active 也可以支持当前的平均分配调度\n3. 也可以支持粘性调度：session 如果已经命中过，优选命中过的 key，新 session 默认命中新 key\n4. 可以配置 n 个账号只把部分设置为 active",
+          "role": "user",
+          "source": "Codex RouteCodex active queue request, current conversation, 2026-11-25"
+        },
+        "requirement_id": "routecodex-active-key-queue",
+        "status": "active",
+        "text": "多 key 调度增加显式启用的 active queue 模式。可以在已配置的多个账号/key 中只激活部分；未激活的账号不因 active queue 耗尽而自动加入。active 集合支持三种选择行为：按队列顺序持续使用当前 key、当前的平均分配、session 粘性。顺序模式中，当前 key 错误后重试三次仍未恢复则切换下一 key；失败 key 暂停调度，按配置等待手动释放或排到当前队尾。粘性模式中，已有 session 优先使用其已命中的 key，新 session 向其他 active key 分配，active 集合用过一轮后允许轮转复用。\n\n本次用户指令仅为新模式增加同 key 重试例外，不全局复活旧 retry-same 或等待恢复机制。没有启用 active 模式的配置继续遵守现有同一请求失败身份不重发规则。既有完整 listener/provider/interface/model/key 身份、声明路由边界、业务提交边界、typed Error 链、健康策略、真实最终 Provider HTTP 错误终点和请求独立性继续适用。队列挂起和手动释放是选择状态，不得伪装成或绕过 Provider 健康状态。",
+        "version": 1
+      },
+      "version": 40
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "你要有各种场景下 key 失败后的处理方式，理论上错误在 3 次以上就失去了该 key 的绑定，需要重新排队了",
+          "role": "user",
+          "source": "Codex RouteCodex active queue failure clarification, current conversation, 2026-11-25"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261125-active-key-failure-binding",
+        "requirement_id": "routecodex-active-key-queue",
+        "text": "多 key 调度增加显式启用的 active queue 模式。可以在已配置的多个账号/key 中只激活部分；未激活的账号不因 active queue 耗尽而自动加入。active 集合支持三种选择行为：按队列顺序持续使用当前 key、当前的平均分配、session 粘性。顺序模式中，当前 key 错误后重试三次仍未恢复则切换下一 key；失败 key 暂停调度，按配置等待手动释放或排到当前队尾。粘性模式中，已有 session 优先使用其已命中的 key，新 session 向其他 active key 分配，active 集合用过一轮后允许轮转复用。\n\n必须定义各种 key 失败场景的处理方式。错误在三次以上，即第四次仍失败时，必须解除该 key 的已有绑定并重新排队；排到队尾不能保留旧 session 对该 key 的优先绑定。故障分类、计数、重试、失去绑定和队列迁移须有可观测行为验收。\n\n本次用户指令仅为新模式增加同 key 重试例外，不全局复活旧 retry-same 或等待恢复机制。没有启用 active 模式的配置继续遵守现有同一请求失败身份不重发规则。既有完整 listener/provider/interface/model/key 身份、声明路由边界、业务提交边界、typed Error 链、健康策略、真实最终 Provider HTTP 错误终点和请求独立性继续适用。队列挂起和手动释放是选择状态，不得伪装成或绕过 Provider 健康状态。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "你要有各种场景下 key 失败后的处理方式，理论上错误在 3 次以上就失去了该 key 的绑定，需要重新排队了",
+          "role": "user",
+          "source": "Codex RouteCodex active queue failure clarification, current conversation, 2026-11-25"
+        },
+        "requirement_id": "routecodex-active-key-queue",
+        "status": "active",
+        "text": "多 key 调度增加显式启用的 active queue 模式。可以在已配置的多个账号/key 中只激活部分；未激活的账号不因 active queue 耗尽而自动加入。active 集合支持三种选择行为：按队列顺序持续使用当前 key、当前的平均分配、session 粘性。顺序模式中，当前 key 错误后重试三次仍未恢复则切换下一 key；失败 key 暂停调度，按配置等待手动释放或排到当前队尾。粘性模式中，已有 session 优先使用其已命中的 key，新 session 向其他 active key 分配，active 集合用过一轮后允许轮转复用。\n\n必须定义各种 key 失败场景的处理方式。错误在三次以上，即第四次仍失败时，必须解除该 key 的已有绑定并重新排队；排到队尾不能保留旧 session 对该 key 的优先绑定。故障分类、计数、重试、失去绑定和队列迁移须有可观测行为验收。\n\n本次用户指令仅为新模式增加同 key 重试例外，不全局复活旧 retry-same 或等待恢复机制。没有启用 active 模式的配置继续遵守现有同一请求失败身份不重发规则。既有完整 listener/provider/interface/model/key 身份、声明路由边界、业务提交边界、typed Error 链、健康策略、真实最终 Provider HTTP 错误终点和请求独立性继续适用。队列挂起和手动释放是选择状态，不得伪装成或绕过 Provider 健康状态。",
+        "version": 2
+      },
+      "version": 41
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 39
+  "version": 41
 }

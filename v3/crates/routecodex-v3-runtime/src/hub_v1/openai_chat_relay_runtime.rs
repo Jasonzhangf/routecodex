@@ -178,6 +178,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         V3HubExecutionMode::Relay,
         Some(handoff),
+        None,
     )
     .await
 }
@@ -229,6 +230,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         None,
+        None,
     )
     .await
 }
@@ -241,6 +243,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec；Chat Process 有界续杯循环在骨架之上的
@@ -264,6 +267,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             provider_health,
             retry_policy,
             initial_handoff,
+            active_keys,
         )
         .await
         .map_err(|(error, failure_events)| {
@@ -293,6 +297,25 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             }
         })?;
     Ok(output)
+}
+
+pub async fn execute_v3_openai_chat_relay_runtime_with_active_keys(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        V3HubExecutionMode::Relay,
+        None,
+        active_keys,
+    )
+    .await
 }
 
 pub fn project_v3_openai_chat_relay_runtime_failure(
@@ -1160,6 +1183,7 @@ fn openai_chat_provider_http_failure(
         provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
@@ -1229,6 +1253,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             provider_body_read_failure: None,
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
+            attempt_source: None,
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: None,

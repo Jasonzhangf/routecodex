@@ -1890,6 +1890,9 @@ mod direct_sse_observability_none_tests {
         });
         let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
         Arc::new(V3ListenerState {
+            active_keys: None,
+            active_key_control_revoked: Default::default(),
+            responses_handoff_observer: Default::default(),
             server,
             manifest_version: manifest.version,
             manifest: Arc::clone(&manifest),

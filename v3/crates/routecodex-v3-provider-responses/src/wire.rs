@@ -258,13 +258,23 @@ pub fn build_v3_provider_12_responses_wire_payload_with_registry(
     body: Value,
     registry: NamespaceToolIdentityRegistry,
 ) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
-    build_responses_wire_payload_with_registry(
+    build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint(
         request_id,
         target,
         body,
+        registry,
         V3ResponsesRequestEndpoint::Responses,
-        Some(registry),
     )
+}
+
+pub fn build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint(
+    request_id: impl Into<String>,
+    target: V3ResponsesProviderTarget,
+    body: Value,
+    registry: NamespaceToolIdentityRegistry,
+    endpoint: V3ResponsesRequestEndpoint,
+) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
+    build_responses_wire_payload_with_registry(request_id, target, body, endpoint, Some(registry))
 }
 
 fn build_responses_wire_payload_with_registry(
@@ -470,11 +480,9 @@ fn strip_v3_response_anthropic_signature_excluding_protocol_cipher(value: &mut V
 fn strip_v3_response_encrypted_fields(value: &mut Value, strip_all: bool, in_content_array: bool) {
     match value {
         Value::Object(map) => {
-            if map
-                .get("type")
-                .and_then(Value::as_str)
-                .is_some_and(is_v3_responses_tool_business_item)
-            {
+            if map.get("type").and_then(Value::as_str).is_some_and(|kind| {
+                is_v3_responses_tool_business_item(kind) || (strip_all && kind == "compaction")
+            }) {
                 return;
             }
             let remove = match map.get("encrypted_content") {

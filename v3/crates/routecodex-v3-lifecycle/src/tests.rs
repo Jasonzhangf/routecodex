@@ -129,7 +129,8 @@ async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup
 
     shutdown_managed_runtime(
         &instance_dir,
-        &declaration.instance_id,
+        &declaration,
+        "fixture-nonce",
         &socket_path,
         handle,
         V3HooksSidecarSupervisor::from_startup(
@@ -158,19 +159,50 @@ async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
+    struct HomeReset(Option<std::ffi::OsString>);
+    impl Drop for HomeReset {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+    let _home = HomeReset(std::env::var_os("HOME"));
+    let home = root.path().join("home");
+    fs::create_dir(&home).unwrap();
+    std::env::set_var("HOME", home);
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
         .unwrap()
         .local_addr()
         .unwrap()
         .port();
-    let (config, executable, state) = fixture_with_port(&root, port);
+    let (config, executable, state) = fixture_with_port_selection(&root, port, true);
     let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
     let (declaration, manifest) = lifecycle.declaration(&executable).unwrap();
     let instance_dir = state.join("instances").join(&declaration.instance_id);
     ensure_private_dir(&instance_dir).unwrap();
     let socket_path = instance_dir.join("managed-control.sock");
-    fs::write(instance_dir.join("pid.cache"), "managed-pid").unwrap();
-    fs::write(instance_dir.join("control.json"), "managed-control").unwrap();
+    let pid = V3ManagedPidCache {
+        retained_control: None,
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        pid: std::process::id(),
+        start_nonce: "test-nonce".into(),
+        started_at_epoch_ms: epoch_ms(),
+        process_start_token: process_start_token(std::process::id()).unwrap(),
+    };
+    write_json_atomic(&instance_dir.join("pid.cache"), &pid).unwrap();
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            start_nonce: pid.start_nonce.clone(),
+            socket_path: socket_path.display().to_string(),
+        },
+    )
+    .unwrap();
     fs::write(&socket_path, "managed-socket").unwrap();
     let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
     fs::write(&process_record_path, "sidecar-process").unwrap();
@@ -178,9 +210,15 @@ async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
     fs::write(&restart_plan_path, "restart-plan").unwrap();
     let sidecar_child = tokio::process::Command::new("true").spawn().unwrap();
     let sidecar = V3HooksSidecarProcess::for_test(sidecar_child, 0, process_record_path.clone());
-    let handle = routecodex_v3_server::spawn_v3_server_aggregate(manifest)
-        .await
-        .unwrap();
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_admin(
+        manifest,
+        None,
+        Some(config.clone()),
+    )
+    .await
+    .unwrap();
+    let control_paths = routecodex_v3_config::v3_active_key_control_paths(&config, "test").unwrap();
+    let control_before = control_paths.read().unwrap();
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
         control_start_nonce: "test-nonce".into(),
@@ -196,26 +234,129 @@ async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
         instance_dir.clone(),
         tokio::spawn(async move { Ok(Some(sidecar)) }),
     );
-    let (stream, _peer) = UnixStream::pair().unwrap();
+    let (stream, peer) = UnixStream::pair().unwrap();
     let error =
         restart_managed_runtime_in_place(&instance_dir, &handle, restart_plan, false, &stream)
             .await
             .unwrap_err();
 
+    let listener_preserved = !listener_set_is_available(&declaration.listeners);
+    let managed_files_preserved = [
+        instance_dir.join("pid.cache"),
+        instance_dir.join("control.json"),
+        socket_path,
+        process_record_path,
+        restart_plan_path,
+    ]
+    .iter()
+    .all(|path| path.exists());
+    let staged_artifacts_absent = [
+        FRONT_HANDOFF_FILE,
+        PROVIDER_HANDOFF_FILE,
+        EXEC_RESTART_DECLARATION_FILE,
+    ]
+    .iter()
+    .all(|name| !instance_dir.join(name).exists());
+    let control_after = control_paths.read().unwrap();
+    let status = active_control_roundtrip(
+        handle.listeners[0].addr,
+        "GET",
+        "/_routecodex/selection/active-keys",
+        None,
+    )
+    .await;
+    let release = active_control_roundtrip(handle.listeners[0].addr, "POST", "/_routecodex/selection/active-keys/release",
+        Some(serde_json::json!({"routing_group_id":"default","pool_id":"default","provider_id":"test","interface_id":"default","model_id":"test","auth_alias":"key"}))).await;
+    let close = handle.shutdown().await;
+    let sidecar_closed = supervisor.stop().await.is_err();
+    let control_record_absent =
+        matches!(control_paths.read(),Err(e) if e.kind()==std::io::ErrorKind::NotFound);
+    drop(stream);
+    drop(peer);
+    root.close().unwrap();
     assert!(
         error.to_string().contains("No such file"),
         "restart must report native exec failure, got {error}"
     );
-    assert!(!listener_set_is_available(&declaration.listeners));
-    assert!(instance_dir.join("pid.cache").exists());
-    assert!(instance_dir.join("control.json").exists());
-    assert!(socket_path.exists());
-    assert!(process_record_path.exists());
-    assert!(restart_plan_path.exists());
-    assert!(!instance_dir.join(FRONT_HANDOFF_FILE).exists());
-    assert!(!instance_dir.join(PROVIDER_HANDOFF_FILE).exists());
-    handle.shutdown().await;
-    assert!(supervisor.stop().await.is_err());
+    assert!(listener_preserved && managed_files_preserved && staged_artifacts_absent);
+    assert!(close.is_empty() && sidecar_closed && control_record_absent);
+    assert_eq!(
+        control_before, control_after,
+        "native exec failure must preserve exact original control ownership"
+    );
+    assert_eq!(status.unwrap().0, 200);
+    assert_eq!(release.unwrap().0, 200);
+}
+
+#[cfg(unix)]
+async fn active_control_roundtrip(
+    address: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<(u16, serde_json::Value), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let operation = async {
+        let mut stream = tokio::net::TcpStream::connect(address)
+            .await
+            .map_err(|e| e.to_string())?;
+        let body = body.map(|b| b.to_string()).unwrap_or_default();
+        stream.write_all(format!("{method} {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.map_err(|e|e.to_string())?;
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .await
+            .map_err(|e| e.to_string())?;
+        let split = response
+            .windows(4)
+            .position(|b| b == b"\r\n\r\n")
+            .ok_or("missing HTTP headers")?;
+        let head = String::from_utf8_lossy(&response[..split]);
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .ok_or("missing HTTP status")?
+            .parse::<u16>()
+            .map_err(|e| e.to_string())?;
+        let body = serde_json::from_slice(&response[split + 4..]).map_err(|e| e.to_string())?;
+        Ok((status, body))
+    };
+    tokio::time::timeout(Duration::from_secs(5), operation)
+        .await
+        .map_err(|_| "active control HTTP timeout".to_string())?
+}
+
+fn exited_test_cache(declaration: &V3ManagedInstanceDeclaration, nonce: &str) -> V3ManagedPidCache {
+    let mut child = std::process::Command::new("cat")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let token = process_start_token(child.id()).unwrap().unwrap();
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    V3ManagedPidCache {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        pid: child.id(),
+        start_nonce: nonce.into(),
+        retained_control: None,
+        started_at_epoch_ms: epoch_ms(),
+        process_start_token: Some(token),
+    }
+}
+
+fn publish_exited_test_owner(dir: &Path, declaration: &V3ManagedInstanceDeclaration) {
+    let cache = exited_test_cache(declaration, "exited");
+    let control = V3ManagedControlRecord {
+        schema_version: SCHEMA_VERSION,
+        instance_id: cache.instance_id.clone(),
+        start_nonce: cache.start_nonce.clone(),
+        socket_path: managed_control_socket_path(&cache.instance_id)
+            .display()
+            .to_string(),
+    };
+    write_json_atomic(&dir.join("pid.cache"), &cache).unwrap();
+    write_json_atomic(&dir.join("control.json"), &control).unwrap();
 }
 
 #[tokio::test]
@@ -262,14 +403,7 @@ async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_contr
     .unwrap();
     write_json_atomic(
         &instance_dir.join("pid.cache"),
-        &V3ManagedPidCache {
-            schema_version: SCHEMA_VERSION,
-            instance_id: expected.instance_id.clone(),
-            pid: 42,
-            start_nonce: "stale".to_string(),
-            started_at_epoch_ms: 1,
-            process_start_token: None,
-        },
+        &exited_test_cache(&expected, "stale"),
     )
     .unwrap();
     write_json_atomic(
@@ -300,9 +434,9 @@ async fn live_hooks_group_does_not_block_forced_stop() {
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
-    let mut child = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg("while :; do sleep 1; done")
+    let mut child = tokio::process::Command::new("/bin/sleep")
+        .arg("60")
+        .kill_on_drop(true)
         .process_group(0)
         .spawn()
         .unwrap();
@@ -315,34 +449,108 @@ async fn live_hooks_group_does_not_block_forced_stop() {
         ),
     )
     .unwrap();
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let declaration = managed_test_declaration(
         "forced-stop-live-hooks",
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_498,
+        listener.local_addr().unwrap().port(),
     );
-    let declaration = V3ManagedInstanceDeclaration {
-        listeners: Vec::new(),
-        ..declaration
-    };
 
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Stopped,
+        Some("original shutdown detail".into()),
+    )
+    .unwrap();
+    let baseline = fs::read(instance_dir.join("status.json")).unwrap();
+    let hooks = fs::read(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE)).unwrap();
+    drop(listener);
     let status = V3ManagedLifecycle::with_state_root(
         &root.path().join("config.v3.toml"),
         &root.path().join("state"),
     )
     .force_stop_after_graceful_timeout(&instance_dir, &declaration)
-    .await
-    .unwrap();
+    .await;
+    let retained = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists();
+    assert!(pid_is_alive(process_group_id as u32));
+    assert!(hooks_sidecar_process_group_is_alive(&instance_dir).unwrap());
+    child.kill().await.unwrap();
+    child.wait().await.unwrap();
+    let status = status.unwrap();
 
+    assert_eq!(
+        fs::read(instance_dir.join("status.json")).unwrap(),
+        baseline
+    );
+    assert_eq!(
+        status.updated_at_epoch_ms,
+        serde_json::from_slice::<V3ManagedStatusRecord>(&baseline)
+            .unwrap()
+            .updated_at_epoch_ms
+    );
+    assert_eq!(
+        fs::read(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE)).unwrap(),
+        hooks
+    );
     assert_eq!(status.state, V3ManagedRunState::Stopped);
     assert!(status
         .detail
         .as_deref()
         .is_some_and(|detail| detail.contains("hooks sidecar cleanup incomplete")));
-    assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
-    assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
-    let _ = child.wait().await;
+    assert!(retained);
+    assert!(status
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("without signal delivery"));
+}
+
+#[tokio::test]
+async fn bare_no_delivery_requires_verified_stopped_baseline() {
+    let root = TempDir::new().unwrap();
+    let config = root.path().join("config.v3.toml");
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let declaration =
+        managed_test_declaration("bare-no-delivery", &config, "digest", "/tmp/rccv3", port);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, root.path());
+    let dir = lifecycle.instance_dir(&declaration.instance_id);
+    ensure_private_dir(&dir).unwrap();
+    write_json_atomic(&dir.join("instance.json"), &declaration).unwrap();
+    for state in [
+        None,
+        Some(V3ManagedRunState::Failed),
+        Some(V3ManagedRunState::Stopped),
+    ] {
+        if let Some(state) = state.clone() {
+            write_status(
+                &dir,
+                &declaration.instance_id,
+                state,
+                Some("original outcome".into()),
+            )
+            .unwrap();
+        }
+        let path = dir.join("status.json");
+        let before = fs::read(&path).ok();
+        if state == Some(V3ManagedRunState::Stopped) {
+            let mut foreign = declaration.clone();
+            foreign.config_digest.push_str("-changed");
+            write_json_atomic(&dir.join("instance.json"), &foreign).unwrap();
+        }
+        let result = lifecycle
+            .force_stop_after_graceful_timeout(&dir, &declaration)
+            .await;
+        assert!(result.is_err(), "unexpected bare publication {result:?}");
+        assert_eq!(fs::read(path).ok(), before);
+    }
 }
 
 #[tokio::test]
@@ -386,14 +594,7 @@ async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
     .unwrap();
     write_json_atomic(
         &instance_dir.join("pid.cache"),
-        &V3ManagedPidCache {
-            schema_version: SCHEMA_VERSION,
-            instance_id: expected.instance_id.clone(),
-            pid: 4_242_424,
-            start_nonce: "stale".to_string(),
-            started_at_epoch_ms: 1,
-            process_start_token: None,
-        },
+        &exited_test_cache(&expected, "stale"),
     )
     .unwrap();
     write_json_atomic(
@@ -489,9 +690,23 @@ fn fixture(root: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
 }
 
 fn fixture_with_port(root: &TempDir, port: u16) -> (PathBuf, PathBuf, PathBuf) {
+    fixture_with_port_selection(root, port, false)
+}
+
+fn fixture_with_port_selection(
+    root: &TempDir,
+    port: u16,
+    active: bool,
+) -> (PathBuf, PathBuf, PathBuf) {
     let config = root.path().join("config.v3.toml");
     let executable = std::env::current_exe().unwrap();
     let state = root.path().join("state");
+    let strategy = if active { "active_queue" } else { "priority" };
+    let active = if active {
+        "active_keys = {members=[{provider=\"test\",alias=\"key\"}],retries=3,on_failure=\"hold\"}"
+    } else {
+        ""
+    };
     fs::write(
         &config,
         format!(
@@ -510,7 +725,8 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_LIFECYCLE_TES
 wire_name = "test"
 capabilities = ["text"]
 [route_groups.default.pools.default]
-selection = {{ strategy = "priority" }}
+selection = {{ strategy = "{strategy}" }}
+{active}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
 "#,
             port
@@ -665,6 +881,7 @@ fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
             instance_id: published.instance_id.clone(),
             pid: residual_pid,
             start_nonce: "admin-only-residual".to_string(),
+            retained_control: None,
             started_at_epoch_ms: epoch_ms(),
             process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
         },
@@ -735,6 +952,7 @@ fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
                 instance_id: published.instance_id.clone(),
                 pid: residual_pid,
                 start_nonce: "admin-port-overlaps-business".to_string(),
+                retained_control: None,
                 started_at_epoch_ms: epoch_ms(),
                 process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
             },
@@ -752,8 +970,7 @@ fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
     // ChildGuard terminates only the processes this test spawned.
 }
 
-/// Reaping an orphan control socket only needs the business listener set to
-/// be free. An occupied optional admin listener must not block that reap.
+/// An independently verified dead generation needs only its business ports free.
 #[test]
 fn issue850e916_admin_only_occupancy_does_not_block_orphan_reap() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -776,11 +993,12 @@ fn issue850e916_admin_only_occupancy_does_not_block_orphan_reap() {
         &instance_dir,
         &declaration.instance_id,
         V3ManagedRunState::Starting,
-        Some("crash window: control record never written".to_string()),
+        Some("child exited after control publication".to_string()),
     )
     .unwrap();
     let socket_path = managed_control_socket_path(&declaration.instance_id);
-    fs::write(&socket_path, b"orphan control socket").unwrap();
+    publish_exited_test_owner(&instance_dir, &declaration);
+    drop(std::os::unix::net::UnixListener::bind(&socket_path).unwrap());
 
     reap_inactive_runtime_files(&instance_dir, &declaration)
         .expect("an occupied admin_webui port must not block reaping an orphan control socket");
@@ -906,6 +1124,7 @@ fn issue36df127_admin_exception_requires_matching_control_and_process_identity()
     fs::create_dir_all(&instance_dir).unwrap();
     let pid = std::process::id();
     let cached = V3ManagedPidCache {
+        retained_control: None,
         schema_version: SCHEMA_VERSION,
         instance_id: declaration.instance_id.clone(),
         pid,
@@ -1128,6 +1347,401 @@ fn write_finite_restart_child_fixture(root: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
+#[test]
+fn foreground_exec_failure_preserves_terminal_retry() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let (config, _, state) = fixture_with_port(&root, port);
+    let executable = write_finite_restart_child_fixture(root.path());
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
+    let lifecycle = V3ManagedLifecycle::with_state_root(config, state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let dir = lifecycle.instance_dir(&declaration.instance_id);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let error = rt
+        .block_on(lifecycle.start_foreground(&executable))
+        .unwrap_err();
+    let before: V3ManagedStatusRecord = read_json(&dir.join("status.json")).unwrap();
+    let lock = fs::File::open(dir.join("status.lock")).unwrap();
+    lock.lock().unwrap();
+    let locked = exec_foreground_start(&executable, &declaration, &lifecycle).unwrap_err();
+    // Socket, cache and control are all published before the Starting write.
+    let child_error = rt
+        .block_on(lifecycle.run_managed_child(&executable))
+        .unwrap_err();
+    let publications_closed = !managed_control_socket_path(&declaration.instance_id).exists()
+        && !dir.join("pid.cache").exists()
+        && !dir.join("control.json").exists();
+    let after: V3ManagedStatusRecord = read_json(&dir.join("status.json")).unwrap();
+    drop(lock);
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    root.close().unwrap();
+    for failure in [error, locked] {
+        assert!(
+            matches!(failure, V3LifecycleError::Io(ref e) if e.kind() == std::io::ErrorKind::PermissionDenied),
+            "{failure}"
+        );
+    }
+    assert!(matches!(
+        before.state,
+        V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+    ));
+    assert_eq!(after, before);
+    assert!(
+        publications_closed && child_error.to_string().contains("status file lock"),
+        "{child_error}"
+    );
+}
+
+#[test]
+fn forced_stop_validates_plan_before_retiring_generation() {
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(config, state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let dir = lifecycle.instance_dir(&declaration.instance_id);
+    ensure_private_dir(&dir).unwrap();
+    write_json_atomic(&dir.join("instance.json"), &declaration).unwrap();
+    publish_exited_test_owner(&dir, &declaration);
+    write_status(
+        &dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    let cache = fs::read(dir.join("pid.cache")).unwrap();
+    let control = fs::read(dir.join("control.json")).unwrap();
+    let plan_path = dir.join(RESTART_PLAN_FILE);
+    let mut plan = V3ManagedRestartPlanRecord {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        executable_path: declaration.executable_path.clone(),
+        start_nonce: "foreign".into(),
+        target_declaration: None,
+        snapshots: true,
+        snapshot_direct: false,
+        snapshot_stages: None,
+        sse_dump: false,
+    };
+    write_json_atomic(&plan_path, &plan).unwrap();
+    let owner: V3ManagedPidCache = read_json(&dir.join("pid.cache")).unwrap();
+    assert!(remove_verified_generation_plan(&dir, &owner, &declaration).is_err());
+    let mut release = ForcedRelease::default();
+    assert!(forced_stop_custody(&dir, &declaration, &release).is_err());
+    assert_eq!(
+        read_json::<V3ManagedRestartPlanRecord>(&plan_path).unwrap(),
+        plan
+    );
+    assert_eq!(fs::read(dir.join("pid.cache")).unwrap(), cache);
+    assert_eq!(fs::read(dir.join("control.json")).unwrap(), control);
+    plan.start_nonce = read_json::<V3ManagedPidCache>(&dir.join("pid.cache"))
+        .unwrap()
+        .start_nonce;
+    write_json_atomic(&plan_path, &plan).unwrap();
+    let mut unrelated = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    release
+        .dispatch(&dir, &declaration, unrelated.id(), V3LifecycleSignal::Kill)
+        .unwrap();
+    assert!(!unrelated.wait().unwrap().success());
+    assert!(release.generation.is_none());
+    assert_eq!(release.signals[0].disposition, SignalDisposition::Delivered);
+    assert!(forced_stop_custody(&dir, &declaration, &release).is_err());
+    assert_eq!(
+        read_json::<V3ManagedRestartPlanRecord>(&plan_path).unwrap(),
+        plan
+    );
+    remove_verified_generation_plan(&dir, &owner, &declaration).unwrap();
+    assert!(!plan_path.exists());
+    assert_eq!(fs::read(dir.join("pid.cache")).unwrap(), cache);
+    assert_eq!(fs::read(dir.join("control.json")).unwrap(), control);
+}
+
+#[test]
+fn forced_signal_dispatch_reports_actual_outcomes() {
+    let signal = V3LifecycleSignal::Kill;
+    for pid in [0, std::process::id()] {
+        assert_eq!(
+            signal_explicit_pid(pid, signal).unwrap().disposition,
+            SignalDisposition::Skipped
+        );
+    }
+    assert!(signal_explicit_pid(u32::MAX, signal).is_err());
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+    let outcome = signal_explicit_pid(pid, signal).unwrap();
+    assert!(!child.wait().unwrap().success());
+    assert_eq!(outcome.pid, pid);
+    assert_eq!(outcome.disposition, SignalDisposition::Delivered);
+    assert_eq!(
+        signal_explicit_pid(pid, signal).unwrap().disposition,
+        SignalDisposition::AlreadyGone
+    );
+}
+
+#[test]
+fn forced_exit_requires_positive_zombie_row() {
+    assert!(positive_zombie_row(42, b" 42 Z  \n"));
+    for row in [
+        b"".as_slice(),
+        b"41 Z",
+        b"42 S",
+        b"42 ZZZ",
+        b"42 Z extra",
+        b"42 Z\n42 Z",
+        b"42 \xff",
+    ] {
+        assert!(!positive_zombie_row(42, row));
+    }
+}
+
+#[cfg(unix)]
+struct ExitObservationChild(std::process::Child);
+
+#[cfg(unix)]
+impl ExitObservationChild {
+    fn new() -> Self {
+        Self(Command::new("/bin/sleep").arg("30").spawn().unwrap())
+    }
+
+    fn cache(&self) -> V3ManagedPidCache {
+        let token = process_start_token(self.0.id()).unwrap();
+        assert!(token.is_some(), "owned child must have a live generation");
+        V3ManagedPidCache {
+            retained_control: None,
+            schema_version: SCHEMA_VERSION,
+            instance_id: "v3-exit-observation".into(),
+            pid: self.0.id(),
+            start_nonce: "owned-child".into(),
+            started_at_epoch_ms: epoch_ms(),
+            process_start_token: token,
+        }
+    }
+
+    fn collect(&mut self) -> std::io::Result<()> {
+        if self.0.try_wait()?.is_some() {
+            return Ok(());
+        }
+        self.0.kill()?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while self.0.try_wait()?.is_none() {
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("owned child {} was not collected", self.0.id()),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ExitObservationChild {
+    fn drop(&mut self) {
+        if let Err(error) = self.collect() {
+            eprintln!("owned exit-observation child cleanup failed: {error}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn forced_exit_observes_collection_between_native_queries() {
+    let mut child = ExitObservationChild::new();
+    let cache = child.cache();
+    let mut observed = None;
+    let result = original_generation_exited_with_query(&cache, || {
+        child.collect()?;
+        let output = Command::new("/bin/ps")
+            .args(["-p", &cache.pid.to_string(), "-o", "pid=", "-o", "state="])
+            .output()?;
+        observed = Some((
+            output.status.success(),
+            output.stdout.clone(),
+            output.stderr.clone(),
+        ));
+        Ok(output)
+    });
+    let cleanup = child.collect();
+    assert!(cleanup.is_ok(), "{cleanup:?}");
+    assert_eq!(observed, Some((false, Vec::new(), Vec::new())));
+    assert!(managed_generation_has_exited(&cache).unwrap());
+    eprintln!(
+        "owned child {} collected after initial live observation; actual ps returned no row",
+        cache.pid
+    );
+    assert!(
+        result.unwrap(),
+        "the witnessed generation exited between observations"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn forced_exit_live_generation_and_query_error_stay_unproved() {
+    let mut child = ExitObservationChild::new();
+    let cache = child.cache();
+    let live = original_generation_exited_with_query(&cache, || {
+        Ok(Command::new("/bin/ps")
+            .args(["-p", &cache.pid.to_string(), "-o", "pid=", "-o", "state="])
+            .output()?)
+    });
+    let error = original_generation_exited_with_query(&cache, || {
+        Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "native query denied").into())
+    });
+    let remained_live = child.0.try_wait().unwrap().is_none();
+    let cleanup = child.collect();
+    assert!(cleanup.is_ok(), "{cleanup:?}");
+    assert!(remained_live && !live.unwrap());
+    assert!(
+        matches!(error, Err(V3LifecycleError::Io(ref error)) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    );
+}
+
+#[test]
+fn forced_stop_rejects_changed_witness() {
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(config, state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let dir = lifecycle.instance_dir(&declaration.instance_id);
+    ensure_private_dir(&dir).unwrap();
+    write_json_atomic(&dir.join("instance.json"), &declaration).unwrap();
+    publish_exited_test_owner(&dir, &declaration);
+    let mut cache: V3ManagedPidCache = read_json(&dir.join("pid.cache")).unwrap();
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    cache.pid = child.id();
+    cache.process_start_token = process_start_token(cache.pid).unwrap();
+    write_json_atomic(&dir.join("pid.cache"), &cache).unwrap();
+    write_status(
+        &dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    let mut release = ForcedRelease::default();
+    release
+        .dispatch(&dir, &declaration, cache.pid, V3LifecycleSignal::Kill)
+        .unwrap();
+    assert!(!child.wait().unwrap().success());
+    let before = fs::read(dir.join("status.json")).unwrap();
+    for (leaf, field) in [
+        ("control.json", "start_nonce"),
+        ("pid.cache", "start_nonce"),
+        ("instance.json", "config_path"),
+    ] {
+        let path = dir.join(leaf);
+        let original = fs::read(&path).unwrap();
+        let mut changed: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        changed[field] = "changed".into();
+        write_json_atomic(&path, &changed).unwrap();
+        assert!(forced_stop_custody(&dir, &declaration, &release).is_err());
+        assert_eq!(read_json::<serde_json::Value>(&path).unwrap(), changed);
+        assert_eq!(fs::read(dir.join("status.json")).unwrap(), before);
+        fs::write(path, original).unwrap();
+    }
+    assert!(matches!(
+        forced_stop_custody(&dir, &declaration, &release).unwrap(),
+        ForcedStopCustody::Ordinary(_)
+    ));
+}
+
+#[test]
+fn failed_outcome_preserves_primary_and_unverified_plan() {
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(config, state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance = lifecycle.instance_dir(&declaration.instance_id);
+    ensure_private_dir(&instance).unwrap();
+    let socket = managed_control_socket_path(&declaration.instance_id);
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let pid = std::process::id();
+    let cache = V3ManagedPidCache {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        pid,
+        start_nonce: "current".into(),
+        started_at_epoch_ms: epoch_ms(),
+        process_start_token: process_start_token(pid).unwrap(),
+        retained_control: None,
+    };
+    let control = V3ManagedControlRecord {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        start_nonce: cache.start_nonce.clone(),
+        socket_path: socket.display().to_string(),
+    };
+    write_json_atomic(&instance.join("pid.cache"), &cache).unwrap();
+    write_json_atomic(&instance.join("control.json"), &control).unwrap();
+    let mut plan = V3ManagedRestartPlanRecord {
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        start_nonce: "foreign".into(),
+        executable_path: declaration.executable_path.clone(),
+        target_declaration: None,
+        snapshots: true,
+        snapshot_direct: false,
+        snapshot_stages: None,
+        sse_dump: false,
+    };
+    let path = instance.join(RESTART_PLAN_FILE);
+    write_json_atomic(&path, &plan).unwrap();
+    let publish = || {
+        control_plane::publish_failed_outcome(
+            &instance,
+            &declaration.instance_id,
+            "primary startup failure",
+            None,
+            Some((&socket, &declaration, &cache.start_nonce)),
+            "startup",
+        )
+    };
+    publish();
+    let status: V3ManagedStatusRecord = read_json(&instance.join("status.json")).unwrap();
+    let detail = status.detail.unwrap();
+    assert_eq!(status.state, V3ManagedRunState::Failed);
+    assert!(
+        detail.starts_with("primary startup failure") && detail.contains("restart plan differs")
+    );
+    assert_eq!(
+        read_json::<V3ManagedRestartPlanRecord>(&path).unwrap(),
+        plan
+    );
+    assert_eq!(
+        read_json::<V3ManagedPidCache>(&instance.join("pid.cache")).unwrap(),
+        cache
+    );
+    assert_eq!(
+        read_json::<V3ManagedControlRecord>(&instance.join("control.json")).unwrap(),
+        control
+    );
+    assert!(socket.exists());
+    plan.start_nonce.clone_from(&cache.start_nonce);
+    write_json_atomic(&path, &plan).unwrap();
+    drop(listener);
+    publish();
+    assert!(
+        !path.exists()
+            && !socket.exists()
+            && !instance.join("control.json").exists()
+            && !instance.join("pid.cache").exists()
+    );
+}
+
+#[cfg(unix)]
 fn assert_expired_restart_budget_preserves_terminal_state(state: V3ManagedRunState) {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
@@ -1235,6 +1849,7 @@ fn restart_discovers_live_previous_owner_when_config_digest_changed() {
             instance_id: old.instance_id.clone(),
             pid: std::process::id(),
             start_nonce: "previous-owner".to_string(),
+            retained_control: None,
             started_at_epoch_ms: 1,
             process_start_token: None,
         },
@@ -1330,8 +1945,9 @@ fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
             instance_id: old.instance_id.clone(),
             pid: std::process::id(),
             start_nonce: "previous-exec-owner".to_string(),
+            retained_control: None,
             started_at_epoch_ms: 1,
-            process_start_token: None,
+            process_start_token: process_start_token(std::process::id()).unwrap(),
         },
     )
     .unwrap();
@@ -1360,16 +1976,22 @@ fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
     .unwrap();
     ensure_private_dir(&expected_dir).unwrap();
     write_json_atomic(&expected_dir.join(EXEC_RESTART_DECLARATION_FILE), &expected).unwrap();
-    let adopted_owner = adopt_exec_restart_declaration_change(
-        &state,
-        &expected_dir,
-        &expected,
-        &ExecRestartOwner {
-            instance_id: old.instance_id.clone(),
-            start_nonce: "previous-exec-owner".into(),
-        },
-    )
-    .unwrap();
+    let mut owner = ExecRestartOwner {
+        instance_id: old.instance_id.clone(),
+        start_nonce: "previous-exec-owner".into(),
+        active_key_controls: None,
+    };
+    let handoff =
+        verify_exec_front_control_handoff(&old_dir, &expected_dir, &expected, &mut owner).unwrap();
+    let successor = V3ManagedPidCache {
+        instance_id: expected.instance_id.clone(),
+        start_nonce: "successor".into(),
+        retained_control: Some(handoff.link()),
+        ..handoff.origin
+    };
+    let adopted_owner =
+        adopt_exec_restart_declaration_change(&state, &expected_dir, &expected, &owner, &successor)
+            .unwrap();
     assert_eq!(adopted_owner, old_dir);
 
     let adopted: V3ManagedInstanceDeclaration =
@@ -1464,6 +2086,7 @@ fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
             instance_id: declaration.instance_id.clone(),
             pid: 42,
             start_nonce: "active-release".to_string(),
+            retained_control: None,
             started_at_epoch_ms: 1,
             process_start_token: None,
         },
@@ -1498,6 +2121,7 @@ async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
     )
     .unwrap();
 
+    publish_exited_test_owner(&instance_dir, &declaration);
     wait_for_stopping_instance(&instance_dir, &declaration, Duration::from_millis(50))
         .await
         .expect("stale owned stop must reach the existing reap safety check");
@@ -1531,6 +2155,7 @@ async fn active_stopping_child_is_not_reaped_when_listeners_have_closed() {
             instance_id: declaration.instance_id.clone(),
             pid: std::process::id(),
             start_nonce: "active-stop".to_string(),
+            retained_control: None,
             started_at_epoch_ms: 1,
             process_start_token: None,
         },
@@ -1586,14 +2211,7 @@ fn stale_running_state_allows_release_snapshot_executable_rollover_when_control_
     .unwrap();
     write_json_atomic(
         &instance_dir.join("pid.cache"),
-        &V3ManagedPidCache {
-            schema_version: SCHEMA_VERSION,
-            instance_id: published.instance_id.clone(),
-            pid: 42,
-            start_nonce: "previous-release".to_string(),
-            started_at_epoch_ms: 1,
-            process_start_token: None,
-        },
+        &exited_test_cache(&published, "previous-release"),
     )
     .unwrap();
     let socket_path = managed_control_socket_path(&published.instance_id);
@@ -1688,6 +2306,7 @@ async fn status_finds_live_instance_after_config_content_changes() {
             pid: std::process::id(),
             start_nonce: start_nonce.clone(),
             started_at_epoch_ms: 0,
+            retained_control: None,
             process_start_token: None,
         },
     )
@@ -1800,6 +2419,7 @@ async fn status_prefers_live_drifted_instance_over_persisted_terminal_state() {
             pid: std::process::id(),
             start_nonce: start_nonce.clone(),
             started_at_epoch_ms: 0,
+            retained_control: None,
             process_start_token: None,
         },
     )
@@ -1944,18 +2564,11 @@ fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
     .unwrap();
     write_json_atomic(
         &instance_dir.join("pid.cache"),
-        &V3ManagedPidCache {
-            schema_version: SCHEMA_VERSION,
-            instance_id: published.instance_id.clone(),
-            pid: 42,
-            start_nonce: "previous-release".to_string(),
-            started_at_epoch_ms: 1,
-            process_start_token: None,
-        },
+        &exited_test_cache(&published, "previous-release"),
     )
     .unwrap();
     let socket_path = managed_control_socket_path(&published.instance_id);
-    fs::write(&socket_path, b"stale owned control socket").unwrap();
+    drop(std::os::unix::net::UnixListener::bind(&socket_path).unwrap());
     write_json_atomic(
         &instance_dir.join("control.json"),
         &V3ManagedControlRecord {
@@ -1974,13 +2587,9 @@ fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
     assert!(!socket_path.exists());
 }
 
-/// Regression for bug 6a436a6: a managed child killed between the canonical
-/// control socket bind and the `control.json` write leaves an orphan socket
-/// that every `control.json`-gated path skips, so `start` then fails forever
-/// with `IdentityMismatch: control socket already exists without a verified
-/// stopped cleanup`.
+/// A canonical socket alone carries no generation identity.
 #[test]
-fn orphan_control_socket_without_control_record_is_reaped_when_no_live_owner() {
+fn orphan_control_socket_without_independent_proof_is_preserved() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
@@ -2000,15 +2609,16 @@ fn orphan_control_socket_without_control_record_is_reaped_when_no_live_owner() {
     .unwrap();
     // The crash window: socket bound, `control.json` never written.
     let socket_path = managed_control_socket_path(&declaration.instance_id);
-    fs::write(&socket_path, b"orphan control socket").unwrap();
+    let socket = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
     assert!(!instance_dir.join("control.json").exists());
 
-    reap_inactive_runtime_files(&instance_dir, &declaration).unwrap();
-
-    assert!(
-        !socket_path.exists(),
-        "orphan control socket must be reaped"
-    );
+    assert!(matches!(
+        reap_inactive_runtime_files(&instance_dir, &declaration),
+        Err(V3LifecycleError::IdentityMismatch(_))
+    ));
+    assert!(socket_path.exists());
+    fs::remove_file(socket_path).unwrap();
+    drop(socket);
     assert!(!instance_dir.join("control.json").exists());
 }
 
@@ -2039,6 +2649,7 @@ fn orphan_control_socket_with_live_cached_pid_is_preserved() {
             instance_id: declaration.instance_id.clone(),
             pid: std::process::id(),
             start_nonce: "live-owner".to_string(),
+            retained_control: None,
             started_at_epoch_ms: 1,
             process_start_token: None,
         },
@@ -2089,6 +2700,7 @@ fn running_instance_state_rejects_release_snapshot_executable_rollover() {
             instance_id: published.instance_id.clone(),
             pid: 42,
             start_nonce: "active-release".to_string(),
+            retained_control: None,
             started_at_epoch_ms: 1,
             process_start_token: None,
         },
@@ -2192,3 +2804,193 @@ fn configured_codex_samples_authorization_survives_managed_declaration() {
 }
 
 mod residual_pids;
+
+#[tokio::test]
+async fn exited_legacy_transfer_resolves_each_pre_normalization_location() {
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let token = process_start_token(pid).unwrap().unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    for (front_moved, provider_moved) in [(false, false), (true, false), (true, true)] {
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (target, _) = lifecycle.declaration(&executable).unwrap();
+        let previous = V3ManagedInstanceDeclaration {
+            instance_id: "previous-generation".into(),
+            ..target.clone()
+        };
+        let cache = V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: previous.instance_id.clone(),
+            pid,
+            start_nonce: "old-handler".into(),
+            started_at_epoch_ms: 100,
+            process_start_token: Some(token.clone()),
+            retained_control: None,
+        };
+        let source = lifecycle.instance_dir(&previous.instance_id);
+        let destination = lifecycle.instance_dir(&target.instance_id);
+        ensure_private_dir(&source).unwrap();
+        ensure_private_dir(&destination).unwrap();
+        write_json_atomic(&source.join("instance.json"), &previous).unwrap();
+        write_json_atomic(&source.join("pid.cache"), &cache).unwrap();
+        write_status(
+            &source,
+            &previous.instance_id,
+            V3ManagedRunState::Starting,
+            None,
+        )
+        .unwrap();
+        let transfer = destination.join(exec_restart::PREVIOUS_RELEASE_RESTART_FILE);
+        write_json_atomic(&transfer, &serde_json::json!({"schema_version":SCHEMA_VERSION,"previous":previous,"pid":cache,"target":target})).unwrap();
+        let front = if front_moved { &destination } else { &source }.join(FRONT_HANDOFF_FILE);
+        let provider = if provider_moved {
+            &destination
+        } else {
+            &source
+        }
+        .join(PROVIDER_HANDOFF_FILE);
+        fs::write(&front, "[]").unwrap();
+        fs::write(&provider, "[]").unwrap();
+        let hooks_owner = br#"{"instance_id":"earlier-hooks-owner"}"#;
+        fs::write(source.join("hooks-sidecar-cleanup.json"), hooks_owner).unwrap();
+        if front_moved {
+            let parked = root.path().join("saved-transfer");
+            fs::rename(&transfer, &parked).unwrap();
+            assert!(recover_exited_front_control_handoff(&destination, &target)
+                .await
+                .is_err());
+            assert!(front.is_file() && provider.is_file());
+            fs::rename(parked, &transfer).unwrap();
+        }
+        let duplicate = if provider_moved {
+            &source
+        } else {
+            &destination
+        }
+        .join(PROVIDER_HANDOFF_FILE);
+        fs::write(&duplicate, "[]").unwrap();
+        assert!(recover_exited_front_control_handoff(&destination, &target)
+            .await
+            .is_err());
+        assert_eq!(fs::read(&front).unwrap(), b"[]");
+        assert!(transfer.is_file() && provider.is_file() && duplicate.is_file());
+        fs::remove_file(&duplicate).unwrap();
+        if provider_moved {
+            let fault = destination.join("status.lock");
+            fs::create_dir(&fault).unwrap();
+            assert!(recover_exited_front_control_handoff(&destination, &target)
+                .await
+                .is_err());
+            assert!(!source.join("pid.cache").exists() && !transfer.exists());
+            assert!(destination.join(FRONT_HANDOFF_FILE).is_file());
+            fs::remove_dir(&fault).unwrap();
+            let prior_path = source.join("instance.json");
+            let saved = fs::read(&prior_path).unwrap();
+            write_json_atomic(&prior_path, &target).unwrap();
+            assert!(recover_exited_front_control_handoff(&destination, &target)
+                .await
+                .is_err());
+            assert!(destination.join(FRONT_HANDOFF_FILE).is_file());
+            assert_eq!(
+                read_json::<V3ManagedInstanceDeclaration>(&prior_path).unwrap(),
+                target
+            );
+            fs::write(prior_path, saved).unwrap();
+        }
+        assert!(matches!(
+            recover_exited_front_control_handoff(&destination, &target)
+                .await
+                .unwrap(),
+            ExitedHandoffRecovery::Recovered
+        ));
+        assert!(!source.join("pid.cache").exists() && !transfer.exists());
+        assert_eq!(
+            fs::read(destination.join("hooks-sidecar-cleanup.json")).unwrap(),
+            hooks_owner
+        );
+        for dir in [&source, &destination] {
+            assert!(
+                !dir.join(FRONT_HANDOFF_FILE).exists() && !dir.join(PROVIDER_HANDOFF_FILE).exists()
+            );
+        }
+        assert_eq!(
+            read_json::<V3ManagedStatusRecord>(&source.join("status.json"))
+                .unwrap()
+                .state,
+            V3ManagedRunState::Stopped
+        );
+        assert_eq!(
+            read_json::<V3ManagedStatusRecord>(&destination.join("status.json"))
+                .unwrap()
+                .state,
+            V3ManagedRunState::Failed
+        );
+        root.close().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn exact_custody_recovery_requires_independent_generation_evidence() {
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture_with_port(&root, 3291);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance = lifecycle.instance_dir(&declaration.instance_id);
+    ensure_private_dir(&instance).unwrap();
+    write_json_atomic(&instance.join("instance.json"), &declaration).unwrap();
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let origin = V3ManagedPidCache {
+        retained_control: None,
+        schema_version: SCHEMA_VERSION,
+        instance_id: declaration.instance_id.clone(),
+        pid: child.id(),
+        process_start_token: process_start_token(child.id()).unwrap(),
+        start_nonce: "original".into(),
+        started_at_epoch_ms: epoch_ms(),
+    };
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let path = instance.join(FRONT_HANDOFF_FILE);
+    let cache = instance.join("pid.cache");
+    let mut outcomes = Vec::new();
+    for (present, nonce) in [
+        (true, "another-generation"),
+        (false, "original"),
+        (true, "original"),
+    ] {
+        let mut evidence = origin.clone();
+        evidence.start_nonce = nonce.into();
+        if present {
+            write_json_atomic(&cache, &evidence).unwrap();
+        } else {
+            fs::remove_file(&cache).unwrap();
+        }
+        write_json_atomic(
+            &path,
+            &ManagedFrontControlHandoff {
+                declaration: declaration.clone(),
+                origin: origin.clone(),
+                checkpoints: vec![],
+                controls: Default::default(),
+            },
+        )
+        .unwrap();
+        let result = recover_exited_front_control_handoff(&instance, &declaration).await;
+        outcomes.push((result.is_ok(), path.exists()));
+    }
+    root.close().unwrap();
+    assert_eq!(
+        outcomes,
+        [(false, true), (false, true), (true, false)],
+        "only independent complete generation evidence authorizes disposition"
+    );
+}

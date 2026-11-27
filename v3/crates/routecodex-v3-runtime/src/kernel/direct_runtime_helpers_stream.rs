@@ -1724,9 +1724,16 @@ pub(crate) fn target_exhausted_output_with_observability(
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let disposition = match &source {
+        Ok(actual) => {
+            V3ErrorHandlingCenter::provider_terminal_disposition_for_source(actual, true, witness)
+        }
+        Err(_) => witness
+            .map(V3ProviderTerminalDisposition::ExternalHttp)
+            .unwrap_or(V3ProviderTerminalDisposition::NoResponse),
+    };
     let mut output = match source {
         Ok(source) => {
-            assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
             error_output_with_observability(source, node_trace, hook_registry, observability)
         }
         Err(fault) => operator_fault_output_with_observability_and_snapshots(
@@ -1737,10 +1744,7 @@ pub(crate) fn target_exhausted_output_with_observability(
             None,
         ),
     };
-    output.terminal_disposition = Some(match witness {
-        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-        None => V3ProviderTerminalDisposition::NoResponse,
-    });
+    output.terminal_disposition = Some(disposition);
     output
 }
 
@@ -2464,6 +2468,7 @@ pub(crate) fn relay_handoff_output(
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     observability_accumulator: V3RuntimeObservabilityAccumulator,
     request_execution_control: V3RequestExecutionControl,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability: None,
@@ -2486,6 +2491,7 @@ pub(crate) fn relay_handoff_output(
         node_trace: node_trace.clone(),
         error_chain: None,
         protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
+            active_keys,
             target,
             expanded,
             request_local_excluded_candidates,
