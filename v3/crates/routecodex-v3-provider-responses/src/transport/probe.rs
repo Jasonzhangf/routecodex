@@ -61,6 +61,7 @@ impl ProviderResponsesTransport {
         let result = async {
             let response = self
                 .send_http_headers(
+                    &self.client,
                     &request_id,
                     &provider_id,
                     url,

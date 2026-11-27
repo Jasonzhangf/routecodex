@@ -191,9 +191,7 @@ async fn issue245_witness(stream: bool) {
     // This case counts upstream attempts, so the Chat Process continuation
     // must not add an extra execution.
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    DENIED_PROBE_RECOVERS.store(false, Ordering::SeqCst);
-    DENIED_PROBE_FAILURES.store(0, Ordering::SeqCst);
-    DENIED_PROBE_SUCCESSES.store(0, Ordering::SeqCst);
+    DENIED_TRIAL_RECOVERS.store(false, Ordering::SeqCst);
     let _home_guard = TestHomeGuard::new("issue245-permission-search");
     std::env::set_var(KEY_ENV, "issue245-permission-test-secret");
     let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -285,21 +283,20 @@ async fn issue245_witness(stream: bool) {
     assert_eq!(initial_deadline, now_ms + 3_600_000);
     assert!(find_entry(&pool, PROVIDER_B).is_none());
     assert!(find_entry(&pool, "hosted").is_none());
+    // The next eligible request is the recovery trial. It is a normal search
+    // request, so A receives the complete paired history and returns the same
+    // real permission error; B completes the request.
     force_probe(&client, &base).await;
-    clock.0.store(now_ms + 10_000, Ordering::SeqCst);
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let pool = cooldown_pool(&client, &base).await;
-            if DENIED_PROBE_FAILURES.load(Ordering::SeqCst) > 0
-                && find_entry(&pool, PROVIDER_A).is_some_and(|entry| entry["state"] == "blocked")
-            {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("failed probe must settle without restoring A");
+    clock.0.store(initial_deadline + 1, Ordering::SeqCst);
+    let failed_trial = search_request("ISSUE245_PERMISSION_DENIED_TRIAL", stream);
+    let failed_trial_body = successful_response(&client, &base, &failed_trial).await;
+    assert!(failed_trial_body["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["type"] == "function_call"));
+    capture(&mut receiver, PROVIDER_A).await;
+    capture(&mut receiver, PROVIDER_B).await;
 
     // The original deadline has passed, but failed probes must preserve exclusion.
     clock.0.store(initial_deadline, Ordering::SeqCst);
@@ -315,20 +312,11 @@ async fn issue245_witness(stream: bool) {
     hosted_success(&client, &base, &mut receiver).await;
 
     // Only a successful probe of the matching exact identity restores A.
-    DENIED_PROBE_RECOVERS.store(true, Ordering::SeqCst);
+    DENIED_TRIAL_RECOVERS.store(true, Ordering::SeqCst);
     force_probe(&client, &base).await;
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let pool = cooldown_pool(&client, &base).await;
-            if find_entry(&pool, PROVIDER_A).is_none() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("matching successful probe must restore A");
-    assert!(DENIED_PROBE_SUCCESSES.load(Ordering::SeqCst) > 0);
+    // The failed trial advances cadence. Move the observation clock beyond
+    // that cadence, then let the next real request verify and clear A.
+    clock.0.store(initial_deadline + 20_000, Ordering::SeqCst);
     successful_response(
         &client,
         &base,
@@ -343,7 +331,7 @@ async fn issue245_witness(stream: bool) {
     // The final complete HTTP error is projected. SSE may already have its
     // transport-only head, in which case the same error is carried by the
     // protocol error event.
-    DENIED_PROBE_RECOVERS.store(false, Ordering::SeqCst);
+    DENIED_TRIAL_RECOVERS.store(false, Ordering::SeqCst);
     let exhausted = client
         .post(format!("{base}/v1/responses"))
         .json(&search_request("ISSUE245_EXHAUST", stream))

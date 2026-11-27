@@ -205,17 +205,18 @@ pub(crate) struct ProbeCooldownRequest {
     pub auth_alias: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
+    /// Explicit consent to one potentially billable upstream diagnostic.
+    #[serde(default)]
+    pub allow_paid_diagnostic: bool,
 }
 
-/// POST /_routecodex/health/cooldown-pool/probe — force the recovery probe due now.
+/// POST /_routecodex/health/cooldown-pool/probe — make a business trial due.
 ///
-/// This only advances the existing probe schedule for the identity. The probe
-/// itself is still executed by the runtime's own probe loop through the same
-/// provider wire a scheduled probe uses, so a manual click cannot bypass the
-/// provider wire. The action moves `next_probe_at_ms` independently of
-/// `blocked_until_ms`. A successful probe can restore the identity once the
-/// cooldown has elapsed. `scheduled=false` means there is no probe state for
-/// the identity.
+/// This advances the trial cadence without changing the cooldown minimum.
+/// The next eligible business request owns the trial. The action sends no
+/// upstream request. `scheduled=false` means no trial cadence was changed.
+/// `allow_paid_diagnostic=true` instead executes one observation-only provider
+/// request, which may be billed, and leaves the trial cadence unchanged.
 pub(crate) async fn probe_cooldown(
     State(state): State<Arc<V3ListenerState>>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -233,6 +234,54 @@ pub(crate) async fn probe_cooldown(
             Json(serde_json::json!({ "error": "invalid cooldown probe request" })),
         )
             .into_response();
+    }
+    if request.allow_paid_diagnostic {
+        let (Some(auth_alias), Some(model_id)) = (
+            request
+                .auth_alias
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+            request
+                .model_id
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+        ) else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "paid diagnostic requires auth_alias and model_id",
+                })),
+            )
+                .into_response();
+        };
+        return match state
+            .provider_health
+            .runtime_health()
+            .diagnose_provider_once(
+                &state.manifest,
+                &provider_id,
+                request.interface_id.trim(),
+                auth_alias,
+                model_id,
+            )
+            .await
+        {
+            Ok(outcome) => Json(serde_json::json!({
+                "ok": true,
+                "scheduled": false,
+                "diagnostic": outcome,
+                "provider_id": provider_id,
+                "interface_id": request.interface_id,
+                "auth_alias": request.auth_alias,
+                "model_id": request.model_id,
+            }))
+            .into_response(),
+            Err(error) => (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": error })),
+            )
+                .into_response(),
+        };
     }
     let scheduled = match state
         .provider_health

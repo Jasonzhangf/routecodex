@@ -3,10 +3,14 @@ owner_feature_id: v3.protocol_conversion_field_parity
 protocol_priority: >-
   RouteCodex is a transparent proxy. Maximize successful pass-through: field or
   protocol-shape validation selects mappings and reports diagnostics, but never
-  independently rejects a client request or provider response. Unmapped business
-  values retain their original opaque value and paired inverse association.
-  Historical reject/fail-fast gap descriptions below record implementation defects,
-  not permission for local business-shape rejection.
+  independently rejects a client request or provider response. A complete valid
+  business field with no target allowlist mapping is never forwarded opaquely: it
+  is warned, recorded as scoped local diagnostic evidence, and omitted from provider
+  wire while projection of the mapped remainder continues. Allowlist absence alone
+  does not reselect a provider or abort the request. Malformed registered values,
+  invalid pairings, control leaks, source-schema invalidity, capability failures,
+  and genuinely unrepresentable boundaries retain their distinct owners and
+  outcomes.
 audit_truth_contract:
   canonical_text_doc: docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
   request_field_projection_doc: docs/design/v3-protocol-request-field-projection.md
@@ -29,8 +33,9 @@ audit_truth_contract:
     covered: Runtime/test owner currently implements the audited semantic for the
       named path.
     covered_but_target_dependent: Runtime implements the field only where the target
-      protocol legally supports it; otherwise the original business value is
-      forwarded opaquely and retained for client inverse projection.
+      protocol legally supports it. A complete business field without a target
+      allowlist mapping is warned, recorded as scoped local diagnostic evidence,
+      omitted from provider wire, and does not block the mapped remainder.
     runtime_conformance_pending: Design and owner are fixed, but positive/negative
       runtime and live evidence have not passed.
     partial: Some runtime path or direction is covered, but cross-protocol or
@@ -53,9 +58,13 @@ audit_truth_contract:
       validated field rename or value intersection.
     mapped_compatible_registered: Target uses a registered wrapper with an explicit
       semantic delta and a required reverse projection.
-    unsupported: No exact or registered compatible semantic projection is known;
-      preserve the original value opaquely and its paired inverse association.
-      Report the mapping gap without rejecting the business payload locally.
+    unsupported: No target allowlist mapping exists for a complete valid business
+      field. It is never forwarded opaquely. Warn, record scoped local diagnostic
+      evidence, omit only that field from provider wire, and continue with the mapped
+      remainder. Allowlist absence alone does not reselect a provider, synthesize a
+      status, or abort the request. Malformed registered values, invalid pairings,
+      control leaks, source-schema invalidity, capability failures, and genuinely
+      unrepresentable boundaries retain their distinct owners and outcomes.
   audited_status_counts:
     covered: 162
     covered_but_target_dependent: 0
@@ -77,8 +86,9 @@ audit_truth_contract:
         pairs; Anthropic metadata declares only user_id, so only exact
         client_metadata.user_id may map to provider metadata. Registered Codex
         client-local keys may be consumed before provider wire as request-local
-        context; unknown business keys retain their original opaque value and
-        inverse association instead of failing local shape validation.
+        context; unknown complete business keys are warned, recorded as scoped local
+        diagnostic evidence, omitted from provider wire, and do not block the mapped
+        remainder or reselect a provider.
       required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
       closeout_status: runtime_conformance_pending
       closeout_rule: Keep target-dependent provider-wire behavior explicit in the
@@ -1970,7 +1980,10 @@ chat_semantic_translation_groups:
     current_impl: partial
     gap: Runtime must project Anthropic output_config.effort instead of silently
       allowing reasoning_effort, validate the concrete target value domain, and
-      preserve non-intersection values opaquely with their inverse association.
+      use the registered target-domain failure for a value outside that domain.
+      A complete field with no target allowlist mapping follows the nonblocking
+      warning, diagnostic, omission, and mapped-remainder rule at the contract
+      level. Opaque forwarding is not an accepted projection.
       No effort-to-budget approximation is permitted.
   - group_id: reasoning.request_summary_policy
     standard_chat_field: request.reasoning_summary_policy
@@ -2004,8 +2017,10 @@ chat_semantic_translation_groups:
           auto/concise/detailed values select the registered static
           compatibility projection that preserves complete native thinking as
           Responses reasoning.summary; the proxy does not reject, truncate, or
-          silently discard reasoning. Unrecognized values remain opaque; local
-          shape validation does not fail the request before provider send.
+          silently discard reasoning. An unrecognized complete policy value is
+          warned, recorded as scoped local diagnostic evidence, and omitted from
+          provider wire while the mapped remainder continues; malformed registered
+          values retain their separate validation outcome.
       gemini:
         request_fields: []
         response_fields: []
@@ -2015,7 +2030,8 @@ chat_semantic_translation_groups:
     current_impl: partial
     gap: Responses round-trips the policy. OpenAI Chat uses the registered static
       effort compatibility projection; Gemini has no equivalent request policy
-      and retains unmatched values opaquely. Anthropic consumes known values through the registered
+      and warns, diagnoses, and omits an unmatched complete policy while continuing
+      the mapped remainder. Anthropic consumes known values through the registered
       static compatibility projection with no provider-wire field; complete
       native thinking is projected as Responses reasoning.summary. A target
       response reasoning field does not authorize reconstructing the source
@@ -2055,7 +2071,8 @@ chat_semantic_translation_groups:
     current_impl: extension_declared
     gap: Responses round-trips the policy. OpenAI Chat consumes valid
       source-roundtrip-only values before wire with no provider field; Anthropic
-      and Gemini must report request.reasoning_context_policy as unmapped.
+      and Gemini warn, diagnose, and omit request.reasoning_context_policy as an
+      unmatched complete policy while the mapped remainder continues.
   - group_id: reasoning.request_mode
     standard_chat_field: request.reasoning_mode
     chat_fields:
@@ -2083,8 +2100,9 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_mode
     current_impl: extension_declared
-    gap: Source-roundtrip only. Non-Responses outbound must report
-      request.reasoning_mode as unmapped.
+    gap: Source-roundtrip only. Non-Responses outbound warns, diagnoses, and omits
+      request.reasoning_mode as an unmatched complete field while the mapped
+      remainder continues.
   - group_id: reasoning.request_include_thoughts
     standard_chat_field: request.reasoning_include_thoughts
     chat_fields:
@@ -2114,8 +2132,9 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_include_thoughts
     current_impl: partial
-    gap: Gemini source-roundtrip only; non-Gemini outbound must report
-      request.reasoning_include_thoughts as unmapped.
+    gap: Gemini source-roundtrip only; non-Gemini outbound warns, diagnoses, and
+      omits request.reasoning_include_thoughts as an unmatched complete field while
+      the mapped remainder continues.
   - group_id: reasoning.request_display_policy
     standard_chat_field: request.reasoning_display_policy
     chat_fields:
@@ -2142,8 +2161,9 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_display_policy
     current_impl: extension_declared
-    gap: Anthropic source-roundtrip only; other targets must report
-      request.reasoning_display_policy as unmapped.
+    gap: Anthropic source-roundtrip only; other targets warn, diagnose, and omit
+      request.reasoning_display_policy as an unmatched complete field while the
+      mapped remainder continues.
   - group_id: reasoning.request_thinking_mode
     standard_chat_field: request.reasoning_thinking_mode
     chat_fields:
@@ -2171,8 +2191,9 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_thinking_mode
     current_impl: extension_declared
-    gap: Anthropic source-roundtrip only; other targets must report
-      request.reasoning_thinking_mode as unmapped.
+    gap: Anthropic source-roundtrip only; other targets warn, diagnose, and omit
+      request.reasoning_thinking_mode as an unmatched complete field while the
+      mapped remainder continues.
   - group_id: reasoning.request_budget_tokens
     standard_chat_field: request.reasoning_budget_tokens
     chat_fields:
@@ -2202,7 +2223,8 @@ chat_semantic_translation_groups:
       - request.reasoning_budget_tokens
     current_impl: partial
     gap: Anthropic/Gemini conditional-exact projection needs target constraint
-      validation; OpenAI targets must report the field as unmapped.
+      validation; OpenAI targets warn, diagnose, and omit the unmatched complete
+      budget field while the mapped remainder continues.
   - group_id: sampling.temperature
     standard_chat_field: request.temperature
     chat_fields:
@@ -2560,8 +2582,9 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, diagnosed, and omitted while the mapped
+          remainder continues. Malformed and unrepresentable cases keep their owners.
       gemini:
         request_fields:
           - request.store
@@ -2593,8 +2616,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2628,8 +2653,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2663,8 +2690,10 @@ chat_semantic_translation_groups:
         request_fields:
           - request.output_config.format.schema
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.generationConfig.responseSchema
@@ -2697,8 +2726,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2727,8 +2758,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.generationConfig.responseLogprobs
@@ -2759,8 +2792,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.generationConfig.logprobs
@@ -2791,8 +2826,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.generationConfig.frequencyPenalty
@@ -2823,8 +2860,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.generationConfig.presencePenalty
@@ -2855,8 +2894,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2885,8 +2926,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2915,8 +2958,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2944,8 +2989,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -2973,8 +3020,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -3005,8 +3054,10 @@ chat_semantic_translation_groups:
         request_fields:
           - request.messages[].content[].type
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.contents[].parts[].type
@@ -3036,8 +3087,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -3067,8 +3120,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.safetySettings[].category
@@ -3100,8 +3155,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields: []
         response_fields: []
@@ -3132,8 +3189,10 @@ chat_semantic_translation_groups:
         request_fields:
           - request.service_tier
         response_fields: []
-        transform: Anthropic has no direct equivalent unless listed here; unsupported
-          target mappings must fail fast or remain explicit extension semantics.
+        transform: Anthropic has no direct equivalent unless listed here; a complete
+          unmatched business field is warned, recorded as scoped local diagnostic
+          evidence, omitted from provider wire, and leaves the mapped remainder
+          running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.serviceTier
@@ -3402,8 +3461,10 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic Messages has no direct seed field in this inventory; target
-          mapping must fail fast or stay unsupported.
+        transform: Anthropic Messages has no direct seed field in this inventory;
+          a complete unmatched seed field is warned, recorded as scoped local
+          diagnostic evidence, omitted from provider wire, and leaves the mapped
+          remainder running. Malformed and unrepresentable cases retain their owners.
       gemini:
         request_fields:
           - request.generationConfig.seed
@@ -6217,9 +6278,10 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: Responses round-trips the policy; OpenAI Chat uses the registered static
-        effort compatibility projection; Gemini retains unmatched values opaquely; Anthropic uses the
-        registered static full-native-thinking compatibility projection with no
-        provider-wire field.
+        effort compatibility projection; Gemini warns, diagnoses, and omits the
+        unmatched complete policy while the mapped remainder continues; Anthropic
+        uses the registered static full-native-thinking compatibility projection
+        with no provider-wire field.
       equivalent_fields: &a1
         responses:
           - request.reasoning.summary
@@ -6239,7 +6301,8 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: Responses context policy is source-roundtrip only; OpenAI Chat consumes
-        known values before wire, Anthropic and Gemini retain unmatched values opaquely, and the
+        known values before wire; Anthropic and Gemini warn, diagnose, and omit an
+        unmatched complete policy while continuing the mapped remainder, and the
         semantic stays separate from reasoning mode.
       equivalent_fields: &a2
         responses:
@@ -9864,8 +9927,8 @@ canonical_extension_registry:
     source_fields: *a1
     projection_rule: Responses source-roundtrip; OpenAI Chat statically projects
       auto/concise/detailed to reasoning_effort medium/low/high and merges the
-      higher explicit effort; Gemini must report this semantic path as unmapped
-      before provider send; Anthropic uses the registered static
+      higher explicit effort; Gemini warns, diagnoses, and omits this unmatched
+      complete semantic path while the mapped remainder continues; Anthropic uses the registered static
       full-native-thinking compatibility projection and emits no provider-wire
       field.
   - field: request.reasoning_context_policy
@@ -9876,8 +9939,9 @@ canonical_extension_registry:
     current_impl: extension_declared
     source_fields: *a2
     projection_rule: Responses context source-roundtrip only; OpenAI Chat consumes
-      valid values before wire with no provider field, Anthropic and Gemini
-      report unmapped, and mode is a separate registered extension.
+      valid values before wire with no provider field, Anthropic and Gemini warn,
+      diagnose, and omit the unmatched complete policy while the mapped remainder
+      continues, and mode is a separate registered extension.
   - field: request.reasoning_include_thoughts
     semantic_id: request.reasoning_include_thoughts
     direction: request
@@ -9885,8 +9949,8 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: partial
     source_fields: *a3
-    projection_rule: Gemini source-roundtrip only; non-Gemini targets must report
-      this semantic path as unmapped.
+    projection_rule: Gemini source-roundtrip only; non-Gemini targets warn, diagnose,
+      and omit this unmatched complete semantic path while the mapped remainder continues.
   - field: request.reasoning_budget_tokens
     semantic_id: request.reasoning_budget_tokens
     direction: request
@@ -9895,7 +9959,8 @@ canonical_extension_registry:
     current_impl: partial
     source_fields: *a4
     projection_rule: Conditional-exact Anthropic/Gemini projection after target
-      validation; OpenAI targets must report unmapped.
+      validation; OpenAI targets warn, diagnose, and omit the unmatched complete
+      field while the mapped remainder continues.
   - field: request.reasoning_mode
     semantic_id: request.reasoning_mode
     direction: request
@@ -11361,10 +11426,11 @@ outbound_projection_contract:
     transformed: Source field is emitted through an adjacent codec shape conversion.
     consumed_by_transform: Source field is read only to produce another emitted
       target field and must not be forwarded raw.
-    target_unsupported: Source field has no registered equivalent in the target
-      protocol; forward the original business value opaquely to the provider and
-      retain its source path and inverse association. The provider decides whether
-      it accepts the value; local shape validation does not reject the request.
+    target_unsupported: Complete business field has no target allowlist mapping;
+      warn and record scoped local diagnostic evidence when available, omit the
+      field from provider wire, and continue with the mapped remainder. This does
+      not include malformed registered values, invalid pairings, control leaks,
+      source-schema invalidity, capability failures, or unrepresentable boundaries.
     control_forbidden: Actual RouteCodex-owned typed control values must remain
       outside business payload at their producing owner. ControlFieldLeak diagnoses
       a proven writer leak, not a business key spelling. Same-name client fields,
@@ -11377,16 +11443,16 @@ outbound_projection_contract:
     consumed_by_transform: mapped_compatible_registered only when a named
       target-default or compatibility contract records the consumed source
       value, semantic delta, and tests; otherwise unsupported.
-    target_unsupported: opaque_original_value_forwarded_with_inverse_association
+    target_unsupported: complete_unmatched_business_field_warn_diagnose_omit_continue
     control_forbidden: outside_projection_classes_control_field_leak
   fail_fast_errors:
-    unmapped: no_local_business_shape_rejection
+    unmapped: no_local_abort_or_reselection_for_complete_unmatched_business_field
     control: ControlFieldLeak
   forbidden_behaviors:
     - recursive automatic strip
     - private `_` key deletion
     - unknown source field ignore
-    - silent drop of unmapped business fields
+    - treating malformed registered values or independent protocol failures as unmatched fields
   initial_rows:
     - source_protocol: responses
       target_protocol: openai_chat
@@ -11400,6 +11466,7 @@ outbound_projection_contract:
         - request.prompt_cache_retention
         - request.service_tier
         - request.truncation
+      rule: complete_fields_without_a_target_allowlist_mapping_are_warned_and_omitted_non_blockingly
     - source_protocol: responses
       target_protocol: openai_chat
       status: transformed
@@ -11431,6 +11498,10 @@ outbound_projection_contract:
         - request.reasoning.summary[auto|concise|detailed]
         - request.client_metadata[unknown_keys]
         - request.tools[].type[web_search|web_search_preview].search_content_types[image]
+      rule: complete_business_fields_without_a_target_allowlist_mapping_are_warned_and_omitted_non_blockingly
+      separate_failures:
+        - selected_target_lacks_web_search_capability: capability_failure_keeps_its_existing_explicit_failure
+        - malformed_web_search_declaration_or_selected_option_shape: malformed_registered_value_keeps_its_existing_explicit_failure
     - source_protocol: openai_chat
       target_protocol: responses
       status: target_unsupported
@@ -11441,6 +11512,7 @@ outbound_projection_contract:
         - request.prediction
         - request.prompt_cache_options.*
         - request.prompt_cache_retention
+      rule: complete_fields_without_a_target_allowlist_mapping_are_warned_and_omitted_non_blockingly
     - source_protocol: openai_chat
       target_protocol: responses
       status: transformed
@@ -11457,6 +11529,7 @@ outbound_projection_contract:
         - request.output_config.format
         - request.cache_control
         - request.user_profile_id
+      rule: only_complete_business_fields_without_a_target_allowlist_mapping_are_unmatched
     - source_protocol: responses
       target_protocol: anthropic
       status: transformed
@@ -11486,12 +11559,14 @@ outbound_projection_contract:
       status: target_unsupported
       fields:
         - request.reasoning.effort[none|minimal]
-        - request.reasoning.context
-        - request.reasoning.mode
         - request.client_metadata[unknown_keys]
-        - request.prompt_cache_key[malformed]
         - request.store[true]
         - request.text.format.strict=false
+      rule: only_complete_business_fields_without_a_target_allowlist_mapping_are_unmatched
+      separate_failures:
+        - request.prompt_cache_key[malformed]: malformed_registered_value_keeps_existing_validation_failure
+        - request.reasoning.context: source_roundtrip_only_unmapped_policy_keeps_existing_owner
+        - request.reasoning.mode: source_roundtrip_only_unmapped_policy_keeps_existing_owner
     - source_protocol: gemini
       target_protocol: any_cross_protocol_outbound
       status: target_unsupported

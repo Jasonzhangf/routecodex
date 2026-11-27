@@ -92,6 +92,7 @@ pub struct V3ResponsesProtocolDirectHandoff {
 /// or Direct handoff. Grouped so the call sites stay compact.
 #[derive(Clone, Default)]
 pub struct V3ResponsesRelayRuntimeSeeds {
+    pub request_purpose: Option<crate::nodes::V3RequestPurpose>,
     /// Actual client identity headers for this request. Provider-declared
     /// headers retain precedence when the transport request merges them.
     pub client_identity_headers: Vec<(String, String)>,
@@ -101,6 +102,9 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     pub image_history: Option<crate::V3ImageHistoryView>,
     pub request_local_busy_candidates: BTreeSet<String>,
+    /// Listener-owned selection control. This is separate from Provider health
+    /// and is never serialized with request or response payloads.
+    pub active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -386,6 +390,9 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
     pub(crate) selected_observability: &'state V3RuntimeObservability,
     pub(crate) trace: &'state mut Vec<&'static str>,
+    pub(crate) active_keys: Option<&'state routecodex_v3_target::V3ActiveKeySelectionState>,
+    pub(crate) active_episode: Option<&'state mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    pub(crate) active_attempt_dispatched: bool,
 }
 
 impl V3RuntimeStreamObservation {

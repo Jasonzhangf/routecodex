@@ -6,10 +6,10 @@ use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
-    classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
-    provider_protocol_compat_id, V3HubEntryProtocol, V3HubProviderWireProtocol,
-    V3HubReqTarget06Resolved, V3HubTransportIntent, V3ProviderCompatError,
-    V3ProviderCompatProfileId,
+    classify_v3_provider_compat_error,
+    encode_v3_responses_semantic_as_anthropic_request_with_drops, provider_protocol_compat_id,
+    V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubReqTarget06Resolved, V3HubTransportIntent,
+    V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use crate::selected_provider_model_binding::{
@@ -152,14 +152,17 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request(
             payload
         }
         V3HubProviderWireProtocol::Anthropic => {
-            let (source, anthropic_drops) =
+            let (source, mut anthropic_drops) =
                 build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
                     governed_payload,
                     entry_protocol,
                 )?;
+            let (payload, semantic_drops) =
+                encode_v3_responses_semantic_as_anthropic_request_with_drops(source)
+                    .map_err(|error| error.to_string())?;
+            anthropic_drops.extend(semantic_drops);
             drops.extend(anthropic_drops);
-            encode_v3_responses_semantic_as_anthropic_request(source)
-                .map_err(|error| error.to_string())?
+            payload
         }
         V3HubProviderWireProtocol::Gemini => {
             let (payload, gemini_drops) =

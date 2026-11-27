@@ -58,7 +58,7 @@ async fn protocol_admission_returns_immediately_when_all_candidates_unavailable(
     assert!(failure.recovery_candidates.is_some());
     let result = tokio::time::timeout(
         std::time::Duration::from_millis(100),
-        plan_v3_responses_protocol_execution_with_recovery(&manifest, raw, health, now, None),
+        plan_v3_responses_protocol_execution_with_recovery(&manifest, raw, health, now, None, None),
     )
     .await;
     assert!(

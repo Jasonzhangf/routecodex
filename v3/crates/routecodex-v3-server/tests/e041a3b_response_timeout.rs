@@ -933,11 +933,16 @@ async fn expired_request_never_dispatches_or_cools_backup_candidate() {
         .send()
         .await
         .unwrap();
-    assert!(response.text().await.unwrap().contains("sibling-success"));
+    // One failed attempt is below the real cooldown threshold. A fresh
+    // request selects the same eligible identity and reaches its own timeout;
+    // it does not inherit a synthetic pre-cool hold from the earlier request.
+    assert!(
+        response.text().await.is_err(),
+        "the repeated incomplete attempt must break transport"
+    );
     assert_eq!(
         entry.captures.recv().await.unwrap()["model"],
-        "wire-recover",
-        "held identity must route the next request to the healthy backup"
+        "wire-e041a3b"
     );
     assert!(entry.captures.try_recv().is_err());
     let response = reqwest::Client::new()
@@ -947,6 +952,10 @@ async fn expired_request_never_dispatches_or_cools_backup_candidate() {
         .await
         .unwrap();
     assert!(response.text().await.unwrap().contains("sibling-success"));
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover"
+    );
     eprintln!("e041a3b-deadline backup-dispatched=false cooldown={pool}");
     entry.stop().await;
 }

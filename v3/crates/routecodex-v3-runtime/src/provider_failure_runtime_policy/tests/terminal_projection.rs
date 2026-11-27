@@ -14,6 +14,7 @@ async fn transient_terminal_projection_releases_action_admission() {
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(
@@ -116,6 +117,7 @@ targets = [
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
@@ -216,6 +218,7 @@ targets = [
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
         manifest: &manifest,
         captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")

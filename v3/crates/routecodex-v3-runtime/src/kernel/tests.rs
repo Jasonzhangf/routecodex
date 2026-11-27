@@ -1,5 +1,83 @@
 include!("../../tests/support/kernel_unit.rs");
 
+#[tokio::test]
+async fn direct_ordinary_429_streak_uses_the_failure_observation_time() {
+    let manifest = provider_concurrency_two_key_then_other_provider_manifest(
+        "observed_429",
+        "observed_429_spare",
+        80,
+    );
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "observe-429".into(),
+        "observe-429-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let now = v3_direct_selection_now_ms(&health).unwrap();
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), now);
+    let selected = plan.decision.target;
+    let source = crate::shared::direct_external_error(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "rate_limit_error",
+        "rate limited",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("rate_limit_error".into()),
+            provider_id: Some(selected.candidate.provider_id.clone()),
+            upstream_request_id: None,
+            message: Some("rate limited".into()),
+        },
+    )
+    .unwrap();
+    for offset in 0..9 {
+        record_v3_direct_provider_failure_record(
+            &health,
+            &scope,
+            &selected,
+            &source,
+            now - 125_000 + offset * 1_000,
+        )
+        .unwrap();
+    }
+    let availability = health.session_bound_availability(&scope);
+    let result = run_v3_direct_provider_failure_policy(
+        &V3DirectProviderFailurePolicyContext {
+            failure_session_scope: &scope,
+            provider_health: &health,
+            recovery_control: None,
+            availability: &availability,
+            expanded: Some(&plan.expanded),
+            provider_pinned: false,
+        },
+        &selected,
+        source,
+        429,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut BTreeSet::new(),
+            same_candidate_retries: &mut BTreeMap::new(),
+            trace: &mut Vec::new(),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        result.decision.action,
+        V3Error05ExecutionAction::Reselect
+    ));
+    assert!(
+        health.store().cooldown_entries(now).is_empty(),
+        "the tenth 429 observed after 120 seconds must remain routable"
+    );
+}
+
 async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
     source_stage: &'static str,
     code: &'static str,
@@ -31,6 +109,8 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         unavailable_candidates: Vec::new(),
         attempts: 1,
         default_floor_protected: false,
+        occurrence: plan.expanded.candidates[0].occurrences[0].clone(),
+        active_selection: None,
     };
     let selected_key = candidate_key(&selected.candidate);
     let sibling_key = candidate_key(&plan.expanded.candidates[1]);
@@ -69,10 +149,10 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         &V3DirectProviderFailurePolicyContext {
             failure_session_scope: &scope,
             provider_health: &health,
+            recovery_control: None,
             availability: &availability,
             expanded: Some(&plan.expanded),
             provider_pinned: false,
-            now_epoch_ms: 0,
         },
         &selected,
         source,
@@ -82,6 +162,7 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
             same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("first-byte timeout policy");
@@ -164,6 +245,8 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         unavailable_candidates: vec![],
         attempts: 1,
         default_floor_protected: false,
+        occurrence: plan.expanded.candidates[0].occurrences[0].clone(),
+        active_selection: None,
     };
     let key = candidate_key(&selected.candidate);
     let before: Vec<_> = plan
@@ -186,6 +269,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     let mut last = None;
     let result = run_v3_relay_provider_failure_policy_with_response_source(
         &V3RelayProviderFailurePolicyContext {
+            recovery_control: None,
             manifest: &manifest,
             captured_target_09: Some(&plan.expanded),
             failure_session_scope: scope.clone(),
@@ -270,6 +354,8 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         unavailable_candidates: vec![],
         attempts: 1,
         default_floor_protected: false,
+        occurrence: plan.expanded.candidates[0].occurrences[0].clone(),
+        active_selection: None,
     };
     let availability = health.session_bound_availability(&scope);
     let before: Vec<_> = plan
@@ -298,10 +384,10 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         &V3DirectProviderFailurePolicyContext {
             failure_session_scope: &scope,
             provider_health: &health,
+            recovery_control: None,
             availability: &availability,
             expanded: Some(&plan.expanded),
             provider_pinned: false,
-            now_epoch_ms: 0,
         },
         &selected,
         source.clone(),
@@ -311,6 +397,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
             same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("response processing recovery");

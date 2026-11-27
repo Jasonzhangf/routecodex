@@ -29,9 +29,9 @@ pub use health::{
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
 };
 pub use key_health::{
-    V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
-    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
-    V3ProviderRateLimitProbeDisposition, V3ProviderSchedulingProjection,
+    V3ProviderBusinessRecoveryAcquisition, V3ProviderHealthProbePermit,
+    V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore, V3ProviderPrecoolObservationOutcome,
+    V3ProviderProbePurpose, V3ProviderRateLimitProbeDisposition, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
 };
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
@@ -57,7 +57,7 @@ pub use transport::{
     discover_v3_provider_models, is_v3_anthropic_provider_request_header_name,
     ProviderResponsesTransport, ReqwestResponsesTransport, ResponsesTransport,
     V3ProviderCancellation, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
-    V3Transport13ResponsesRequest,
+    V3Transport13ResponsesRequest, V3_RESPONSES_CLIENT_IDENTITY_HEADER_NAMES,
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptControl,

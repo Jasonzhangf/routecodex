@@ -1,0 +1,92 @@
+{
+  "id": "v3.active_key_selection_control",
+  "version": "1",
+  "inputs": [{"id":"Admin control command","schema":"Object","schema_ref":"v3.admin.active_key_control_command"}],
+  "output_contracts": [{"id":"Selection control result","schema":"Object","schema_ref":"v3.target.active_key_control_result"}],
+  "nodes": [
+    {
+      "id":"Resolve listener endpoint",
+      "operator":"routecodex.v3.admin.forward_selection_control",
+      "operator_version":"1",
+      "inputs":["Admin control command"],
+      "output":{"id":"Resolved control command","schema":"Object","schema_ref":"v3.server.active_key_control_address"},
+      "input_selector":{"include":[],"exclude":[],"predicate":null},
+      "output_selector":{"include":[],"exclude":[],"predicate":null},
+      "iterator":"Whole",
+      "resources":{"reads":["v3.server.active_key_control_endpoint_record"],"writes":[]}
+    },
+    {
+      "id":"Forward scoped HTTP control",
+      "operator":"routecodex.v3.admin.forward_selection_control",
+      "operator_version":"1",
+      "inputs":["Resolved control command"],
+      "output":{"id":"Local listener command","schema":"Object","schema_ref":"v3.server.active_key_local_control_command"},
+      "input_selector":{"include":[],"exclude":[],"predicate":null},
+      "output_selector":{"include":[],"exclude":[],"predicate":null},
+      "iterator":"Whole",
+      "resources":{"reads":[],"writes":[]}
+    },
+    {
+      "id":"Authorize and dispatch control",
+      "operator":"routecodex.v3.server.active_keys_control_router",
+      "operator_version":"1",
+      "inputs":["Local listener command"],
+      "output":{"id":"Scoped selection action","schema":"Object","schema_ref":"v3.target.active_key_scope_validated"},
+      "input_selector":{"include":[],"exclude":[],"predicate":null},
+      "output_selector":{"include":[],"exclude":[],"predicate":null},
+      "iterator":"Whole",
+      "resources":{"reads":[],"writes":[]}
+    },
+    {
+      "id":"Read queue status",
+      "operator":"routecodex.v3.target.V3ActiveKeySelectionState::snapshot",
+      "operator_version":"1",
+      "inputs":["Scoped selection action"],
+      "output":{"id":"Status result","schema":"Object","schema_ref":"v3.target.active_key_state_snapshot"},
+      "input_selector":{"include":[],"exclude":[],"predicate":null},
+      "output_selector":{"include":[],"exclude":[],"predicate":null},
+      "iterator":"Whole",
+      "resources":{"reads":["v3.target.active_key_state","v3.target.active_key_policy"],"writes":[]}
+    },
+    {
+      "id":"Release and persist held set",
+      "operator":"routecodex.v3.target.V3ActiveKeySelectionState::release",
+      "operator_version":"1",
+      "inputs":["Scoped selection action"],
+      "output":{"id":"Release result","schema":"Object","schema_ref":"v3.target.active_key_state_updated"},
+      "input_selector":{"include":[],"exclude":[],"predicate":null},
+      "output_selector":{"include":[],"exclude":[],"predicate":null},
+      "iterator":"Whole",
+      "resources":{"reads":["v3.target.active_key_state","v3.target.active_key_policy"],"writes":["v3.target.active_key_state"]}
+    },
+    {
+      "id":"Return control response",
+      "operator":"routecodex.v3.server.json_response",
+      "operator_version":"1",
+      "inputs":["Scoped selection action","Status result","Release result"],
+      "output":{"id":"Selection control result","schema":"Object","schema_ref":"v3.target.active_key_control_result"},
+      "input_selector":{"include":[],"exclude":[],"predicate":null},
+      "output_selector":{"include":[],"exclude":[],"predicate":null},
+      "iterator":"Whole",
+      "resources":{"reads":[],"writes":[]}
+    }
+  ],
+  "edges":[
+    {"from":"Resolve listener endpoint","to":"Forward scoped HTTP control","arc_id":"Resolved control command"},
+    {"from":"Forward scoped HTTP control","to":"Authorize and dispatch control","arc_id":"Local listener command"},
+    {"from":"Authorize and dispatch control","to":"Read queue status","arc_id":"Scoped selection action"},
+    {"from":"Authorize and dispatch control","to":"Release and persist held set","arc_id":"Scoped selection action"},
+    {"from":"Authorize and dispatch control","to":"Return control response","arc_id":"Scoped selection action"},
+    {"from":"Read queue status","to":"Return control response","arc_id":"Status result"},
+    {"from":"Release and persist held set","to":"Return control response","arc_id":"Release result"}
+  ],
+  "outputs":["Selection control result"],
+  "semantic_contract":{
+    "fresh_recovery":"After an exited adoption, Lifecycle keeps the verified target front through predecessor and target closeout. Only exact Server custody authorizes endpoint disposition. Legacy front checkpoints carry no endpoint custody.",
+    "scope":"Listener, routing group, pool and full provider/interface/model/key identity define selection state. Queue release never changes Provider health.",
+    "branches":"GET status snapshots selection state; POST release validates membership, removes hold if present and persists the held set. Idempotent release also retries a previous persistence error. Failures remain explicit control responses.",
+    "authorization":"Server handlers authorize the actual loopback peer and enforce exact listener/group/pool membership. Listener-local synchronous lifetime access encloses snapshot or release after body parsing. Revoked controls return an explicit failure at the same result boundary without entering Target.",
+    "transport":"Admin asynchronously acquires the shared namespace lock under a fixed deadline, reads the canonical Server-owned endpoint record off the async business worker, then releases it before HTTP. Acquisition expiry returns explicit control failure through the same result boundary and leaves no latent waiter. Specific loopback and wildcard binds use the same listener family; non-loopback business binds use the narrow loopback-only companion.",
+    "lifecycle":"Authenticated ReleasePorts accepts declared ports and exact retained cleanup ports. Server revokes selected controls before stopping accepts. Accepted business and siblings remain independent. Borrowed exec stages exact custody in the front artifact. Publication writes alternatives before mutation and settles from the locked leaf after an error. Exact removal, absence and confirmed foreign replacement resolve custody; conflict remains visible. Malformed or unreadable leaves and contention retain responsibility. Shutdown and consuming exec transfer pending exact records. Failed adoption resolves the predecessor transition before endpoint retirement. Start and restart verify exited generation custody. Scoped forced stop reports retained controls and keeps the generation proof for fresh recovery. Drop tries once. Control discovery uses the declared config independently of Admin."
+  }
+}

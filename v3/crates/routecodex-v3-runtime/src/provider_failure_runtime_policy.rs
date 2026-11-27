@@ -22,8 +22,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
-    V3StickySelectionScope, V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected,
-    V3TargetCandidate, V3TargetExhaustion, V3TargetInterpreter,
+    V3ActiveKeySelectionContext, V3StickySelectionScope, V3Target09CandidateSetExpanded,
+    V3Target10ConcreteProviderSelected, V3TargetCandidate, V3TargetExhaustion, V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::{V3Router07OpaqueTargetHitOnce, V3VirtualRouter};
 use serde_json::Value;
@@ -444,6 +444,7 @@ pub(crate) struct V3RelayProviderFailurePolicyEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct V3RelayProviderFailurePolicyResult {
+    pub(crate) business_trial_failed: bool,
     pub(crate) decision: V3Error05ExecutionDecision,
     pub(crate) retry_selected: Option<Box<V3Target10ConcreteProviderSelected>>,
     pub(crate) terminal_projection: Option<V3Error06ClientProjected>,
@@ -456,6 +457,7 @@ pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
     pub(crate) captured_target_09: Option<&'ctx V3Target09CandidateSetExpanded>,
     pub(crate) failure_session_scope: V3ProviderFailureSessionScope,
     pub(crate) provider_health: &'ctx V3ProviderFailureRuntimeHealth,
+    pub(crate) recovery_control: Option<&'ctx crate::execution_control::V3RequestExecutionControl>,
     pub(crate) retry_policy: V3RelayProviderFailureRetryPolicy,
     pub(crate) deterministic_sample: u64,
 }
@@ -487,21 +489,257 @@ pub(crate) enum V3RelayProviderTargetResolution {
     OperatorFault(V3RelayErrorOperatorFault),
 }
 
+enum V3RelayProviderSuccessorObservation {
+    Eligible {
+        candidate: V3TargetCandidate,
+        default_pool: bool,
+    },
+    Resolution(V3RelayProviderTargetResolution),
+}
+
+/// Observe captured occurrence eligibility without selecting, assigning sticky
+/// affinity or consuming an active queue turn.
+pub(crate) fn observe_v3_target_successors(
+    expanded: &V3Target09CandidateSetExpanded,
+    session: &dyn V3ProviderAvailabilityReader,
+    health: &V3ProviderFailureRuntimeHealth,
+    failed: &BTreeSet<String>,
+    scope: &V3ProviderFailureSessionScope,
+    keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    now_ms: u64,
+) -> Vec<routecodex_v3_target::V3TargetOccurrenceEligibility> {
+    let mut expanded = expanded.clone();
+    if expanded.route.estimated_history_turns.is_some() {
+        expanded.candidates.retain(|candidate| {
+            !health.provider_blocked_until_compact(scope, &candidate.provider_id)
+        });
+    }
+    let excluded = expanded
+        .candidates
+        .iter()
+        .filter(|candidate| failed.contains(&v3_relay_provider_candidate_key(candidate)))
+        .map(V3TargetCandidate::active_key_identity)
+        .collect();
+    let active = keys.map(|state| V3ActiveKeySelectionContext {
+        listener_id: scope.server_id(),
+        session_id: scope.is_client_session().then_some(scope.session_id()),
+        state,
+        excluded: &excluded,
+    });
+    let reader = V3SessionGlobalSchedulingReader {
+        session,
+        global: health,
+        excluded: failed,
+    };
+    V3TargetInterpreter::default().observe_eligible_occurrences(
+        &expanded,
+        &reader,
+        now_ms,
+        &excluded,
+        scope.server_id(),
+        active.as_ref(),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3SelectionInvalidation {
+    OccurrenceChanged,
+    HealthUnavailable,
+}
+
+pub(crate) fn selection_invalidation(
+    selected: &V3Target10ConcreteProviderSelected,
+    expanded: &V3Target09CandidateSetExpanded,
+    keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    health: &V3ProviderFailureRuntimeHealth,
+    session: &V3ProviderFailureSessionScope,
+    now_ms: u64,
+) -> Option<V3SelectionInvalidation> {
+    let captured = expanded.candidates.iter().any(|candidate| {
+        candidate.active_key_identity() == selected.candidate.active_key_identity()
+            && candidate.occurrences.contains(&selected.occurrence)
+    });
+    if !captured
+        || !V3TargetInterpreter::candidate_admitted(&selected.candidate, now_ms)
+        || (expanded.route.estimated_history_turns.is_some()
+            && health.provider_blocked_until_compact(session, &selected.candidate.provider_id))
+    {
+        return Some(V3SelectionInvalidation::OccurrenceChanged);
+    }
+    if expanded
+        .active_pools
+        .contains_key(&selected.occurrence.pool_id)
+    {
+        let (Some(keys), Some(witness)) = (keys, selected.active_selection.as_ref()) else {
+            return Some(V3SelectionInvalidation::OccurrenceChanged);
+        };
+        if witness.scope.listener_id != session.server_id()
+            || witness.scope.routing_group_id != expanded.route.routing_group_id
+            || witness.scope.pool_id != selected.occurrence.pool_id
+            || witness.identity != selected.candidate.active_key_identity()
+        {
+            return Some(V3SelectionInvalidation::OccurrenceChanged);
+        }
+        active_selection_invalidation(witness, &selected.candidate, keys, health, session, now_ms)
+    } else {
+        selected
+            .active_selection
+            .is_some()
+            .then_some(V3SelectionInvalidation::OccurrenceChanged)
+    }
+}
+
+/// Revalidate selection after recovery acquisition without rejecting the
+/// request's own health trial. A rejected send releases matching custody.
+pub(crate) fn prepare_selected_dispatch(
+    selected: &V3Target10ConcreteProviderSelected,
+    expanded: Option<&V3Target09CandidateSetExpanded>,
+    keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    mut episode: Option<&mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    control: &crate::execution_control::V3RequestExecutionControl,
+    health: &V3ProviderFailureRuntimeHealth,
+    session: &V3ProviderFailureSessionScope,
+    exclusions: &mut BTreeSet<String>,
+    now_ms: u64,
+) -> Result<bool, String> {
+    let started = std::time::Instant::now();
+    let candidate = &selected.candidate;
+    let failed_retry = episode
+        .as_ref()
+        .is_some_and(|episode| episode.can_retry(true));
+    if let Some(reason) = expanded.and_then(|expanded| {
+        selection_invalidation(selected, expanded, keys, health, session, now_ms)
+    }) {
+        if failed_retry || reason == V3SelectionInvalidation::HealthUnavailable {
+            exclusions.insert(v3_relay_provider_candidate_key(candidate));
+        }
+        return Ok(false);
+    }
+    if !health.acquire_business_recovery_trial(
+        control,
+        &candidate.provider_id,
+        &candidate.interface_id,
+        &candidate.auth_alias,
+        &candidate.model_id,
+        now_ms,
+    )? {
+        exclusions.insert(v3_relay_provider_candidate_key(candidate));
+        return Ok(false);
+    }
+    if selected.route.estimated_history_turns.is_some()
+        && health.provider_blocked_until_compact(session, &candidate.provider_id)
+    {
+        control
+            .cancel_business_recovery_trial(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                &candidate.auth_alias,
+                &candidate.model_id,
+            )
+            .map_err(|error| error.to_string())?;
+        if let Some(episode) = episode.as_deref_mut() {
+            episode.cancel();
+        }
+        exclusions.insert(v3_relay_provider_candidate_key(candidate));
+        return Ok(false);
+    }
+    let ready = begin_v3_active_dispatch(
+        selected,
+        keys,
+        episode,
+        control,
+        now_ms.saturating_add(started.elapsed().as_millis() as u64),
+    )?;
+    if !ready && failed_retry {
+        exclusions.insert(v3_relay_provider_candidate_key(candidate));
+    }
+    Ok(ready)
+}
+
+pub(crate) fn begin_v3_active_dispatch(
+    selected: &V3Target10ConcreteProviderSelected,
+    keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    mut episode: Option<&mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    control: &crate::execution_control::V3RequestExecutionControl,
+    now_ms: u64,
+) -> Result<bool, String> {
+    let current = V3TargetInterpreter::candidate_admitted(&selected.candidate, now_ms)
+        && match episode.as_deref_mut() {
+            Some(episode) => {
+                keys.is_some_and(|keys| {
+                    selected.active_selection.as_ref() == Some(&episode.selection)
+                        && keys.selection_current(&episode.selection)
+                }) && episode.begin_attempt().is_some()
+            }
+            None => selected.active_selection.is_none(),
+        };
+    if !current {
+        control
+            .cancel_business_recovery_trial(
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                &selected.candidate.auth_alias,
+                &selected.candidate.model_id,
+            )
+            .map_err(|error| error.to_string())?;
+        if let Some(episode) = episode {
+            episode.cancel();
+        }
+    }
+    Ok(current)
+}
+
+/// Selection storage is an internal control diagnostic, never another
+/// provider delivery or health observation.
+pub(crate) fn active_key_durability_diagnostic(
+    selected: &V3Target10ConcreteProviderSelected,
+    error: Option<String>,
+) -> Option<crate::hub_v1::V3RuntimeProviderFailureObservation> {
+    error.map(
+        |message| crate::hub_v1::V3RuntimeProviderFailureObservation {
+            provider_key: v3_relay_provider_candidate_key(&selected.candidate),
+            provider_id: selected.candidate.provider_id.clone(),
+            auth_alias: Some(selected.candidate.auth_alias.clone()),
+            model_id: selected.candidate.model_id.clone(),
+            message,
+            internal_code: Some("active_key_hold_persistence_failed".into()),
+            action: "active_key_durability_failure".into(),
+            ..Default::default()
+        },
+    )
+}
+
 pub(crate) fn select_v3_target_with_session_then_global(
     target: &V3TargetInterpreter,
-    expanded: V3Target09CandidateSetExpanded,
+    mut expanded: V3Target09CandidateSetExpanded,
     failure_session_scope: &V3ProviderFailureSessionScope,
     session_availability: &dyn V3ProviderAvailabilityReader,
     global_availability: &V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
+    active: Option<&V3ActiveKeySelectionContext<'_>>,
 ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    if expanded.route.estimated_history_turns.is_some() {
+        expanded.candidates.retain(|candidate| {
+            !global_availability
+                .provider_blocked_until_compact(failure_session_scope, &candidate.provider_id)
+        });
+    }
     let reader = V3SessionGlobalSchedulingReader {
         session: session_availability,
         global: global_availability,
         excluded: request_local_excluded_candidates,
     };
+    if let Some(active) = active {
+        return target.select_available_with_health_active(
+            expanded,
+            &reader,
+            now_ms,
+            deterministic_sample,
+            active,
+        );
+    }
     // Sticky selection needs a session that outlives one request. A request
     // without a client session header keeps its existing pool strategy.
     let Some(sticky) = sticky_scope_for(failure_session_scope) else {
@@ -519,6 +757,41 @@ pub(crate) fn select_v3_target_with_session_then_global(
         deterministic_sample,
         &sticky,
     )
+}
+
+fn active_selection_invalidation(
+    selection: &routecodex_v3_target::V3ActiveKeySelection,
+    candidate: &V3TargetCandidate,
+    keys: &routecodex_v3_target::V3ActiveKeySelectionState,
+    health: &V3ProviderFailureRuntimeHealth,
+    session: &V3ProviderFailureSessionScope,
+    now_ms: u64,
+) -> Option<V3SelectionInvalidation> {
+    let session_reader = health.session_bound_availability(session);
+    let excluded = BTreeSet::new();
+    let reader = V3SessionGlobalSchedulingReader {
+        session: &session_reader,
+        global: health,
+        excluded: &excluded,
+    };
+    let available = reader
+        .scheduling_projection_for_interface(
+            &candidate.provider_id,
+            &candidate.interface_id,
+            &candidate.auth_alias,
+            &candidate.model_id,
+            candidate.priority,
+            candidate.weight,
+            now_ms,
+        )
+        .available;
+    if !available {
+        Some(V3SelectionInvalidation::HealthUnavailable)
+    } else if !keys.selection_current(selection) {
+        Some(V3SelectionInvalidation::OccurrenceChanged)
+    } else {
+        None
+    }
 }
 
 /// Builds the sticky scope for a session that genuinely spans requests.
@@ -637,6 +910,84 @@ pub struct V3ProviderFailureRuntimeHealth {
     probe_owner: std::sync::Arc<std::sync::Mutex<Option<V3ManagedProbeSender>>>,
     precool: std::sync::Arc<std::sync::Mutex<BTreeMap<V3PrecoolIdentity, V3DeferredHealthAction>>>,
     observation_clock: Option<Arc<dyn V3ProviderHealthObservationClock>>,
+    turn_limits: Arc<std::sync::Mutex<V3ConversationTurnLimits>>,
+}
+
+type V3TurnLimitScope = (String, String, String);
+
+#[derive(Debug, Default)]
+struct V3ConversationTurnLimits {
+    generation: u64,
+    blocked: BTreeMap<V3TurnLimitScope, BTreeMap<String, u64>>,
+}
+
+impl V3ConversationTurnLimits {
+    fn scope_key(scope: &V3ProviderFailureSessionScope) -> V3TurnLimitScope {
+        (
+            scope.server_id().to_owned(),
+            scope.routing_group().to_owned(),
+            scope.session_id().to_owned(),
+        )
+    }
+}
+
+impl V3ProviderFailureRuntimeHealth {
+    pub(crate) fn provider_blocked_until_compact(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+    ) -> bool {
+        scope.is_client_session()
+            && self
+                .turn_limits
+                .lock()
+                .unwrap()
+                .blocked
+                .get(&V3ConversationTurnLimits::scope_key(scope))
+                .is_some_and(|providers| providers.contains_key(provider_id))
+    }
+
+    pub(crate) fn record_session_turn_limit(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+    ) {
+        if scope.is_client_session() {
+            let mut limits = self.turn_limits.lock().unwrap();
+            limits.generation += 1;
+            let generation = limits.generation;
+            limits
+                .blocked
+                .entry(V3ConversationTurnLimits::scope_key(scope))
+                .or_default()
+                .insert(provider_id.to_owned(), generation);
+        }
+    }
+
+    pub(crate) fn compaction_turn_limit_generation(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+    ) -> Option<u64> {
+        scope
+            .is_client_session()
+            .then(|| self.turn_limits.lock().unwrap().generation)
+    }
+
+    pub(crate) fn clear_turn_limits_after_compaction(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        through_generation: u64,
+        _receipt: &crate::nodes::V3AttemptSuccessReceipt,
+    ) {
+        let mut limits = self.turn_limits.lock().unwrap();
+        let key = V3ConversationTurnLimits::scope_key(scope);
+        if let Some(providers) = limits.blocked.get_mut(&key) {
+            providers.retain(|_, generation| *generation > through_generation);
+            if providers.is_empty() {
+                limits.blocked.remove(&key);
+            }
+        }
+    }
 }
 
 /// Observation time belongs to the health owner. Request residence and actual
@@ -654,7 +1005,7 @@ impl V3ProviderFailureRuntimeHealth {
         self
     }
 
-    fn observation_now_ms(&self, supplied_now_ms: u64) -> u64 {
+    pub(crate) fn observation_now_ms(&self, supplied_now_ms: u64) -> u64 {
         self.observation_clock
             .as_ref()
             .map_or(supplied_now_ms, |clock| clock.now_epoch_ms())
@@ -787,6 +1138,7 @@ impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
             probe_owner: Default::default(),
             precool: Default::default(),
             observation_clock: None,
+            turn_limits: Default::default(),
             action_gate: V3ProviderActionGate::default(),
             default_same_provider_retries: 0,
         }
@@ -835,7 +1187,8 @@ async fn reselect_from_captured_target_plan(
     selected: &V3Target10ConcreteProviderSelected,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
-) -> V3RelayProviderTargetResolution {
+    active_keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+) -> V3RelayProviderSuccessorObservation {
     let expanded = match context.captured_target_09 {
         Some(expanded) => expanded.clone(),
         None => {
@@ -848,37 +1201,78 @@ async fn reselect_from_captured_target_plan(
             ) {
                 Ok(expanded) => expanded,
                 Err(error) => {
-                    return match target_resolution_source(
-                        "V3Target09CandidateSetExpanded",
-                        "captured_target_plan_expansion_failed",
-                        error,
-                    ) {
-                        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
-                        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
-                    };
+                    return V3RelayProviderSuccessorObservation::Resolution(
+                        match target_resolution_source(
+                            "V3Target09CandidateSetExpanded",
+                            "captured_target_plan_expansion_failed",
+                            error,
+                        ) {
+                            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+                            Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+                        },
+                    );
                 }
             }
         }
     };
+    // Error policy observes whether an eligible successor exists. It must not
+    // consume an active queue turn or assign a provisional session choice.
+    if !expanded.active_pools.is_empty() {
+        let observed = observe_v3_target_successors(
+            &expanded,
+            &context
+                .provider_health
+                .session_bound_availability(&context.failure_session_scope),
+            context.provider_health,
+            request_local_excluded_candidates,
+            &context.failure_session_scope,
+            active_keys,
+            now_ms,
+        );
+        if let Some((occurrence, candidate)) = observed.iter().find_map(|observed| {
+            expanded
+                .candidates
+                .iter()
+                .find(|candidate| {
+                    observed
+                        .identities
+                        .contains(&candidate.active_key_identity())
+                })
+                .map(|candidate| (&observed.occurrence, candidate))
+        }) {
+            return V3RelayProviderSuccessorObservation::Eligible {
+                candidate: candidate.clone(),
+                default_pool: occurrence.pool_id == "default",
+            };
+        }
+        return V3RelayProviderSuccessorObservation::Resolution(
+            V3RelayProviderTargetResolution::Exhausted {
+                attempted_candidates: Vec::new(),
+            },
+        );
+    }
     // This is an observation before Error03's health effects, not a recovery
     // event. It must not start probes or wait on an alternative's recovery.
-    match select_v3_target_with_session_then_global(
-        &V3TargetInterpreter::default(),
-        expanded,
-        &context.failure_session_scope,
-        &context
-            .provider_health
-            .session_bound_availability(&context.failure_session_scope),
-        context.provider_health,
-        request_local_excluded_candidates,
-        now_ms,
-        context.deterministic_sample,
-    ) {
-        Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
-        Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates: exhausted.attempted_candidates,
+    V3RelayProviderSuccessorObservation::Resolution(
+        match select_v3_target_with_session_then_global(
+            &V3TargetInterpreter::default(),
+            expanded,
+            &context.failure_session_scope,
+            &context
+                .provider_health
+                .session_bound_availability(&context.failure_session_scope),
+            context.provider_health,
+            request_local_excluded_candidates,
+            now_ms,
+            context.deterministic_sample,
+            None,
+        ) {
+            Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
+            Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
+                attempted_candidates: exhausted.attempted_candidates,
+            },
         },
-    }
+    )
 }
 
 fn v3_relay_provider_policy_ordinary_error(
@@ -928,14 +1322,75 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     provider_status: Option<u16>,
     provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
+    run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(
+        context,
+        selected,
+        source_stage,
+        status,
+        error_type,
+        message,
+        matched_policy_directive,
+        state,
+        response_processing_code,
+        attempt_source,
+        provider_status,
+        provider_body_read_failure,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: V3Target10ConcreteProviderSelected,
+    source_stage: &'static str,
+    status: u16,
+    error_type: Option<String>,
+    message: String,
+    matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+    attempt_source: Option<V3Error01SourceRaised>,
+    provider_status: Option<u16>,
+    provider_body_read_failure: Option<&str>,
+    active_keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
     // The external classification belongs to a real upstream HTTP status: the
-    // source code is `provider_http_{status}` and the external link code is
-    // `HTTP_{status}`. The body-derived `error_type` stays the policy/health
-    // input for upstream account and quota classifications.
+    // legacy source code is `provider_http_{status}` and the external link code
+    // remains `HTTP_{status}`. Active episodes also retain the actual Provider
+    // error category so Error can distinguish quota/auth from ordinary429.
     let is_real_http_failure = provider_status == Some(status);
+    let ordinary_request = selected.route.estimated_history_turns.is_some();
+    let session_turn_limit_rejected = ordinary_request
+        && is_real_http_failure
+        && state.last_external_http.as_ref().is_some_and(
+            routecodex_v3_error::V3ExternalHttpWitness::is_session_turn_limit_rejection,
+        );
+    if session_turn_limit_rejected {
+        context.provider_health.record_session_turn_limit(
+            &context.failure_session_scope,
+            &selected.candidate.provider_id,
+        );
+        if let Some(control) = context.recovery_control {
+            control
+                .cancel_business_recovery_trial(
+                    &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
+                    &selected.candidate.auth_alias,
+                    &selected.candidate.model_id,
+                )
+                .map_err(|error| v3_relay_provider_policy_ordinary_error(error.to_string()))?;
+        }
+    }
     let external_error_type = if is_real_http_failure {
-        Some(format!("provider_http_{status}"))
+        if active_keys.is_some() && selected.active_selection.is_some() {
+            error_type
+                .clone()
+                .or_else(|| Some(format!("provider_http_{status}")))
+        } else {
+            Some(format!("provider_http_{status}"))
+        }
     } else {
         error_type.clone()
     };
@@ -945,37 +1400,49 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // Preserve the original typed Error01 source of this provider attempt before
     // the Error05 decision consumes it, so a later target-resolution failure
     // cannot erase the provider cause that actually began this attempt.
-    let (attempt_source_projection, attempt_source) = if let Some(source) = attempt_source {
-        serde_json::to_value(&source)
-            .map(|projection| (projection, source.clone()))
-            .map_err(|error| {
-                relay_error_operator_fault(
-                    "relay_error_operator_sdk_failure",
-                    format!("failed to serialize V3Error01SourceRaised: {error}"),
-                    Some(source),
-                )
-            })
-    } else if let Some(code) = response_processing_code {
-        raise_v3_source_via_err01(
-            V3ErrorSourceKind::RuntimeFailure,
-            source_stage,
-            error_type
-                .as_deref()
-                .unwrap_or("relay_response_processing_failure"),
-            &message,
-            V3Err01SourceInput::Internal(code),
-        )
-    } else {
-        build_v3_relay_provider_attempt_source(
-            &selected,
-            source_stage,
-            external_error_type.as_deref(),
-            &message,
-            provider_status,
-            external_link_code.as_deref(),
-        )
+    let (mut attempt_source_projection, mut attempt_source) =
+        if let Some(source) = attempt_source {
+            serde_json::to_value(&source)
+                .map(|projection| (projection, source.clone()))
+                .map_err(|error| {
+                    relay_error_operator_fault(
+                        "relay_error_operator_sdk_failure",
+                        format!("failed to serialize V3Error01SourceRaised: {error}"),
+                        Some(source),
+                    )
+                })
+        } else if let Some(code) = response_processing_code {
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                source_stage,
+                error_type
+                    .as_deref()
+                    .unwrap_or("relay_response_processing_failure"),
+                &message,
+                V3Err01SourceInput::Internal(code),
+            )
+        } else {
+            build_v3_relay_provider_attempt_source(
+                &selected,
+                source_stage,
+                external_error_type.as_deref(),
+                &message,
+                provider_status,
+                external_link_code.as_deref(),
+            )
+        }
+        .map_err(Err)?;
+    if active_keys.is_some() && selected.active_selection.is_some() {
+        attempt_source =
+            routecodex_v3_error::normalize_v3_active_key_failure_source(attempt_source, true);
+        attempt_source_projection = serde_json::to_value(&attempt_source).map_err(|error| {
+            Err(relay_error_operator_fault(
+                "relay_error_operator_sdk_failure",
+                error.to_string(),
+                Some(attempt_source.clone()),
+            ))
+        })?;
     }
-    .map_err(Err)?;
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -991,20 +1458,70 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
-    let is_request_local_compat_failure = is_response_processing_failure
+    let is_request_local_compat_failure = session_turn_limit_rejected
+        || is_response_processing_failure
         || (!(is_real_http_failure && status == 403)
             && is_health_neutral_request_compat_failure(source_stage, error_type.as_deref()));
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
+    if session_turn_limit_rejected {
+        if let Some(expanded) = context.captured_target_09 {
+            excluded_with_failed.extend(
+                expanded
+                    .candidates
+                    .iter()
+                    .filter(|candidate| candidate.provider_id == selected.candidate.provider_id)
+                    .map(v3_relay_provider_candidate_key),
+            );
+        }
+        state
+            .failed_candidates
+            .extend(excluded_with_failed.iter().cloned());
+    }
     let resolution = reselect_from_captured_target_plan(
         context,
         &selected,
         &excluded_with_failed,
         v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?,
+        active_keys,
     )
     .await;
-    let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
+    let has_alternative = matches!(
+        &resolution,
+        V3RelayProviderSuccessorObservation::Eligible { .. }
+            | V3RelayProviderSuccessorObservation::Resolution(
+                V3RelayProviderTargetResolution::Selected(_)
+            )
+    );
+    let trial_failed = match context
+        .recovery_control
+        .filter(|_| !session_turn_limit_rejected)
+    {
+        Some(control)
+            if !matches!(
+                attempt_source.source_kind,
+                V3ErrorSourceKind::ClientDisconnect
+            ) =>
+        {
+            context
+                .provider_health
+                .settle_business_recovery_failure(
+                    control,
+                    &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
+                    &selected.candidate.auth_alias,
+                    &selected.candidate.model_id,
+                    v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(v3_relay_provider_policy_ordinary_error)?,
+                    has_alternative,
+                )
+                .map_err(v3_relay_provider_policy_ordinary_error)?
+        }
+        _ => false,
+    };
     if has_alternative
+        && !trial_failed
+        && !session_turn_limit_rejected
         && is_request_local_compat_failure
         && is_real_http_failure
         && matches!(status, 400..=402 | 404..=599)
@@ -1024,14 +1541,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // attempt publishes diagnostics only; it does not update health or actions.
     // The last or only eligible candidate stays health-neutral for every
     // provider failure class.
-    let health_record = if is_request_local_compat_failure || !has_alternative {
+    let health_record = if is_request_local_compat_failure || !has_alternative || trial_failed {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),
-            state: if is_response_processing_failure {
+            state: if session_turn_limit_rejected {
+                "session_turn_limit_exceeded"
+            } else if is_response_processing_failure {
                 "request_local_response_processing"
             } else if is_request_local_compat_failure {
                 "request_local_provider_compat"
+            } else if trial_failed && has_alternative {
+                "recovery_trial_failed"
             } else {
                 "last_candidate_terminal"
             }
@@ -1082,6 +1603,54 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                     .map_err(v3_relay_provider_policy_ordinary_error)?,
             )?
     };
+    let resolution = match resolution {
+        V3RelayProviderSuccessorObservation::Eligible {
+            candidate,
+            default_pool,
+        } => {
+            state.failed_candidates.insert(candidate_key.clone());
+            let (projection, decision) = build_v3_relay_provider_error_05_decision(
+                &selected,
+                attempt_source_projection.clone(),
+                attempt_source.clone(),
+                usize::from(!default_pool),
+                default_pool,
+                false,
+                None,
+                false,
+            )
+            .map_err(Err)?;
+            state.trace.push("V3TargetLocalReselected");
+            return Ok(V3RelayProviderFailurePolicyResult {
+                business_trial_failed: trial_failed,
+                terminal_projection: terminal_projection_for(projection, &decision, matched_policy)
+                    .map_err(Err)?,
+                terminal_disposition: terminal_disposition_for(
+                    &decision,
+                    state,
+                    provider_body_read_failure,
+                ),
+                decision,
+                // Observation never creates a dispatch target. Plan execution
+                // obtains the supplying occurrence and witness from Target.
+                retry_selected: None,
+                event: build_v3_relay_provider_failure_policy_event(
+                    V3RelayProviderFailurePolicyEventInput {
+                        candidate: selected.candidate,
+                        status,
+                        error_type,
+                        message,
+                        health_record,
+                        action: "switch_provider",
+                        next_provider_key: Some(v3_relay_provider_candidate_key(&candidate)),
+                        wait_ms: None,
+                        diagnostic_source: attempt_source,
+                    },
+                ),
+            });
+        }
+        V3RelayProviderSuccessorObservation::Resolution(resolution) => resolution,
+    };
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
@@ -1107,6 +1676,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 .map_err(Err)?;
                 state.trace.push("V3TargetLocalReselected");
                 return Ok(V3RelayProviderFailurePolicyResult {
+                    business_trial_failed: trial_failed,
                     terminal_projection: terminal_projection_for(
                         decision_projection,
                         &decision,
@@ -1172,6 +1742,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 terminal_projection_for(decision_projection, &decision, matched_policy)
                     .map_err(Err)?;
             return Ok(V3RelayProviderFailurePolicyResult {
+                business_trial_failed: trial_failed,
                 terminal_projection,
                 terminal_disposition: None,
                 decision,
@@ -1209,6 +1780,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         )
         .map_err(Err)?;
         return Ok(V3RelayProviderFailurePolicyResult {
+            business_trial_failed: trial_failed,
             terminal_projection: terminal_projection_for(
                 decision_projection,
                 &decision,
@@ -1260,6 +1832,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let terminal_disposition =
         terminal_disposition_for(&decision, state, provider_body_read_failure);
     Ok(V3RelayProviderFailurePolicyResult {
+        business_trial_failed: trial_failed,
         terminal_projection,
         terminal_disposition,
         decision,
@@ -1531,6 +2104,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
         body,
         deterministic_sample,
         false,
+        false,
     )
 }
 
@@ -1542,6 +2116,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
     body: &Value,
     deterministic_sample: u64,
     has_unprojected_history_images: bool,
+    is_compaction: bool,
 ) -> Result<
     V3Router07OpaqueTargetHitOnce,
     Result<
@@ -1549,10 +2124,12 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
     >,
 > {
-    let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
+    let facts = crate::nodes::build_v3_router_request_facts_for_resolve_target(
         body,
         entry_kind,
+        endpoint_path,
         crate::configured_v3_longcontext_threshold_tokens(manifest, server_id),
+        is_compaction,
         manifest,
     );
     let router = V3VirtualRouter::process_shared();
@@ -1661,6 +2238,7 @@ pub(crate) fn resolve_v3_relay_target_outcome(
         input.request_local_excluded_candidates,
         input.now_ms,
         input.deterministic_sample,
+        None,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
         Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {

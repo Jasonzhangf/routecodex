@@ -1,5 +1,6 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use provider_compat_core::namespace_identity::NamespaceToolAliases;
 use provider_compat_core::namespace_tools::{
     push_unique_provider_function_tool, NamespaceToolIdentityRegistry,
 };
@@ -145,7 +146,7 @@ pub struct V3Provider12ResponsesWirePayload {
     endpoint: V3ResponsesRequestEndpoint,
     body: Value,
     custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
-    namespace_identities: HashMap<String, (String, String)>,
+    namespace_identities: NamespaceToolAliases,
 }
 
 impl V3Provider12ResponsesWirePayload {
@@ -153,7 +154,7 @@ impl V3Provider12ResponsesWirePayload {
         self.stream_intent = intent;
         self
     }
-    pub fn namespace_identities(&self) -> &HashMap<String, (String, String)> {
+    pub fn namespace_identities(&self) -> &NamespaceToolAliases {
         &self.namespace_identities
     }
     pub fn request_id(&self) -> &str {
@@ -257,13 +258,23 @@ pub fn build_v3_provider_12_responses_wire_payload_with_registry(
     body: Value,
     registry: NamespaceToolIdentityRegistry,
 ) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
-    build_responses_wire_payload_with_registry(
+    build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint(
         request_id,
         target,
         body,
+        registry,
         V3ResponsesRequestEndpoint::Responses,
-        Some(registry),
     )
+}
+
+pub fn build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint(
+    request_id: impl Into<String>,
+    target: V3ResponsesProviderTarget,
+    body: Value,
+    registry: NamespaceToolIdentityRegistry,
+    endpoint: V3ResponsesRequestEndpoint,
+) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
+    build_responses_wire_payload_with_registry(request_id, target, body, endpoint, Some(registry))
 }
 
 fn build_responses_wire_payload_with_registry(
@@ -323,7 +334,7 @@ fn build_responses_wire_payload_with_registry(
             detail,
         })?,
     };
-    let namespace_identities = registry.restore_identities();
+    let namespace_identities = registry.restore_aliases();
     let mut body = if already_projected {
         current_request_body
     } else {
@@ -469,11 +480,9 @@ fn strip_v3_response_anthropic_signature_excluding_protocol_cipher(value: &mut V
 fn strip_v3_response_encrypted_fields(value: &mut Value, strip_all: bool, in_content_array: bool) {
     match value {
         Value::Object(map) => {
-            if map
-                .get("type")
-                .and_then(Value::as_str)
-                .is_some_and(is_v3_responses_tool_business_item)
-            {
+            if map.get("type").and_then(Value::as_str).is_some_and(|kind| {
+                is_v3_responses_tool_business_item(kind) || (strip_all && kind == "compaction")
+            }) {
                 return;
             }
             let remove = match map.get("encrypted_content") {

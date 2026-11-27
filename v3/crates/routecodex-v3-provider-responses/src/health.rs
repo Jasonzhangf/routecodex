@@ -326,6 +326,7 @@ pub(super) struct V3ProviderHealthState {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 struct V3ProviderAdaptiveHistory {
     rate_limit_episode: Option<V3ProviderRateLimitEpisode>,
     attempts: u32,
@@ -373,12 +374,14 @@ struct V3ProviderFailureSessionKey {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 struct V3ProviderCooldown {
     reason: String,
     until_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test-health-observer"), derive(PartialEq, Eq))]
 struct V3ProviderConsecutiveFailure {
     failure_count: u32,
     last_failure_at_ms: u64,
@@ -1337,6 +1340,70 @@ impl V3ProviderHealthStore {
         Ok(recovered)
     }
 
+    /// Settle one owned business-recovery trial with the Runtime-sealed
+    /// success receipt. The health lock verifies the exact acquisition before
+    /// clearing the episode and applying ordinary success accounting.
+    pub fn complete_provider_business_recovery_success_with_permit(
+        &self,
+        permit: &V3ProviderHealthProbePermit,
+        now_ms: u64,
+    ) -> Result<bool, V3ProviderHealthError> {
+        if permit.purpose() != V3ProviderProbePurpose::BusinessRecovery {
+            return Err(V3ProviderHealthError::ProbePurposeMismatch);
+        }
+        let key = provider_cooldown_probe_key_for_interface(
+            permit.provider_id(),
+            permit.interface_id(),
+            permit.auth_alias(),
+            permit.model_id(),
+        );
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let Some(probe) = state.provider_cooldown_probes.get(&key) else {
+            return Ok(false);
+        };
+        if probe.active_probe != Some(permit.acquisition_id)
+            || probe.blocked_until_ms != permit.business_cooldown_until_ms
+            || probe
+                .blocked_until_ms
+                .is_some_and(|deadline| deadline > now_ms)
+        {
+            return Ok(false);
+        }
+        let generation = state
+            .adaptive_history
+            .get(&key)
+            .map_or(0, |history| history.score_generation);
+        let recovered = complete_provider_probe_success_at_generation(
+            &mut state,
+            &key,
+            now_ms,
+            Some(generation),
+        )
+        .map_err(V3ProviderHealthError::Poisoned)?;
+        if recovered {
+            let identity = provider_key_label(
+                permit.provider_id(),
+                permit.interface_id(),
+                permit.auth_alias(),
+                permit.model_id(),
+            );
+            state
+                .cooldowns
+                .retain(|key, _| key.provider_runtime_identity != identity);
+            state
+                .consecutive_failures
+                .retain(|key, _| key.provider_runtime_identity != identity);
+        }
+        persist_cooldown_state(state);
+        if recovered {
+            self.publish_availability_change();
+        }
+        Ok(recovered)
+    }
+
     /// probe 失败：保持冷却，推后下一次探针。
     pub fn complete_provider_cooldown_probe_failure(
         &self,
@@ -1396,7 +1463,8 @@ impl V3ProviderHealthStore {
         now_ms: u64,
         permit: Option<&V3ProviderHealthProbePermit>,
     ) -> Result<(), V3ProviderHealthError> {
-        if permit.is_some_and(|permit| permit.purpose() != V3ProviderProbePurpose::CooldownRecovery)
+        if permit
+            .is_some_and(|permit| permit.purpose() == V3ProviderProbePurpose::PrecoolObservation)
         {
             // A pre-cool observation failure must stay with Runtime's pending
             // action; this path would reschedule a non-existent cooldown.
@@ -1431,10 +1499,13 @@ impl V3ProviderHealthStore {
             .adaptive_history
             .get(&key)
             .map_or(0, |history| history.score_generation);
-        if let Some(expected_generation) =
-            permit.map(V3ProviderHealthProbePermit::expected_generation)
-        {
-            if expected_generation != current_generation {
+        if let Some(permit) = permit {
+            let superseded = if permit.purpose() == V3ProviderProbePurpose::BusinessRecovery {
+                existing_probe.blocked_until_ms != permit.business_cooldown_until_ms
+            } else {
+                permit.expected_generation() != current_generation
+            };
+            if superseded {
                 persist_cooldown_state(state);
                 self.publish_availability_change();
                 return Ok(());
@@ -2294,6 +2365,9 @@ impl V3ProviderHealthStore {
         // Provider cooldown probes (global)
         for (key, probe) in &state.provider_cooldown_probes {
             let blocked = probe.blocked_until_ms.is_some_and(|u| u > now_ms);
+            if key.model_id.is_none() && !blocked && state.auth_key_cooldowns.contains_key(key) {
+                continue;
+            }
             // A deadline only makes recovery due. Retained exclusions remain
             // in the pool while waiting or probing, until semantic recovery.
             let state_str = if probe.active_probe.is_some() {
@@ -2521,6 +2595,9 @@ fn global_availability_projection(
 
 include!("health/runtime_projection.rs");
 include!("health/legacy_api.rs");
+
+#[cfg(any(test, feature = "test-health-observer"))]
+pub mod test_observer;
 
 #[cfg(test)]
 #[path = "health_tests.rs"]

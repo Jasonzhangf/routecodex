@@ -138,11 +138,19 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
                 .expect(
                     "ordinary provider policy failure must remain distinct from a Source01 fault",
                 );
-            assert_eq!(record.state, "pre_cool_observation");
-            assert_eq!(record.failure_count, 0);
-            assert_eq!(record.cooldown_until_ms, None);
+            assert_eq!(
+                record.state,
+                if status == 401 {
+                    "cooldown"
+                } else {
+                    "provider_failure_observed"
+                }
+            );
+            assert_eq!(
+                record.cooldown_until_ms,
+                (status == 401).then_some(3_600_100)
+            );
         }
-        complete_due_precool_failures(&health, 101).await;
         assert_eq!(
             health
                 .store()
@@ -182,11 +190,9 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
                 200 + index as u64,
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
-        assert_eq!(record.state, "pre_cool_observation");
-        assert_eq!(record.failure_count, 0);
-        assert_eq!(record.cooldown_until_ms, None);
+        assert_eq!(record.failure_count, index + 1);
+        assert_eq!(record.cooldown_until_ms, (index == 9).then_some(3_600_209));
     }
-    complete_due_precool_failures(&other_health, 202).await;
     assert!(
         !other_health
             .store()
@@ -575,11 +581,12 @@ targets = [
                 now_ms,
             )
             .expect("Anthropic body decode failure must be recorded");
-        assert_eq!(record.state, "pre_cool_observation");
-        assert_eq!(record.failure_count, 0);
-        assert_eq!(record.cooldown_until_ms, None);
+        assert_eq!(record.failure_count, attempt + 1);
+        assert_eq!(
+            record.cooldown_until_ms,
+            (attempt == 9).then_some(3_600_109)
+        );
     }
-    complete_due_precool_failures(&health, 101).await;
     for attempt in 0..2 {
         let model_available = health
             .store()

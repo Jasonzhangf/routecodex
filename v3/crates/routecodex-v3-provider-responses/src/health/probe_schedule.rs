@@ -1,7 +1,7 @@
 use super::{persistence, V3ProviderHealthError, V3ProviderHealthState, V3ProviderHealthStore};
 use crate::key_health::{
-    V3ProbeAcquisitionId, V3ProviderHealthProbePermit, V3ProviderPrecoolObservationOutcome,
-    V3ProviderProbePurpose,
+    V3ProbeAcquisitionId, V3ProviderBusinessRecoveryAcquisition, V3ProviderHealthProbePermit,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
 };
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
@@ -12,6 +12,73 @@ pub type V3ProviderCooldownProbeKey = (String, Option<String>, Option<String>);
 pub type V3ProviderCooldownProbeKeyWithInterface = (String, String, Option<String>, Option<String>);
 
 impl V3ProviderHealthStore {
+    /// Let one genuine business attempt own an expired recovery episode.
+    /// Selection reads stay non-mutating; only the selected attempt calls this.
+    pub fn acquire_provider_business_recovery_trial_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<V3ProviderBusinessRecoveryAcquisition, V3ProviderHealthError> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let key = provider_cooldown_probe_key_for_interface(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        );
+        let Some(probe_state) = state.provider_cooldown_probes.get(&key) else {
+            return Ok(V3ProviderBusinessRecoveryAcquisition::NotRequired);
+        };
+        if auth_alias.is_none()
+            || model_id.is_none()
+            || probe_state.blocked_until_ms.is_none()
+            || probe_state.cooldown_cause
+                == Some(crate::global_cooldown::V3ProviderCooldownFailureClass::RateLimit)
+        {
+            return Ok(V3ProviderBusinessRecoveryAcquisition::NotRequired);
+        }
+        if probe_state.active_probe.is_some()
+            || probe_state
+                .blocked_until_ms
+                .is_some_and(|deadline| deadline > now_ms)
+            || probe_state
+                .next_probe_at_ms
+                .is_some_and(|deadline| deadline > now_ms)
+            || precool_observation_conflicts(&state, &key, model_id)
+        {
+            return Ok(V3ProviderBusinessRecoveryAcquisition::Contended);
+        }
+        let business_cooldown_until_ms = probe_state.blocked_until_ms;
+        let acquisition_id = allocate_probe_acquisition(&mut state)?;
+        let probe_state = state
+            .provider_cooldown_probes
+            .get_mut(&key)
+            .expect("selected recovery episode must remain present under the health lock");
+        probe_state.active_probe = Some(acquisition_id);
+        let expected_generation = state
+            .adaptive_history
+            .get(&key)
+            .map_or(0, |history| history.score_generation);
+        persist_cooldown_state(state);
+        let mut permit = V3ProviderHealthProbePermit::new_with_purpose(
+            provider_id.to_string(),
+            key.interface_id.clone(),
+            auth_alias.map(str::to_string),
+            key.model_id.clone(),
+            expected_generation,
+            acquisition_id,
+            V3ProviderProbePurpose::BusinessRecovery,
+        );
+        permit.business_cooldown_until_ms = business_cooldown_until_ms;
+        Ok(V3ProviderBusinessRecoveryAcquisition::Acquired(permit))
+    }
+
     /// provider 级冷却中、冷却已到期且 probe 到期的 provider 列表
     /// （(provider_id, auth_alias, model_id)）。由后台 probe 循环消费。
     #[allow(clippy::type_complexity)]

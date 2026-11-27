@@ -7,6 +7,12 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use routecodex_v3_error::{V3Error01SourceRaised, V3ExternalHttpWitness};
+use routecodex_v3_provider_responses::{
+    V3ProviderBusinessRecoveryAcquisition, V3ProviderHealthProbePermit, V3ProviderHealthStore,
+};
+use routecodex_v3_target::{V3ActiveKeyIdentity, V3Target10ConcreteProviderSelected};
+
 const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
 const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
 const V3_COMMITTED_SSE_REQUEST_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -111,9 +117,32 @@ pub(crate) struct V3AttemptBudget {
 /// Provider identities from protocol payloads.
 #[derive(Clone)]
 pub struct V3RequestExecutionControl {
+    failure: Arc<Mutex<Option<V3RequestFailure>>>,
     attempt_budget: V3AttemptBudget,
     refill_excluded_candidates: Arc<Mutex<BTreeSet<String>>>,
+    business_recovery_trial: Arc<Mutex<Option<V3BusinessRecoveryTrialGuard>>>,
+    compaction_generation: Arc<std::sync::OnceLock<u64>>,
     pub(crate) image_history: Option<crate::image_history::V3ImageHistoryView>,
+}
+
+enum V3RequestFailure {
+    Dispatched(
+        V3ActiveKeyIdentity,
+        V3Error01SourceRaised,
+        Option<V3ExternalHttpWitness>,
+    ),
+    Local(V3Error01SourceRaised),
+}
+
+struct V3BusinessRecoveryTrialGuard {
+    store: V3ProviderHealthStore,
+    permit: V3ProviderHealthProbePermit,
+}
+
+impl Drop for V3BusinessRecoveryTrialGuard {
+    fn drop(&mut self) {
+        let _ = self.store.cancel_provider_cooldown_probe(&self.permit);
+    }
 }
 
 impl fmt::Debug for V3RequestExecutionControl {
@@ -123,6 +152,49 @@ impl fmt::Debug for V3RequestExecutionControl {
 }
 
 impl V3RequestExecutionControl {
+    pub(crate) fn begin_actual_send(&self) {
+        self.failure.lock().expect("request failure custody").take();
+    }
+
+    pub(crate) fn record_failure(
+        &self,
+        selected: &V3Target10ConcreteProviderSelected,
+        source: &V3Error01SourceRaised,
+        witness: Option<&V3ExternalHttpWitness>,
+        dispatched: bool,
+    ) {
+        *self.failure.lock().expect("request failure custody") = Some(if dispatched {
+            V3RequestFailure::Dispatched(
+                selected.candidate.active_key_identity(),
+                source.clone(),
+                witness.cloned(),
+            )
+        } else {
+            V3RequestFailure::Local(source.clone())
+        });
+    }
+
+    pub(crate) fn take_failure_for_exhaustion(
+        &self,
+        local: Option<V3Error01SourceRaised>,
+    ) -> (
+        Option<V3ActiveKeyIdentity>,
+        Option<V3Error01SourceRaised>,
+        Option<V3ExternalHttpWitness>,
+    ) {
+        match (
+            local,
+            self.failure.lock().expect("request failure custody").take(),
+        ) {
+            (Some(source), _) | (None, Some(V3RequestFailure::Local(source))) => {
+                (None, Some(source), None)
+            }
+            (None, Some(V3RequestFailure::Dispatched(identity, source, witness))) => {
+                (Some(identity), Some(source), witness)
+            }
+            (None, None) => (None, None, None),
+        }
+    }
     pub(crate) fn from_manifest(
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
         server_id: &str,
@@ -130,8 +202,158 @@ impl V3RequestExecutionControl {
         Ok(Self {
             attempt_budget: V3AttemptBudget::from_manifest(manifest, server_id)?,
             refill_excluded_candidates: Arc::default(),
+            business_recovery_trial: Arc::new(Mutex::new(None)),
+            failure: Arc::default(),
+            compaction_generation: Arc::default(),
             image_history: None,
         })
+    }
+
+    pub(crate) fn retain_compaction_generation(&self, observed: Option<u64>) -> Option<u64> {
+        observed.map(|generation| *self.compaction_generation.get_or_init(|| generation))
+    }
+
+    pub(crate) fn acquire_business_recovery_trial(
+        &self,
+        store: &V3ProviderHealthStore,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        now_ms: u64,
+    ) -> Result<bool, V3AttemptStoreError> {
+        let acquisition = store
+            .acquire_provider_business_recovery_trial_for_interface(
+                provider_id,
+                interface_id,
+                Some(auth_alias),
+                Some(model_id),
+                now_ms,
+            )
+            .map_err(|error| {
+                V3AttemptStoreError::InvalidAttemptState(format!(
+                    "business recovery acquisition failed: {error}"
+                ))
+            })?;
+        match acquisition {
+            V3ProviderBusinessRecoveryAcquisition::NotRequired => Ok(true),
+            V3ProviderBusinessRecoveryAcquisition::Contended => Ok(false),
+            V3ProviderBusinessRecoveryAcquisition::Acquired(permit) => {
+                let guard = V3BusinessRecoveryTrialGuard {
+                    store: store.clone(),
+                    permit,
+                };
+                let mut trial = self.business_recovery_trial.lock().map_err(|_| {
+                    V3AttemptStoreError::InvalidAttemptState(
+                        "business recovery ownership is unavailable".into(),
+                    )
+                })?;
+                if trial.is_some() {
+                    return Err(V3AttemptStoreError::InvalidAttemptState(
+                        "business recovery ownership was already installed for this request".into(),
+                    ));
+                }
+                *trial = Some(guard);
+                Ok(true)
+            }
+        }
+    }
+
+    pub(crate) fn settle_business_recovery_success(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        now_ms: u64,
+    ) -> Result<Option<bool>, V3AttemptStoreError> {
+        let trial = self.take_matching_business_recovery_trial(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        )?;
+        let Some(trial) = trial else {
+            return Ok(None);
+        };
+        let recovered = trial
+            .store
+            .complete_provider_business_recovery_success_with_permit(&trial.permit, now_ms)
+            .map_err(|error| V3AttemptStoreError::InvalidAttemptState(error.to_string()))?;
+        // false means the permit no longer identifies the current episode.
+        // Keep it distinct from None so the caller does not treat a stale
+        // recovery attempt as an ordinary successful business attempt.
+        Ok(Some(recovered))
+    }
+
+    pub(crate) fn settle_business_recovery_failure(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        now_ms: u64,
+        has_alternative: bool,
+    ) -> Result<bool, V3AttemptStoreError> {
+        let trial = self.take_matching_business_recovery_trial(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        )?;
+        let Some(trial) = trial else {
+            return Ok(false);
+        };
+        if has_alternative {
+            trial
+                .store
+                .complete_provider_cooldown_probe_failure_with_permit(&trial.permit, now_ms)
+                .map_err(|error| V3AttemptStoreError::InvalidAttemptState(error.to_string()))?;
+        } else {
+            // Terminal failures release custody without penalizing the identity.
+            trial
+                .store
+                .cancel_provider_cooldown_probe(&trial.permit)
+                .map_err(|error| V3AttemptStoreError::InvalidAttemptState(error.to_string()))?;
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn cancel_business_recovery_trial(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+    ) -> Result<(), V3AttemptStoreError> {
+        drop(self.take_matching_business_recovery_trial(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        )?);
+        Ok(())
+    }
+
+    fn take_matching_business_recovery_trial(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+    ) -> Result<Option<V3BusinessRecoveryTrialGuard>, V3AttemptStoreError> {
+        let mut trial = self.business_recovery_trial.lock().map_err(|_| {
+            V3AttemptStoreError::InvalidAttemptState(
+                "business recovery ownership is unavailable".into(),
+            )
+        })?;
+        let matches = trial.as_ref().is_some_and(|trial| {
+            trial.permit.provider_id() == provider_id
+                && trial.permit.interface_id() == interface_id
+                && trial.permit.auth_alias() == Some(auth_alias)
+                && trial.permit.model_id() == Some(model_id)
+        });
+        Ok(if matches { trial.take() } else { None })
     }
 
     pub fn with_image_history(mut self, image_history: Option<crate::V3ImageHistoryView>) -> Self {

@@ -88,7 +88,7 @@ fn health_disabled_provider_ignores_persisted_cooldown_and_never_writes_one() {
 }
 
 #[test]
-fn health_store_restores_durable_cooldown_until_startup_probe_succeeds() {
+fn health_store_restores_durable_cooldown_without_reconstructing_trial_ownership() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -140,7 +140,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
     let reader = V3ProviderSessionAvailabilityReader::new(restored.clone(), scope.clone());
-    let projection = reader.availability("p", Some("k"), Some("m"), 2_000);
+    assert!(
+        !reader
+            .availability("p", Some("k"), Some("m"), 2_000)
+            .available
+    );
+    let projection = reader.availability("p", Some("k"), Some("m"), 6_000);
     assert_ne!(
         restored
             .cooldown_entries(2_000)
@@ -151,8 +156,8 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         "probing",
         "durable cooldown must never reconstruct a process-local owner"
     );
-    assert!(!projection.available);
-    assert!(projection
+    assert!(projection.available);
+    assert!(!projection
         .blocked_scopes
         .contains(&"provider_cooldown_probe_pending".to_string()));
 
@@ -390,7 +395,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn restart_resets_a_persisted_deadline_beyond_the_configured_probe_maximum() {
+fn restart_preserves_cooldown_minimum_despite_configured_probe_maximum() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -438,10 +443,28 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     );
 
     let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    assert!(restored
+        .provider_cooldown_probe_keys_due(0)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        restored
+            .acquire_provider_business_recovery_trial_for_interface(
+                "p",
+                "default",
+                Some("k"),
+                Some("m"),
+                0,
+            )
+            .unwrap(),
+        routecodex_v3_provider_responses::V3ProviderBusinessRecoveryAcquisition::Contended
+    ));
     assert_eq!(
-        restored.provider_cooldown_probe_keys_due(0).unwrap(),
+        restored
+            .provider_cooldown_probe_keys_due(30 * 60_000 + 1_000)
+            .unwrap(),
         vec![("p".into(), Some("k".into()), Some("m".into()))],
-        "restart must make the bounded recovery probe immediately eligible"
+        "restart preserves the minimum before recovery becomes eligible"
     );
     assert!(restored
         .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
@@ -533,11 +556,11 @@ fn assert_persisted_429_recovery(advisory: bool) {
     );
     let now = 3_720_102;
     assert!(
-        !restored
+        restored
             .record_provider_key_success("p", "k", "m", now)
             .unwrap()
             .available,
-        "late business success cannot bypass a persisted minimum or required probe"
+        "a persisted 429 cooldown is timer-only after its minimum"
     );
     let entries = V3ProviderCooldownCoordinator::load(path.clone())
         .unwrap()

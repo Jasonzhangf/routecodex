@@ -8,7 +8,7 @@ use axum::{
 };
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
@@ -17,9 +17,7 @@ use super::{TestHomeGuard, HUB_V1_TEST_DECLARATION, TEST_LOCK};
 const KEY_ENV: &str = "V3_ISSUE245_PERMISSION_TEST_KEY";
 const PROVIDER_A: &str = "denied";
 const PROVIDER_B: &str = "healthy";
-static DENIED_PROBE_RECOVERS: AtomicBool = AtomicBool::new(false);
-static DENIED_PROBE_FAILURES: AtomicUsize = AtomicUsize::new(0);
-static DENIED_PROBE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static DENIED_TRIAL_RECOVERS: AtomicBool = AtomicBool::new(false);
 
 fn assert_wire_tool(body: &Value) {
     let expected = json!({"type":"function", "function":{
@@ -60,32 +58,29 @@ struct UpstreamState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
 }
 
-/// One conditional business handler for both providers.
-///
-/// The request marker decides success or failure. Business sends always carry
-/// the client tool history; probes carry the fixed "ping; reply pong" body and
-/// are therefore distinguishable inside the handler, never by an extra header.
+/// One conditional business handler for both providers. Every request is a
+/// client business attempt and carries the paired tool history. Recovery is
+/// exercised by the same request path, never by a synthetic probe payload.
 async fn conditional_upstream(
     State(state): State<Arc<UpstreamState>>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response<Body> {
-    let is_probe =
-        body.pointer("/messages/0/content").and_then(Value::as_str) == Some("ping; reply pong");
-    if !is_probe {
-        assert_wire_tool(&body);
-        let marker = body
-            .pointer("/messages/0/content")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+    assert_wire_tool(&body);
+    let marker = body
+        .pointer("/messages/0/content")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
         // Actual provider HTTP error channel: candidate A returns HTTP 400 with
         // a real typed error body. This is a Provider failure, never a client
         // response. Candidate B is the healthy fallback and must not see the
         // same marker as a failure.
-        if marker == "ISSUE245_EXHAUST"
-            || (state.upstream == PROVIDER_A && marker.starts_with("ISSUE245_PERMISSION_DENIED_"))
-        {
+    if marker == "ISSUE245_EXHAUST"
+        || (state.upstream == PROVIDER_A
+            && marker.starts_with("ISSUE245_PERMISSION_DENIED_")
+            && !DENIED_TRIAL_RECOVERS.load(Ordering::SeqCst))
+    {
             state
                 .captures
                 .send(ProviderCapture {
@@ -112,95 +107,73 @@ async fn conditional_upstream(
                     .to_string(),
                 ))
                 .unwrap();
-        }
-        // B must verify exact tools, arguments, call ID and result before it
-        // answers the follow-up. A nonce is returned from complete arguments.
-        let call_id = "call_issue245_continuation";
-        let expected_arguments = json!({
-            "nonce": "ISSUE245_NONCE_0001",
-            "query": "issue245 paired tool continuation"
-        })
-        .to_string();
-        let expected_result =
-            "ISSUE245_TOOL_RESULT:ISSUE245_NONCE_0001:issue245 paired tool continuation";
-        let has_paired_history = body["messages"].as_array().is_some_and(|messages| {
-            let assistant_call = messages.iter().any(|message| {
-                message["role"] == "assistant"
-                    && message["tool_calls"].as_array().is_some_and(|calls| {
-                        calls.iter().any(|call| {
-                            call["id"] == call_id
-                                && call["function"]["name"] == "issue245_continuation"
-                                && call["function"]["arguments"] == expected_arguments
-                        })
+    }
+    // B must verify exact tools, arguments, call ID and result before it
+    // answers the follow-up. A nonce is returned from complete arguments.
+    let call_id = "call_issue245_continuation";
+    let expected_arguments = json!({
+        "nonce": "ISSUE245_NONCE_0001",
+        "query": "issue245 paired tool continuation"
+    })
+    .to_string();
+    let expected_result =
+        "ISSUE245_TOOL_RESULT:ISSUE245_NONCE_0001:issue245 paired tool continuation";
+    let has_paired_history = body["messages"].as_array().is_some_and(|messages| {
+        let assistant_call = messages.iter().any(|message| {
+            message["role"] == "assistant"
+                && message["tool_calls"].as_array().is_some_and(|calls| {
+                    calls.iter().any(|call| {
+                        call["id"] == call_id
+                            && call["function"]["name"] == "issue245_continuation"
+                            && call["function"]["arguments"] == expected_arguments
                     })
-            });
-            let paired_result = messages.iter().any(|message| {
-                message["role"] == "tool"
-                    && message["tool_call_id"] == call_id
-                    && message["content"] == expected_result
-            });
-            assistant_call && paired_result
+                })
         });
-        state
-            .captures
-            .send(ProviderCapture {
-                upstream: state.upstream,
-                path: "/v1/chat/completions".to_string(),
-                authorization: headers
-                    .get("authorization")
-                    .and_then(|value| value.to_str().ok())
-                    .map(ToOwned::to_owned),
-                body: body.clone(),
-            })
-            .expect("capture receiver remains live");
-        if has_paired_history {
-            return chat_response(json!([{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "ISSUE245_CONTINUATION_OK"
-                },
-                "finish_reason": "stop"
-            }]));
-        }
-        // First business turn: B delivers a real function call with complete
-        // arguments the client must actually execute.
+        let paired_result = messages.iter().any(|message| {
+            message["role"] == "tool"
+                && message["tool_call_id"] == call_id
+                && message["content"] == expected_result
+        });
+        assistant_call && paired_result
+    });
+    state
+        .captures
+        .send(ProviderCapture {
+            upstream: state.upstream,
+            path: "/v1/chat/completions".to_string(),
+            authorization: headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body: body.clone(),
+        })
+        .expect("capture receiver remains live");
+    if has_paired_history {
         return chat_response(json!([{
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": null,
-                "tool_calls": [{
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": "issue245_continuation",
-                        "arguments": expected_arguments
-                    }
-                }]
+                "content": "ISSUE245_CONTINUATION_OK"
             },
-            "finish_reason": "tool_calls"
+            "finish_reason": "stop"
         }]));
     }
-    if state.upstream == PROVIDER_A && !DENIED_PROBE_RECOVERS.load(Ordering::SeqCst) {
-        DENIED_PROBE_FAILURES.fetch_add(1, Ordering::SeqCst);
-        return Response::builder()
-            .status(StatusCode::SERVICE_UNAVAILABLE)
-            .header("content-type", "application/json")
-            .body(Body::from(
-                json!({"error":{"type":"api_error","message":"controlled failed probe"}})
-                    .to_string(),
-            ))
-            .unwrap();
-    }
-    if state.upstream == PROVIDER_A {
-        DENIED_PROBE_SUCCESSES.fetch_add(1, Ordering::SeqCst);
-    }
-    // A matching successful semantic probe can restore this identity.
+    // The same complete business request is the recovery trial when A is due.
     chat_response(json!([{
         "index": 0,
-        "message": {"role": "assistant", "content": "pong"},
-        "finish_reason": "stop"
+        "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": "issue245_continuation",
+                    "arguments": expected_arguments
+                }
+            }]
+        },
+        "finish_reason": "tool_calls"
     }]))
 }
 
@@ -250,30 +223,27 @@ async fn hosted_upstream(
 ) -> Response<Body> {
     assert_eq!(state.upstream, "hosted");
     assert_eq!(body["model"], "hosted-wire");
-    let is_probe = body["input"].to_string().contains("ping; reply pong");
-    if !is_probe {
-        assert!(
-            body["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool["type"] == "web_search"),
-            "native hosted search must keep its native tool: {body}"
-        );
-        assert!(!body.to_string().contains("call_issue245_prior_search"));
-        state
-            .captures
-            .send(ProviderCapture {
-                upstream: state.upstream,
-                path: "/v1/responses".into(),
-                authorization: headers
-                    .get("authorization")
-                    .and_then(|v| v.to_str().ok())
-                    .map(ToOwned::to_owned),
-                body,
-            })
-            .unwrap();
-    }
+    assert!(
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["type"] == "web_search"),
+        "native hosted search must keep its native tool: {body}"
+    );
+    assert!(!body.to_string().contains("call_issue245_prior_search"));
+    state
+        .captures
+        .send(ProviderCapture {
+            upstream: state.upstream,
+            path: "/v1/responses".into(),
+            authorization: headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .map(ToOwned::to_owned),
+            body,
+        })
+        .unwrap();
     Response::builder()
         .status(200)
         .header("content-type", "application/json")

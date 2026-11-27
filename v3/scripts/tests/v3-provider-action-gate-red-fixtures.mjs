@@ -97,6 +97,12 @@ function removeEdge(document, chainId, stepId) {
 }
 const cases = [
   {
+    name: 'Direct inner policy bypasses the owning failure recorder',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+    mutate: (source) => source.replace('match record_v3_direct_provider_failure_record(', 'match bypassed_direct_failure_record('),
+    diagnostic: /v3-provider-action-gate-36:.*does not call record_v3_direct_provider_failure_record/u,
+  },
+  {
     name: 'Direct provider action gate revives the removed handoff-budget executor',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
     mutate: (source) => source.replaceAll(
@@ -535,6 +541,24 @@ const cases = [
       'V3RelayProviderTargetResolution::Exhausted { attempted_candidates: _ } => {',
     ),
     diagnostic: /target-resolution source errors must not be swallowed as provider-pool exhaustion/u,
+  },
+  {
+    name: 'Direct failure ingress bypasses active-key outcome custody',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    mutate: (source) => source.replaceAll(
+      'run_v3_direct_provider_failure_policy_with_active_keys(',
+      'run_v3_direct_provider_failure_policy(',
+    ),
+    diagnostic: /does not call run_v3_direct_provider_failure_policy_with_active_keys/u,
+  },
+  {
+    name: 'Responses Relay failure ingress bypasses active-key outcome custody',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    mutate: (source) => source.replaceAll(
+      'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(',
+      'run_v3_relay_provider_failure_policy_with_response_source(',
+    ),
+    diagnostic: /does not call run_v3_relay_provider_failure_policy_with_response_source_and_active_keys/u,
   },
   {
     name: 'Recovery ticket exact-key wait is removed',

@@ -114,15 +114,15 @@ features:
   - docs/architecture/v3-function-map.yml
   required_positive:
   - issue127_disabled_health_persistence_direct_public_blackbox proves a real Direct Responses consumer ignores persisted cooldown when health is disabled, attempts a genuine upstream failure without persisting automatic cooldown, and preserves fresh and independent requests; the health-enabled control honors the same seed
-  - persisted cooldown remains unavailable after restart until startup probe succeeds
-  - d9fd985 public consumer proves listener-local failure, exact identity, probe outcomes, explicit-override persistence rebuild and all-owner lifecycle rollback
+  - id9_persistence_rebuild_is_port_local_with_explicit_override and id9_persistence_rebuild_is_port_local_with_default_path prove listener rebuild preserves the cooldown minimum and the later deadline set by a failed real trial, restores neither in-flight ownership nor automatic sends, routes to the spare before the deadline, and admits a governed real recovery attempt on the owning listener at the deadline.
+  - d9fd985 public consumer proves listener-local failure, exact identity, business recovery outcomes, explicit-override persistence rebuild and all-owner lifecycle rollback
   - id9_429_visibility_is_port_local proves a 429 visibility block on one listener does not hide the same provider identity on a sibling listener
-  - id9_terminal_join_releases_both_listener_probe_permits exercises two public listener control entries with held probes, then public shutdown and terminal exec preparation; both probe permits and scheduler registrations must be released before either method returns
+  - id9_terminal_join_releases_both_listener_probe_permits exercises two public listener control entries with held explicit diagnostics, then public shutdown and terminal exec preparation; diagnostic work and owner registrations are joined before either method returns
   - id9_terminal_supervisor_joins_held_owners rejects detached child tasks at the exact supervisor join return boundary, independently of later listener or persistence shutdown yields
   - id9_stopped_owner_joins_remaining_owner_before_exit covers a completed task and held sibling; the already-consumed JoinHandle is removed and every remaining task is cancelled and joined before fault exit
   - id9_partial_registration_does_not_spawn_detached_owner proves failed listener registration leaves no spawned partial batch and synchronously releases prior registrations
-  - due probe failure preserves cooldown and success removes it
-  - provider startup or cooldown probe HTTP/transport failure is recorded as provider-local degraded health and never escapes as a listener or managed-lifecycle startup failure
+  - a failed real recovery attempt preserves cooldown and advances retry eligibility, and a matching governed business success removes the episode
+  - rebuilding provider health restores persisted entries without dispatching upstream recovery requests
   required_negative:
   - cooldown state never enters provider or client payload
   - lock and persistence failures are not converted into availability success
@@ -244,6 +244,7 @@ features:
   - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
   - Omitted weights in one multi-member tier compile to equal weights.
   - A pool may declare `selection = { strategy = "sticky" }`; it parses, projects into the Manifest pool selection, and round-trips while the default priority selection stays omitted from serialized output.
+  - Optional route-pool active_keys compiles explicit provider/alias members, default retries=3 and hold disposition; an empty list stays empty and the simplified authoring round-trips the same typed policy.
   - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
   - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
   - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
@@ -251,6 +252,7 @@ features:
   - Explicit config.v3.toml remains on V3ConfigStore until the retirement phase.
   required_negative:
   - Unknown user fields, internal fields, malformed provider/model refs, empty pools or tiers, duplicate members, invalid weights, and unknown topology fail before Manifest publication.
+  - Active membership rejects unknown providers/aliases, duplicate members, unreachable pinned aliases, unsupported priority/weighted combinations, and active_queue without active_keys.
   - Runtime, Server, Virtual Router, Target, Provider, and Error crates do not read config.toml or call the user parser.
   - Parse failure never retries config.v3.toml and config.v3 failure never retries config.toml.
   - Lifecycle does not directly choose a parser or re-read config.toml through the legacy store.
@@ -1471,13 +1473,14 @@ features:
   - v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only proves the public Responses Direct live SSE consumer receives every original business byte after optional snapshot append and terminal persistence fail, while the snapshot diagnostic remains observable.
   required_negative:
   - The optional snapshot failure test proves no V3DebugArtifact source replaces the original upstream source and no snapshot failure terminates the public SSE consumer.
+  - The issue639a73f public Responses gate proves client Authorization, cookies, attestation, turn metadata and state, installation IDs, routing and workspace metadata, beta flags and transport negotiation do not enter Provider headers; Connection nomination removes an otherwise eligible identity or correlation header. Its two-origin redirect control proves forwarded identity headers remain on the selected origin for same-origin redirects, never reach a foreign origin through a cross-origin redirect, and unrelated requests retain the default redirect policy.
   required_integration:
   - Model entry blackbox covers real HTTP 503 projection and malformed SSE transport breaks for Chat, Responses including compact, Messages and Gemini. final_truncated_provider_error_breaks_transport_and_preserves_received_head proves an incomplete body with a real 503 head remains private. direct_incomplete_http_error_remains_private_evidence covers the same boundary at the pluggable Direct transport interface. The V3 workspace gate also covers WebSocket decode failures, provider 429/binary/502, malformed input, pool exhaustion, session isolation and successful tools.
   - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
   - Server model endpoints emit internal Debug/Error evidence and return complete success, a qualified final Provider error or a typed incomplete transport outcome.
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
-  - issue1f60200 exercises public Responses provider-request dry-run through Direct and Relay. Both paths capture redacted client identity headers, exclude Connection-specified headers and credentials, and make zero Provider sends. The live counterpart proves the actual headers. The Server orchestration test exercises the typed Relay-to-Direct handoff and proves the same redacted identity projection with zero sends.
+  - issue1f60200 exercises public Responses provider-request dry-run through Direct and Relay. Both paths capture redacted client identity headers, exclude Connection-specified headers and credentials, and make zero Provider sends. issue639a73f proves the actual User-Agent, Originator, x-client-request-id, session-id, thread-id, x-codex-window-id, x-codex-parent-thread-id and x-openai-subagent values through live Direct and Relay, selected Provider Authorization, configured override precedence and the exclusions above, including Direct-to-Relay reselection. The Server orchestration test exercises the typed Relay-to-Direct handoff and proves the same redacted identity projection with zero sends.
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and only applies the current ToolThinking/model-identity cleanup contract
   - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
@@ -1510,6 +1513,227 @@ features:
     forbidden_claim: Do not claim P5 Router/Target selection, P6 Responses Provider request, P7 relay/protocol support, real ~/.rcc mutation, or global install from P3/P4 evidence.
 - feature_id: v3.virtual_router_target_interpreter
   status: p5_source_and_live_verified
+  active_key_selection_blackbox:
+    requirement: routecodex-active-key-queue v2
+    command: npm run test:v3-active-key-selection
+    test_design: docs/design/v3-active-key-selection.md
+    failure_mode: Sticky fourth-failure retry and reselection preserve each caller request's identity headers and the selected alias credential for Responses HTTP providers in Direct and Relay. The cross-protocol Chat case retains its header exclusion, queue order, fresh-session assignment and inactive-account boundary.
+    test_ids:
+    - active_queue_success_retains_head_and_excludes_inactive_alias
+    - fourth_recoverable_failure_reselects_and_next_request_keeps_b
+    - third_failure_then_success_does_not_dispose_active_head
+    - decode_and_empty_response_failures_reselect_without_unchanged_retry
+    - cross_protocol_fourth_failure_and_round_robin_retry_keep_actual_turns
+    - same_protocol_generic_direct_retries_then_holds_and_releases_the_key
+    - sticky_success_feedback_covers_chat_anthropic_and_gemini_entries
+    - confirmed_quota_switches_early_and_queue_release_does_not_clear_health
+    - final_only_account_errors_count_once_each_until_fourth_failure_hold
+    - held_key_survives_fixture_reconstruction_and_release_rejoins_tail
+    - corrupt_hold_state_fails_startup_without_releasing_or_leaking_listener
+    - cancellation_does_not_count_as_a_delivery_failure_or_hold_a_key
+    - accepted_refusal_and_content_filter_reset_the_failure_streak
+    - streaming_failure_recovery_commits_only_the_accepted_keys_business_frames
+    - review_regressions::legacy_failure_enters_active_default_with_target_witness
+    - review_regressions::held_active_default_is_not_a_health_successor
+    - review_regressions::overlapping_legacy_and_active_occurrences_keep_their_own_policy
+    - review_regressions::hold_store_failure_still_recovers_to_healthy_successor
+    - review_regressions::shared_identity_uses_the_supplying_active_pools_state
+    - review_regressions::concurrent_fourth_failure_holds_once_and_independent_requests_keep_b
+    - review_regressions::legacy_duplicate_identity_keeps_first_merged_row_rank
+    - review_regressions::legacy_duplicate_identity_keeps_scheduled_tier_table
+    - business_recovery::due_active_head_has_one_business_trial_while_other_requests_use_b
+    - business_recovery::held_active_member_cannot_acquire_trial_and_release_keeps_health
+    - business_recovery::failed_owned_trial_defers_without_spending_active_retry_budget
+    - business_recovery::cancelled_business_trial_releases_custody_without_holding_the_active_key
+    - final_boundaries::post_choice_hold_reselects_b_before_dispatch_planning_returns
+    - final_boundaries::fresh_choice_invalidated_during_validation_uses_b_in_each_dispatch_loop
+    - final_boundaries::fresh_unsent_hold_preserves_legacy_default_occurrence
+    - final_boundaries::fresh_unsent_hold_reaches_b
+    - final_boundaries::stale_failed_tail_retry_excludes_a_across_declarations_and_sends_b
+    - final_boundaries::contended_trial_is_health_neutral_in_each_dispatch_loop
+    - final_boundaries::relay_direct_handoff_preserves_actual_http
+    - final_boundaries::direct_relay_handoff_preserves_actual_http
+    - final_boundaries::later_actual_handoff_truncation_replaces_http
+    - final_boundaries::later_actual_handoff_truncation_breaks_the_client_transport
+    - final_boundaries::independent_local_failure_never_borrows_http
+    - final_boundaries::final_only_failed_direct_trial_ends_active_episode
+    - final_boundaries::final_only_failed_relay_trial_ends_active_episode
+    - final_boundaries::final_only_failed_trial_protocol_codecs
+    - final_boundaries::direct_skipped_retry_projects_exact_http_through_server
+    - round_robin_uses_only_active_aliases_and_retries_do_not_consume_turns
+    - sticky_sessions_spread_then_keep_their_successful_alias
+    - sticky_failed_attempt_does_not_create_a_successful_preference
+    - sticky_tail_fourth_failure_clears_old_binding_and_allows_later_fresh_a
+    - failure_streak_accumulates_across_requests_without_retry_budget_reset
+    - nonretryable_http_failures_accumulate_without_unchanged_same_key_retries
+    - exhausted_final_complete_http_error_preserves_actual_status_and_body
+    - actual_final_truncation_never_projects_an_earlier_http_error_or_cycles
+    - invalid_model_arguments_are_success_and_client_error_history_stays_paired
+  active_key_control_blackbox:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test active_key_control_address -- --test-threads=1 --nocapture
+    test_ids:
+    - real_admin_status_and_exact_release_follow_the_selected_listener_control
+    - control_publication_failure_keeps_business_and_preserves_the_foreign_record
+    - drop_and_exec_close_the_owned_companion_and_record
+    - drop_revokes_record_only_controls_on_retained_connection
+    - bracketed_ipv6_bind_keeps_legacy_business_and_real_admin_controls
+    - colliding_config_listener_components_keep_independent_real_admin_controls
+    - long_canonical_config_name_keeps_real_admin_status_release_and_cleanup
+    - shared_canonical_config_keeps_chunked_listener_owners_independent
+    - failed_chunked_publication_preserves_live_sibling_and_foreign_leaf
+    - case_distinct_listener_ids_keep_independent_real_admin_controls
+    - record_path_above_syscall_limit_keeps_real_admin_controls
+    address_coverage: IPv4 wildcard, IPv6 loopback and wildcard, and a currently assigned non-loopback IPv4 address. The companion exposes only selection controls and closes its record and sockets with its listener owner.
+  active_key_attempt_witness_blackbox:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test active_key_retry_witness -- --test-threads=1 --nocapture
+    test_ids:
+    - stale_failed_tail_retry_cannot_reopen_singleton
+    - direct_skipped_retry_preserves_final_actual_http
+    - responses_skipped_retry_preserves_final_actual_http_witness
+    - chat_skipped_retry_preserves_final_actual_http_witness
+    - gemini_skipped_retry_preserves_final_actual_http_witness
+    - anthropic_skipped_retry_preserves_final_actual_http_witness
+    - no_transition_qualifies_second_actual_http_error
+    - later_actual_transport_never_projects_earlier_http_error
+    - later_actual_truncation_never_projects_earlier_http_error
+  active_key_handoff_projection_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_handoff_projection:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_handoff_projection::relay_direct_held_successor_projects_exact_http_through_server
+    - tests::active_key_handoff_projection::direct_relay_held_successor_projects_exact_http_through_server
+    failure_mode: A real Server handoff selects B before its fourth-failure hold; opposite-mode dispatch must skip B and project only the retained actual A503 status, content-type and complete body. The per-aggregate observation exists only in cfg(test) builds.
+  active_key_control_storage_overlap_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_control_storage_race:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_control_storage_race::prepared_publication_survives_another_owners_prefix_prune
+    failure_mode: A prepared shorter listener publication overlaps a longer prefix owner's shutdown. An independently opened lock and a child process must observe the publisher's actual OS lock. The real Server/Admin consumer must retain business forwarding, control discovery, held-member status, exact release and complete resource cleanup.
+  active_key_control_contention_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_control_contention:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_control_contention::contended_admin_discovery_does_not_block_same_runtime_business
+    - tests::active_key_control_contention::startup_contention_serves_business_before_bounded_control_publication
+    - tests::active_key_control_contention::contended_drop_has_no_waiter_and_retains_exact_manual_cleanup
+    failure_mode: An actual Admin request must leave unrelated business progressing on the same current-thread consumer runtime while a separate handle holds its control namespace lock; lock acquisition must end explicitly and leave no latent waiter.
+  active_key_partial_release_blackbox:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::active_key_partial_release:: -- --test-threads=1 --nocapture'
+    test_ids:
+    - tests::active_key_partial_release::releasing_one_listener_closes_its_control_and_preserves_its_peer
+    failure_mode: Port-scoped shutdown removes only the released listener's control owner and permits same-canonical-config replacement while the sibling serves real business and scoped control.
+  active_key_managed_release_blackbox:
+    command: 'npm run test:v3-managed-server-lifecycle'
+    test_ids:
+    - active_key_control_release::managed_release_reports_control_timeout_and_retries_only_the_selected_owner
+    - active_key_control_release::actual_managed_restart_replaces_active_control_records
+    - active_key_control_release::managed_active_controls_receive_declared_config_without_admin
+    - active_key_control_release::cancelled_managed_exec_retains_original_active_controls_and_business
+    - active_key_control_release::contended_successor_reports_unavailable_controls_and_retains_exact_recovery
+    - active_key_control_release::final_port_cleanup_failure_keeps_managed_retry_until_exact_cleanup_completes
+    - active_key_control_release::managed_release_revokes_accepted_record_only_controls
+    - active_key_control_release::fatal_exec_recovers_exact_controls
+    - active_key_control_release::contended_fatal_exec_recovers_exact_controls
+    - active_key_control_release::removed_port_retries_exact_retained_cleanup
+    - active_key_control_release::exited_verified_owner_resolves_foreign_replacement_and_starts_business
+    - active_key_control_release::exact_custody_terminal_contention_recovers_successor_and_preserves_foreign_leaf
+    - active_key_control_release::exact_custody_child_exits_with_sample_lock_and_failed_artifact_reduction
+    - active_key_control_release::exact_custody_interrupted_exec_recovers_from_predecessor_generation
+    - active_key_control_release::interrupted_exec_non_executable_successor_records_rejection_and_closes
+    - active_key_control_release::native_collection_refusal_retains_rejected_foreground
+    - active_key_control_release::native_prepublication_unwind_collects_adopted_child
+    - active_key_control_release::native_published_handoff_observation_failure_retains_collected_scope
+    - active_key_control_release::native_stop_refusal_retains_current_generation
+    - active_key_control_release::exact_post_adoption_unwind_retains_foreground
+    - active_key_control_release::exact_custody_published_declaration_recovers_predecessor_control
+    - active_key_control_release::exact_custody_public_restart_recovers_predecessor_control
+    - active_key_control_release::public_restart_staged_same_directory
+    - active_key_control_release::public_restart_staged_changed_directory
+    - active_key_control_release::public_restart_retired_control_starting
+    - active_key_control_release::public_restart_retired_control_running
+    - active_key_control_release::exact_custody_status_lock_failed_adoption_recovers_controls
+    - active_key_control_release::published_outcome_locked_provider_restore
+    - active_key_control_release::published_outcome_unlocked_provider_restore
+    - active_key_control_release::published_outcome_locked_readiness
+    - active_key_control_release::aggregate_absent_locked_constructor
+    - active_key_control_release::aggregate_absent_locked_changed_directory
+    - active_key_control_release::aggregate_absent_changed_directory_transfer_retry
+    - active_key_control_release::interrupted_predecessor_control_unlink
+    - previous_release_restart::interrupted_previous_transfer_unlink
+    - tests::exited_legacy_transfer_resolves_each_pre_normalization_location
+    - active_key_control_release::empty_custody_preparation_retains_live_owner
+    - active_key_control_release::empty_custody_recovery_retries_log_open
+    - active_key_control_release::empty_custody_recovery_retries_spawn
+    - active_key_control_release::stopped_child_exit_recovers_owned_generation
+    - active_key_control_release::foreground_exec_refusal_retries_through_formal_restart
+    - active_key_control_release::foreground_owner_survives_competing_public_start
+    - active_key_control_release::stopped_child_retries_control_unlink
+    - active_key_control_release::stopped_child_retries_cache_unlink
+    - active_key_control_release::failed_starting_retains_generation_through_unlink_fault
+    - active_key_control_release::failed_starting_retains_generation_through_socket_fault
+    - active_key_control_release::failed_starting_retains_generation_through_cache_fault
+    - active_key_control_release::rejected_restart_plan_settles_at_graceful_stop
+    - active_key_control_release::public_stop_observes_failed_terminal_publication
+    - active_key_control_release::fresh_child_rolls_back_incomplete_control_publication
+    - tests::forced_stop_validates_plan_before_retiring_generation
+    - tests::forced_signal_dispatch_reports_actual_outcomes
+    - tests::forced_exit_requires_positive_zombie_row
+    - tests::forced_exit_observes_collection_between_native_queries
+    - tests::forced_exit_live_generation_and_query_error_stay_unproved
+    - tests::forced_stop_rejects_changed_witness
+    - tests::live_hooks_group_does_not_block_forced_stop
+    - tests::bare_no_delivery_requires_verified_stopped_baseline
+    - active_key_control_release::replacement_listener_preserves_failed_stop
+    - active_key_control_release::exact_forced_stop_refuses_changed_control
+    - active_key_control_release::exact_cleanup_after_original_exit
+    - active_key_control_release::exact_cleanup_after_missing_fresh_cache
+    - active_key_control_release::exact_cleanup_after_original_metadata_error
+    - active_key_control_release::exact_cleanup_after_detached_original_peer_error
+    - active_key_control_release::exact_cleanup_after_stopped_original_spawn_error
+    - active_key_control_release::exact_cleanup_after_detached_fresh_peer_error
+    - active_key_control_release::exact_cleanup_after_first_peer_error_and_collection
+    - active_key_control_release::exact_cleanup_preserves_live_and_replaced_socket
+    - active_key_control_release::exact_cleanup_after_unresolved_prebusiness_fresh_reader
+    - active_key_control_release::exact_cleanup_joins_held_provider_work
+    - active_key_control_release::exact_cleanup_unwind_retains_pending_request_until_owned_lock_recovery
+    - issue36df127_start_replaces_unresponsive_aggregate_with_attached_admin
+    - start_force_kills_explicit_listener_pid_after_graceful_timeout
+    - issue36df127_stop_unresponsive_aggregate_with_attached_admin
+    - stop_force_kills_explicit_listener_pid_after_graceful_timeout
+    - f8c64a9_shutdown_slow_writer_remains_pending_until_exit
+    - managed_restart_recovers_owned_stale_running_child_after_unexpected_exit
+    - active_key_control_release::empty_custody_recovery_verifies_independent_proof
+    - tests::foreground_exec_failure_preserves_terminal_retry
+    - tests::failed_outcome_preserves_primary_and_unverified_plan
+    - active_key_control_release::exact_custody_forced_stop_recovers_controls
+    failure_mode: Actual authenticated managed ReleasePorts revokes accepted controls before success and preserves accepted business and siblings. Exact retained A remains retryable after a native A+B to B restart and external lock release. Formal restart recovers after Starting and Failed status writes both time out. A changed-directory predecessor control generation mismatch preserves all exact evidence. Genuine recovery permits a later formal restart to the original declaration with usable controls and Provider business. When a client times out with Provider work pending and ordinary Stop refuses the fixture lock, the same fixture must retain the live recorder through unwind and recover after its own lock is released. An owned child collected between the initial generation observation and the native process-state query must be recognized by positive final absence evidence; a live generation or query error cannot authorize publication.
+  active_key_rejected_native_exec:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib tests::native_exec_failure_retains_aggregate_and_hooks_owner -- --exact --nocapture'
+    failure_mode: A genuine native exec failure after borrowed active-control preparation preserves exact original endpoint bytes, actual status/release, listener and hooks ownership while cleaning only attempt artifacts.
+  active_key_lifecycle_custody:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib exact_custody_ -- --test-threads=1'
+    test_ids:
+    - tests::exact_custody_recovery_requires_independent_generation_evidence
+    - tests::codex_sample_persistence::exact_custody_failure_returns_before_stalled_sample_retention
+  active_key_exec_handoff_ownership:
+    command: 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib active_key_control::tests_active_key_exec:: -- --nocapture --test-threads=1'
+    test_ids:
+    - active_key_control::tests_active_key_exec::active_key_custody_retains_fully_written_leaf_after_failed_rollback
+    - active_key_control::tests_active_key_exec::active_key_exec_replaces_exact_or_missing_and_keeps_equal_record_owned
+    - active_key_control::tests_active_key_exec::active_key_exec_preserves_foreign_and_malformed_record
+    - active_key_control::tests_active_key_exec::active_key_exec_retires_removed_config_and_policy_without_touching_siblings
+    - active_key_control::tests_active_key_exec::active_key_exec_expiry_and_cancellation_retain_exact_cleanup_for_later_close
+    - active_key_control::tests_active_key_exec::active_key_exec_duplicate_scope_cannot_construct_a_cleanup_owner
+    - active_key_control::tests_active_key_exec::active_key_startup_cancellation_keeps_exact_publication_alternatives
+    - active_key_control::tests_active_key_exec::active_key_startup_needs_authority_and_durable_write_before_mutation
+    failure_mode: Verified exec handoff permits only full exact record replacement or retirement, including same-PID equal record-only ownership and removed config files; conflicts survive and expired/cancelled acquisition leaves explicit cleanup responsibility without late mutation.
+  active_key_recovery_dispatch_guard:
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch -- --exact
+    failure_mode: A concurrent hold during recovery acquisition must reject the stale unsent selection and release only its matching trial without changing cadence or counting a dispatch.
+  estimated_turn_filter_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server estimated_turn_filter
+    test_ids: [responses_estimated_turn_filter_applies_per_request, estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_role]
+  session_turn_limit_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server turn_limit
+    test_ids: [responses_session_turn_limit_skips_every_key_until_compact, responses_nonmatching_turn_limit_witnesses_do_not_block_the_provider, responses_active_key_turn_limit_preserves_failure_and_compact_boundaries]
+    active_composition: Direct and Responses Relay exact-400 failures charge one actual active dispatch; same-key retries, sibling and inactive aliases remain excluded. A trial-owned rejecting Provider releases matching custody without changing cooldown or cadence, and a trial-ready successor actually dispatches and recovers. Repeated filtered requests preserve the fourth-failure threshold. Native compact resets its active streak and clears only conversation restrictions while another held member stays held. Manual release leaves conversation restrictions intact. Estimated-turn filtering preserves original active-key eligibility without delivery failures.
   admission_nonblocking_blackbox:
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e37891a_admission_nonblocking -- --nocapture --test-threads=1
     test_ids:
@@ -1597,6 +1821,8 @@ features:
   - A pool may declare selection strategy sticky: Target10 then keeps one primary and one standby provider per server+routingGroup+sessionId+pool binding, keyed by providerId+authAlias+modelId. The same session keeps its primary across attempts, uses the standby only when the primary is unusable, and rolls primary/standby only on a health or cooldown exclusion, never on a request-local provider failure; recovery is lazy and never pulls the session back. A fresh session takes the least-held primary in that pool so different sessions spread instead of stacking on the heaviest member, and a single-member pool keeps an empty standby. Sticky state is process-lifetime in-memory per pool with no cross-pool association, and a request without a client control session id creates no binding and keeps the previous selection behavior. Sticky only orders candidates the unchanged health/cooldown/availability/priority rules already admitted, inside the same eligible route tier.
   required_gates:
   - npm run test:v3-p5-router-target
+  - npm run test:v3-active-key-selection
+  - npm run verify:webui-smoke
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target sticky -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture
@@ -2069,6 +2295,17 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
+  governance_clauses:
+    status: approved_candidate_unbound
+    ontology: docs/architecture/v3-protocol-mapping-ontology.md
+    clauses:
+    - MAP-001
+    - MAP-002
+    missing_executable_edges:
+    - inbound complete-field preservation into Chat/extension with Chat Process continuation
+    - outbound warning and scoped diagnostic persistence for complete unmatched business fields
+    - provider-wire omission plus mapped-remainder continuation on the first attempt
+    - public JSON/SSE proof that allowlist absence causes no local abort, reselection, or synthetic status
   assistant_text_projection_regression:
     issue: aa8d483
     owner: request_outbound_responses_items::normalize_responses_content_part_for_role
@@ -2201,7 +2438,7 @@ features:
     save without MetadataCenter, headers, or outbound repair.
   - Responses text.verbosity remains output verbosity. Anthropic consumes valid low/medium/high values only as a registered local style hint; it never maps them to output_config.effort because that field
     is reasoning effort, not verbosity.
-  - "Responses text.format.json_schema.name is a source-only schema identity: inbound preserves it, while Anthropic outbound consumes it and emits only the target-valid `{type:json_schema,schema}` format. Unknown nested format fields and malformed strict values remain explicit outbound failures."
+  - "Responses text.format.json_schema.name and boolean strict are source-only schema controls: inbound preserves them, while Anthropic outbound consumes them and emits only the target-valid `{type:json_schema,schema}` format. An unmatched nested format field is dropped with target/path/field diagnostic evidence while the mapped remainder continues; a malformed registered target field such as non-boolean strict remains an explicit outbound failure."
   - ? Responses custom tool declarations map exactly to native OpenAI Chat custom tools. Anthropic uses the registered `v3.custom_tool.anthropic_string_input_wrapper.v1` compatibility projection
     : exact raw input becomes `tool_use.input={"input":raw}`, declaration description/schema carries free-form or exact grammar information without claiming native enforcement, and reverse projection requires
       governed custom declaration identity plus the exact wrapper shape for raw-string unwrapping; other model-generated JSON values remain complete custom input text with a paired consumer error and exact client-string follow-up. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image
@@ -2242,6 +2479,7 @@ features:
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
   - Forced choice, native Chat history and explicit namespace references project only through exact declared identities. Responses history may associate a namespace-less call only when the current declarations contain one unique same-kind identity with the exact full leaf and no same-kind plain declaration owns that name. Function and custom never cross-bind; prefixes, separators, call IDs, source item IDs and arguments grant no authority; undeclared or ambiguous references remain unchanged.
+  - Responses Direct passthrough preserves the native namespace and leaf name of references to native additional_tools declarations. A declaration whose implicit wire name collides uses the assigned alias and its own schema in the same carrier. History, forced choice, and allowed_tools use the same binding. The response inverse accepts only an emitted alias of the matching tool kind.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -2249,6 +2487,7 @@ features:
   - responses_additional_tools_refreshes_same_namespace_custom_tool_before_anthropic_projection
   - responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer
   - responses_direct_additional_tools_declarations_execute_and_follow_up_once
+  - responses_direct_additional_tool_collision_executes_and_follows_up_once
   - responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer
   - namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom
   - namespace_target_bindings_keep_kind_choice_history_and_inverse
@@ -2303,6 +2542,8 @@ features:
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
   - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
+  - dbc3d38_responses_anthropic_structured_output_strict_false_public
+  - dbc3d38_responses_anthropic_structured_output_strict_false_sse_public
   - anthropic_relay_preserves_explicit_tool_result_is_error_presence
   - responses_completed_tool_output_does_not_synthesize_anthropic_is_error
   - anthropic_consumes_responses_json_schema_name_in_outbound_projection
@@ -3460,6 +3701,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
+  - v3/crates/routecodex-v3-server/tests/explicit_cooldown_diagnostic.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3467,30 +3709,41 @@ features:
   - run_v3_plan_execution_operator_with_probes
   - PlanExecutionOperator::execute_plan
   required_positive:
-  - consecutive_provider_errors_direct_public_http and consecutive_provider_errors_relay_public_http prove that non-429 recoverable errors retain the shared tenth-error policy and an ordinary 429 cannot trigger the hour on its own tenth observation. Ten ordinary HTTP 429s within 120 seconds create a 15-second timer-only exclusion. A later request can try that identity when the timer expires; at least eleven ordinary 429s spanning strictly more than 120 seconds without success create the one-hour minimum. Eligible successors and other listeners remain usable. A failed probe preserves the hour minimum, and a real 2xx probe can restore routing only after it expires. A real HTTP 429 with confirmed insufficient_quota still commits the hour immediately.
-  - late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http proves a held real business failure arriving after qualified cooldown switches to a healthy spare and cannot create a second precool owner that shadows the subsequent real successful probe and restored business dispatch.
-  - sustained_429_hour_requires_probe_and_ignores_late_business_success proves a one-hour unresolved episode cannot be cleared by business success or time alone; typed probe matrix preserves non429 failures and the persistence consumer retains the lock across Store reconstruction.
-  - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
-  - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
-  - one opaque typed acquisition identity owns each scheduled or rescue probe; matching current-health-generation success atomically resets score, streak, delta window, cooldown, and probe backoff state
+  - expired_cooldown_is_recovered_by_the_real_request_public_http and expired_cooldown_is_recovered_by_the_real_request_relay_public_http prove an exact cooled identity admits one real trial after expiry and routes concurrent requests to the healthy alternative without automatic synthetic traffic.
+  - failed_real_recovery_attempt_preserves_cooldown_public_http proves a real failed trial keeps the episode and defers the next trial while the current and subsequent requests use the healthy alternative.
+  - slow_direct_trial_defers_from_failure_settlement_public_http holds the upstream response beyond one retry interval with the real clock, then proves the next request still uses the spare until the deadline measured from failure settlement.
+  - final_terminal_trial_is_health_neutral_on_direct_public_entry and final_terminal_trial_is_health_neutral_on_relay_public_entry prove a due singleton trial forwards its complete real final HTTP error, preserves the existing cooldown and cadence, and allows an immediate independent request to own the next trial.
+  - direct_trial_uses_successor_window_at_failure_public_http holds a real Direct trial across a successor's declared window boundary and verifies both reselection when it opens and health-neutral final projection when it closes.
+  - direct_reselection_ignores_a_preferred_candidate_after_its_window_closes proves a cached preferred recovery target cannot bypass Target's current declared model window.
+  - direct_ordinary_429_streak_uses_the_failure_observation_time proves the tenth ordinary HTTP429 stays routable when the observed first-to-last span exceeds 120 seconds.
+  - direct_429_replans_when_its_preferred_successor_closes_public_http proves a real owned HTTP429 can select a successor while its window is open, then send to the next declared identity if that window closes before retry planning.
+  - direct_tenth_429_crosses_120_seconds_while_in_flight_public_http restores nine real HTTP429 observations, sends the tenth inside the span using the production clock, and receives it past the threshold without creating a short cooldown.
+  - superseded_compatibility_failure_preserves_newer_cooldown_public_http proves a late exact-identity HTTP400 from a superseded trial preserves the newer cooldown, retry cadence and consecutive HTTP403 streak.
+  - consecutive_provider_errors_direct_public_http and consecutive_provider_errors_relay_public_http prove that non-429 recoverable errors retain the shared tenth-error policy and an ordinary 429 cannot trigger the hour on its own tenth observation. Ten ordinary HTTP 429s within 120 seconds create a 15-second timer-only exclusion. A later request can try that identity when the timer expires; at least eleven ordinary 429s spanning strictly more than 120 seconds without success create the one-hour minimum. Eligible successors and other listeners remain usable. After the minimum, one matching real request can try recovery. A governed success clears the episode and a failed trial defers the next one. A real HTTP 429 with confirmed insufficient_quota still commits the hour immediately.
+  - late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http proves a held real business failure arriving after qualified cooldown switches to a healthy spare and leaves the episode available for the next eligible real recovery trial.
+  - a one-hour episode requires matching governed success from the owned recovery trial; the minimum and failed-trial deadline survive reconstruction and an ordinary result from an earlier request cannot settle the episode
+  - issue231_responses_relay_stale_probe_public_blackbox proves Responses Relay delivers the healthy later-tier payload while a preferred business trial is held. Both stale completion branches preserve the newer deadline and release their owner. At the new deadline, the final real HTTP error is projected while a healthy sibling continues.
+  - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, and uses governed real trials for failed deferral and successful recovery. Exhaustion preserves the final HTTP400 while explicit current-turn native hosted search continues.
+  - one opaque typed acquisition owns each real business trial; matching governed success atomically resets score, streak, delta window, cooldown, and retry cadence state
   - old_probe_outcomes_release_only_their_owner_and_preserve_stored_health proves stale cancel/success/failure preserve stored health and schedule while releasing only A
   - late_probe_outcomes_cannot_release_replacement_or_sibling_owners and acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b prove same-generation replacement ownership, non-default interface and exact sibling isolation, and deterministic due-time admission
-  - newer_business_generation_shutdown_releases_held_probe_owner, newer_business_generation_exec_releases_held_probe_owner, and newer_business_generation_drop_releases_held_probe_owner prove authenticated held probe release after genuine same-identity earlier business403, while healthy business completes before cancellation; an already accepted read-only public HTTP connection observes original in-memory state after listener exit
-  - public Chat HTTP proves cooldown-only failed rescue closes the exhausted request without client status, error payload or fabricated success, preserves exact-identity cooldown and permits healthy sibling progress
-  - rejected, cancelled or dropped reversible exec preparation restores the sole aggregate probe owner before business admission resumes; restored scheduling preserves future due deadlines and an authenticated due probe restores only its exact cooled identity before subsequent successful business
-  - fair scheduling reaches an independently available fifth due identity while four earlier identities retain real business transport leases; capacity rejection remains health-neutral and the four manager slots stay bounded
-  - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact HTTP 2xx probe recovery
-  - 429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch
-  - Responses, OpenAI Chat, Anthropic, and Gemini probes send a simple ping and accept every HTTP 2xx response without reading the success body or validating content type, JSON, embedded errors, terminal status, or pong text
-  - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
-  - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
-  - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
-  - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
+  - newer_business_generation_shutdown_releases_held_probe_owner, newer_business_generation_exec_releases_held_probe_owner, and newer_business_generation_drop_releases_held_probe_owner prove authenticated explicit diagnostic cancellation after a genuine same-identity earlier HTTP403 while healthy business completes. An already accepted read-only public connection observes the same cooldown after listener exit.
+  - public Chat HTTP proves that a failed diagnostic leaves the exact cooldown intact. A request with only a held identity exhausts without fabricated success, and an eligible final real business failure projects only its own HTTP error while healthy sibling traffic completes.
+  - rejected, cancelled or dropped reversible exec preparation closes the held explicit diagnostic socket, preserves the exact retry deadline, and allows a governed real trial to recover only its own identity when due.
+  - five independent identities can own genuine recovery trials while each identity remains exclusive and concurrent duplicate traffic continues to a declared spare.
+  - each health-excluded complete identity stays visible in the cooldown pool through trial eligibility and in-flight recovery until the matching governed success
+  - the public managed listener exercises exact-key business failures, timer-only 429 expiry, in-flight trial visibility, spare-key routing, and normal same-key dispatch after recovery
+  - explicit bounded diagnostics retain the Responses, OpenAI Chat, Anthropic and Gemini request shape and status-only HTTP observation semantics
+  - explicit_paid_diagnostic_is_bounded_single_flight_and_observation_only_public_http proves the default operator action emits no upstream request, while a paid opt-in observes one exact identity and leaves cooldown eligibility and health unchanged across completed and timed-out diagnostics.
+  - admin_paid_diagnostic_preserves_consent_identity_observation_and_cadence proves the Admin route preserves paid consent and exact listener identity, reports the actual upstream result, and leaves the trial cadence untouched. Its default action emits no upstream request.
+  - a failed business trial advances only next_probe_at_ms from failure settlement and never extends the original blocked_until_ms
+  - every retry interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
+  - cc-sol and kdns provider declarations with probe_interval_ms=120000 cap the retry deferral at two minutes
   - matched HTTP 401 and consecutive HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
-  - Confirmed HTTP 401 errors start the one-hour cooldown immediately for the complete identity. Independent current probes retain their recovery cadence.
-  - Ordinary HTTP 429 requires its own count and elapsed span for automatic cooldown; other recoverable HTTP errors retain their shared-count policy. An early successful or failed probe cannot shorten the committed one-hour minimum.
-  - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
+  - Confirmed HTTP 401 errors start the one-hour cooldown immediately for the complete identity. Other identities retain their separate trial cadence.
+  - Ordinary HTTP 429 requires its own count and elapsed span for automatic cooldown; other recoverable HTTP errors retain their shared-count policy. Explicit diagnostic outcomes leave the committed minimum and trial cadence intact.
+  - private-profile diagnostics preserve provider-specific request compatibility and report HTTP status as an observation
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - Before client business commit, a complete HTTP 502 from the final Provider key reaches the HTTP client with its original status and body. A truncated 2xx follows the separate incomplete-response recovery path and only its exhausted request transport ends.
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
@@ -3506,11 +3759,11 @@ features:
   - Public held-probe SSE regressions prove exhausted requests return without waiting for a probe and subsequent requests can use the independently recovered exact identity.
   - A saturated local capacity snapshot does not exclude the declared preferred candidate in Direct or Relay
   - Direct Chat and Messages precommit SSE failures select an available declared successor immediately; Responses initial protocol preplanning never waits for target recovery.
-  - Business requests acquire no capacity lease or permit. Scheduled probes retain their separate background admission and cannot delay business requests.
+  - Business requests acquire no capacity lease or permit. An eligible selected recovery attempt acquires exact-identity ownership; other requests immediately use available successors.
   required_negative:
-  - stale successful or failed probe generations cannot mutate newer provider health state
-  - Non-2xx probe responses and connection failures preserve cooldown; business response parsing is unaffected by status-only probes
-  - an early due probe does not make the provider available before HTTP 2xx probe success
+  - stale trial results cannot mutate newer provider health state
+  - explicit diagnostic outcomes preserve cooldown and business streaks; business response parsing remains independent of status-only diagnostics
+  - automatic recovery sends no upstream request and eligibility alone cannot clear the cooldown episode
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Capacity saturation, adaptive budget, permit state, FIFO ticket, or Deferred state cannot record provider health, cooldown, MetadataCenter, or provider/client payload truth
@@ -3533,6 +3786,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test explicit_cooldown_diagnostic -- --nocapture
+  - npm run test:v3-port-local-provider-health
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
@@ -4285,7 +4540,7 @@ features:
   - frame acceptance covers only the existing Responses JSON caller; identity, Direct, and hosted frame paths remain pending, so no addressable global frame node is claimed
   - resolve_target and plan_execution are SDK-wired through actual Direct kernel, four-protocol Relay, and Server non-admitting preplan callers; initial execution and reselection both use run_v3_plan_execution_operator_with_probes, the actual typed V3PlanExecutionModePolicy is consumed, and control does not mirror into payload
   - resolve_target and plan_execution passed the final combined58/58 matrix, Server127/127, and Runtime1358/0fail/1existingignored; no pending-node acceptance is inferred from those results
-  - pre-dispatch protocol-plan failure projects through SDK02..06; kernel::tests::protocol_plan_failure_preserves_source_status_and_pool_exhausted preserves the real failure source and status, while multi_listener_server::responses_selection_exhaustion_never_reaches_the_client locks public exhaustion behavior
+  - pre-dispatch protocol-plan failure projects through SDK02..06; kernel::tests::protocol_plan_failure_preserves_source_status_and_pool_exhausted preserves the real failure source and status, while multi_listener_server::responses_selection_exhaustion_never_reaches_the_client uses immutable authoring TOML, an enabled-provider wire-success control, exact Target09 provenance, zero disabled-phase captures, comments-only detectable SSE termination, and zero-byte JSON termination; tests::target_origin_health_neutrality::target_origin_json_and_sse_leave_exact_aggregate_health_and_persistence_unchanged supervises one owned child that compares every retained listener store through the gated Provider-owned typed observer for fresh and populated baselines across JSON and SSE, including isolated persistence content; after both aggregate phases release, the owned upstream favors shutdown, drains the actual backlog into the accepted counter before dropping the listener, joins, and records the final zero count; the module proves a queued arrival is counted and rejected both when shutdown is already ready and as an intentional post-phase child closeout failure, and proves direct-flush, assertion-plus-shutdown, and cleanup-only persistence stalls end with the exact child reaped, recorded addresses released, and the parent-owned HOME absent
   - tests::protocol_plan_operator_fault_consumer_preserves_sources_without_error06 tests the private Server typed-fault consumer for persisted policy source and original cause, zero attempts and detectable transport termination; real SDK rejection is separately covered by canonical_sdk_failure_is_returned_without_typed_reconstruction, without claiming a public HTTP fault injection path
   - the SDK operator-fault shape has no deterministic public HTTP injection input in the fixed operator catalog; the Server typed consumer is the required boundary for this shape and its exact request-record/transport regression is a mapped gate, while public HTTP gates cover reachable provider and response-processing failures
   - inverse_project_client_response has ordinary Anthropic Relay wiring through resp_outbound_05_client_semantic.rs; its hosted path remains pending REQ02 and is not a released API symbol

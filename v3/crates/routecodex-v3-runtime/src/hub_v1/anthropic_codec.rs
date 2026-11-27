@@ -12,6 +12,7 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
+use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -432,6 +433,15 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
 pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
+    let (request, mut drops) = encode_v3_responses_semantic_as_anthropic_request_with_drops(input)?;
+    V3ProjectionDropContext::disabled().restamp_and_emit(&mut drops);
+    Ok(request)
+}
+
+pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
+    input: Value,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), V3AnthropicCodecError> {
+    let mut drops = Vec::new();
     namespace_tool_names::validate_anthropic_declared_tool_names(&input)
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
     let mut input = input;
@@ -502,7 +512,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
             output.insert((*key).to_string(), value.to_owned());
         }
     }
-    project_responses_text_as_anthropic_output_config(&mut output, responses_request_extension)?;
+    project_responses_text_as_anthropic_output_config(
+        &mut output,
+        responses_request_extension,
+        &mut drops,
+    )?;
     validate_responses_cache_and_store_for_anthropic(responses_request_extension)?;
     project_chat_reasoning_effort_as_anthropic_output_config(&mut output, object)?;
     for key in ["temperature", "top_p", "top_k", "service_tier"] {
@@ -541,7 +555,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
             json!({"gemini_native_fields":records}),
         );
     }
-    Ok(Value::Object(output))
+    Ok((Value::Object(output), drops))
 }
 
 fn consume_mapped_gemini_request_root_fields(input: &mut Value) {

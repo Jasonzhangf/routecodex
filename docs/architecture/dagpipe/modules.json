@@ -44,6 +44,11 @@
       "graph": "docs/architecture/dagpipe/graphs/provider-listener-health.graph.json"
     },
     {
+      "id": "provider-cooldown-recovery",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/provider-cooldown-recovery.graph.json"
+    },
+    {
       "id": "dsh-responses-function-call-terminal",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/dsh-responses-function-call-terminal.graph.json"

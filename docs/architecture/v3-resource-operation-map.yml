@@ -394,7 +394,7 @@ resources:
     owner_node: V3Server03HttpRequestRaw
     identity: [requestId, serverId, endpoint, method]
     semantic_contract:
-      client_identity_headers: the actual user-agent and originator values are request-local protocol fields carried to the selected Provider; absent values remain absent and no client credentials enter the carrier
+      client_identity_headers: the actual user-agent, originator, x-client-request-id, session-id, thread-id, x-codex-window-id, x-codex-parent-thread-id and x-openai-subagent values are request-local protocol fields carried to the selected Responses Provider; absent values remain absent, Connection-nominated names are excluded, forwarded identity requests follow redirects only within the selected origin, and no client credentials, cookies, attestation, turn metadata, installation IDs, routing hints, transport negotiation or workspace-bearing metadata enter the carrier
     allowed_writers: [V3Server03HttpRequestRaw]
     allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Transport13ResponsesHttpRequest, V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-provider-responses]
@@ -483,11 +483,103 @@ resources:
     identity: [requestId, targetId, candidateIds, interfaceId, requestInputTokens]
     semantic_contract:
       context_admission: Target09 carries the typed request input token count as side-channel route evidence; Target10 compares the scaled estimate with each candidate max_context_tokens only as advisory ordering evidence. The estimate never removes a healthy, capability-eligible, request-eligible candidate from the pool and never records it in unavailable_candidates; the real provider owns the context verdict.
-      priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only as an effective-priority adjustment inside the selected route pool.
+      priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only inside the selected pool. Plans without active pools build their schedule tier table from the original merged candidate rows; active plans use occurrence-local rows.
       payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload. The provider-declared output cap and the provider-declared reasoning-effort policy are candidate fields that may influence provider wire parameters; Target09 attaches them from the published provider/model declarations, Target10 carries them unchanged, and ProviderReqCompat06ProviderCompat may project the output cap only when the client supplied no output limit and may apply the configured reasoning effort after standard projection and existing compat mappings.
     allowed_writers: [V3Target09CandidateSetExpanded]
     allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_policy
+    resource_kind: control
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-config
+    owner_node: V3RoutePoolManifest
+    identity: [routingGroupId, poolId, members, retries, onFailure, selectionStrategy]
+    semantic_contract: Optional compiled active membership. It references declared provider aliases and never contains credentials or payload data. Absence preserves legacy selection.
+    allowed_writers: [publish_v3_config_05_manifest_from_v3_config_04]
+    allowed_readers: [routecodex-v3-target, V3ActiveKeySelectionState::snapshot, V3ActiveKeySelectionState::release]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_candidate_set
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3Target09CandidateSetExpanded
+    identity: [requestId, routingGroupId, poolId, tier, activeMembers, declaredOccurrences]
+    semantic_contract: Each declaration occurrence retains its supplying pool and tier. Only that occurrence's active membership intersects candidates and request restrictions. Full provider/interface/model/key identity remains the request-local failure and health key. Read-only recovery observation uses the same eligibility without consuming selection turns.
+    allowed_writers: [V3TargetInterpreter::expand_candidates]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health_active]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-runtime, routecodex-v3-server, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_state
+    resource_kind: control
+    lifecycle: v3.active_key_selection_control
+    owner_crate: routecodex-v3-target
+    owner_node: V3ActiveKeySelectionState
+    identity: [listenerIdentity, routingGroupId, poolId, queueOrder, heldMembers, sessionBindings, memberGeneration, consecutiveDeliveryFailures]
+    semantic_contract: Target-owned selection state contains no payload, credential, raw error, retry counter, or provider health truth. Holds persist; session bindings and cursors are process-local.
+    allowed_writers: [V3ActiveKeySelectionState, V3ActiveKeySelectionState::persist, V3ActiveKeySelectionState::release]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health_active, V3ActiveKeySelectionState, V3ActiveKeySelectionState::snapshot, V3ActiveKeySelectionState::release, V3ActiveKeySelectionState::persist]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.active_key_attempt
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3ActiveKeyEpisode
+    identity: [memberGeneration, providerId, interfaceId, modelId, authAlias, actualDispatches, completedDispatch, retryBudget]
+    semantic_contract: Typed request-local witness for selected active identity and generation. Runtime begins each actual dispatch and reports each outcome once. Target records shared consecutive failures; the fourth invalidates matching affinity and holds or tails the member. Early episode closure does not reset the shared streak.
+    allowed_writers: [V3ActiveKeyEpisode::new, V3ActiveKeyEpisode::begin_attempt, V3ActiveKeyEpisode::cancel, V3ActiveKeySelectionState::record_delivery_failure, V3ActiveKeySelectionState::accepted_success, V3ActiveKeySelectionState::close_failure]
+    allowed_readers: [routecodex-v3-runtime]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-provider-responses, request.normal_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.active_key_control_endpoint_record
+    resource_kind: control
+    lifecycle: v3.active_key_selection_control
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerAggregateHandle
+    identity: [canonicalConfig, serverId, actualBusinessSocket, loopbackControlSocket, ownerPid, ownerEndpoint]
+    semantic_contract: >-
+      Server owns selected-listener transport and record lifetime. Config provides
+      canonical-parent/raw-basename/60-byte-lowercase-hex-listener addressing and
+      directory-relative IO; composed paths are diagnostic only. A stable namespace
+      lock covers complete publication and compare/remove/prune. Async acquisition
+      is deadline-bounded and cancellable; complete locked IO runs off the business
+      worker. Admin shared reads create nothing and release before HTTP. Business
+      accept starts first. Exact port-scoped cleanup preserves siblings and retains
+      failed owners for retry; Drop tries once without a waiter. The empty lock
+      remains after endpoint close. Verified managed exec carries opaque Server
+      ownership in its existing typed envelope; only Server compares/replaces or
+      retires exact inherited records. Rejected exec preserves original controls.
+      Lifecycle only transports this authority after owner adoption. Records carry
+      no queue, health, credential or business truth. Foreign records and distinct
+      listener scopes remain independent; publication or cleanup failure is explicit.
+    allowed_writers: [routecodex-v3-server]
+    allowed_readers: [routecodex-v3-admin, routecodex-v3-server, routecodex-v3-lifecycle, forward_selection_control, restart_managed_runtime_in_place, "V3ManagedLifecycle::run_managed_child_with_declaration"]
+    forbidden_writers: [routecodex-v3-target, routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.active_key_control_exec_handoff
+    resource_kind: control
+    lifecycle: v3.managed_restart
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerExecPreparation
+    identity: [canonicalConfig, completeEndpointRecord]
+    semantic_contract: Lifecycle persists opaque Server ownership through readiness and terminal disposition in the existing front handoff. The managed PID cache or its retained generation link verifies the originating nonce and process for the target declaration. Server writes exact alternatives before publication and resolves them under the namespace lock. Confirmed foreign replacement resolves responsibility with a diagnostic. Uncertain storage outcomes preserve custody and its independent authority. Rejected exec preserves original endpoints and custody.
+    allowed_writers: [routecodex-v3-server, "V3ActiveKeyControlExecHandoff::capture"]
+    allowed_readers: [routecodex-v3-server, routecodex-v3-lifecycle, restart_managed_runtime_in_place, "V3ManagedLifecycle::run_managed_child_with_declaration"]
+    forbidden_writers: [routecodex-v3-target, routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -502,6 +594,8 @@ resources:
       request_local_failure_scope: request/provider compatibility failures are candidate-scoped and exclude only the failed providerId+interfaceId+authAlias+modelId while remaining health-neutral; transport and provider-health failures exclude only the failed providerId+interfaceId+authAlias+modelId for the current request; persistent health cooldown remains keyed by providerId+interfaceId+authAlias+modelId
       tier_progression: a higher numeric priority tier is selectable only when every lower-priority candidate is unavailable in the current session
       context_admission: Target10 scales route request_input_tokens by the candidate model context_token_estimate_scale_bps (default 10000 and never below 10000) before comparing max_context_tokens; an omitted max_context_tokens compiles to the documented 200000-token default. The scaled estimate is advisory ordering evidence only. Below 90 percent keeps configured order, 90 percent and above remains eligible but is demoted below normal candidates in the same route tier, and route-tier precedence still beats a lower-tier normal candidate. An eligible candidate at or above its declared window stays selectable and is never filtered before transport or recorded in unavailable_candidates; the real provider owns the context verdict.
+      estimated_turn_filter: Target09 filters a candidate when the observable history estimate reaches its model's optional positive exclude_at_estimated_turns threshold. The estimate counts completed user and assistant messages and standalone model tool calls. It excludes tool results and reasoning. Compact requests omit the estimate. Exclusion is request-local and health-neutral.
+      session_turn_limit: Runtime records an exact complete Provider HTTP 400 session_turn_limit_exceeded witness as a conversation/provider restriction before successor selection. Target skips every key of that provider for the affected ordinary conversation. A committed compact result clears restrictions observed when compact started.
       protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
       provider_request_policy: the selected candidate carries the compiled provider reasoning-effort policy; ProviderReqCompat06ProviderCompat is the only runtime owner that applies it to the provider wire payload, and an unsupported protocol policy is rejected by Config compile before manifest publication.
       sticky_selection: a pool whose selection strategy is sticky keeps one primary and one standby provider per (server, routingGroup, sessionId, pool) binding, keyed by providerId+authAlias+modelId. The same session prefers its primary, falls to the standby only when the primary is unavailable, and rolls the pair on a health/cooldown exclusion (never on a request-local failure); recovery is lazy. A fresh session picks the least-held primary in that pool, so different sessions spread by hold count. The pair is process-lifetime in-memory state, bounded and evicted by last use; different pools share no state. Without a client control session id the selection is unchanged and creates no binding.
@@ -572,7 +666,7 @@ resources:
       lifetime: attempt-local stack holder is cloned before wire consumption; retries rebuild from current declarations; completion, cancellation and exhaustion drop the holder
       response: Gemini provider SSE fully buffers into native business content; Resp02 atomically normalizes payload and semantic protocol; Resp03 consumes the standard holder; Resp05 uses existing Responses JSON and SSE projection
     allowed_writers: [NamespaceToolIdentityRegistry::from_request, build_provider_req_compat_06_from_v3_hub_req_outbound_07]
-    allowed_readers: [NamespaceToolIdentityRegistry::project_responses_history_references, project_v3_operation_runner_standard_provider_request, build_v3_provider_12_responses_wire_payload_with_registry, run_json_response_hooks, restore_gemini_tool_kinds, build_v3_responses_provider_response_from_openai_chat_payload, V3AnthropicResponsesProjectionContext::from_chat_canonical_request, anthropic_tool_use_as_responses_call]
+    allowed_readers: [NamespaceToolIdentityRegistry::project_responses_history_references, project_v3_operation_runner_standard_provider_request, build_v3_provider_12_responses_wire_payload_with_registry, build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint, run_json_response_hooks, restore_gemini_tool_kinds, build_v3_responses_provider_response_from_openai_chat_payload, V3AnthropicResponsesProjectionContext::from_chat_canonical_request, anthropic_tool_use_as_responses_call]
     forbidden_writers: [routecodex-v3-server, provider transport, MetadataCenter, debug snapshot]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -585,8 +679,9 @@ resources:
     identity: [requestId, providerId, interfaceId, providerType, upstreamUrl]
     semantic_contract:
       configured_headers: selected Target headers are carried on the typed transport request and applied by the generic HTTP send owner; the resolved auth handle alone supplies Authorization
-      client_identity_headers: actual client identity headers are carried per request through Direct, Relay, and reselection; selected Target configuration takes precedence on duplicate names
+      client_identity_headers: the shared case-insensitive Responses allowlist is user-agent, originator, x-client-request-id, session-id, thread-id, x-codex-window-id, x-codex-parent-thread-id and x-openai-subagent; values are carried per request through Direct, Relay and reselection, while configured names remain authoritative on case-insensitive duplicates
       projection: configured header names may be projected for diagnosis, but configured header values are redacted from dry-run/debug artifacts
+      carrier_scope: the allowlist carries identity, correlation and subagent attribution only; credentials, cookies, attestation, turn metadata, installation IDs, routing hints, transport negotiation and workspace-bearing metadata remain outside the carrier
       scope: provider transport consumes the already selected Target and never reads configuration or branches on deployment provider ID
     allowed_writers: [V3Transport13ResponsesHttpRequest, build_v3_openai_chat_transport_request_from_v3_provider_08]
     allowed_readers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
@@ -1344,7 +1439,7 @@ resources:
       score_effect: score remains diagnostic; consecutive typed failures determine automatic cooldown
       cross_session_same_model: shared
       cross_model_same_key: isolated
-      revival_rule: matching business success resets the consecutive count; a matching HTTP 2xx probe at or after expiry restores routing
+      revival_rule: matching business success resets the consecutive count; governed success from the owned business recovery trial restores routing
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
@@ -1366,19 +1461,19 @@ resources:
       score_effect: the diagnostic score cannot create an automatic cooldown
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
       cooldown_condition: genuine non-final recoverable failures count to ten for the exact identity; confirmed unrecoverable failures commit the cooldown immediately
-      revival_rule: after one hour, a matching HTTP 2xx recovery probe may remove cooldown state
-      exhaustion_disposition: the request immediately tries the eligible declared successor or reaches typed exhaustion; background recovery retains its independent owner
-      healthy_rescue_initiation: aggregate recovery owns eligible guarded probes independently; healthy later-tier commitment never depends on probe initiation or completion
-      aggregate_probe_lifetime: one aggregate supervisor retains a recovery owner per listener; each polls its own due and transferred probes; shutdown and exec cancel and join every owner, aggregate drop aborts all; cancellation releases matching ownership without recording a provider failure
-      generation_state: recovery ownership follows the exact identity until a qualifying current HTTP 2xx probe removes the block
-      in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
+      revival_rule: after the minimum and retry deadlines, one eligible business attempt may take recovery ownership; governed success removes the matching cooldown episode
+      exhaustion_disposition: with an eligible successor, a failed owned trial defers recovery and the request switches; a terminal trial failure releases custody while preserving the original episode and cadence
+      healthy_rescue_initiation: the eligible selected business attempt acquires recovery ownership immediately before transport
+      aggregate_probe_lifetime: the aggregate supervisor joins listener-local owners for explicit diagnostics during shutdown and exec; genuine recovery ownership follows the business attempt and cancellation releases it without recording a failure
+      generation_state: recovery ownership follows the exact identity and cooldown episode until a qualifying governed business success removes the block
+      in_flight_rule: if another request owns the business recovery trial, this request skips the cooled candidate and continues to the selected later tier without waiting
       acquisition_ownership: active_probe is an optional opaque store-lifetime acquisition identity carried by the existing permit; only its matching owner may release it, independently of health generation
       stale_outcome: matching stale success or failure releases only that acquisition; cancellation preserves health, stored backoff and deadline, failure counters and rescue state; late A never releases replacement B
-      persistence_ownership: load restores stored identity health and cooldown without an active probe acquisition
-      scheduled_progress: a Runtime-local complete-identity cursor rotates due snapshots after the last considered identity; capacity-neutral early rejection cannot starve an independent later identity and four aggregate manager slots remain the bound
-      reversible_owner: Server retains probe task and maintenance custody through join; failed, cancelled or dropped exec preparation registers a due-only Runtime owner before reopening business admission, while terminal disposal suppresses restoration
-      dry_run_rule: dry-run never acquires or sends a rescue probe
-    allowed_writers: [V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
+      persistence_ownership: load restores stored identity health, cooldown minimum and retry cadence without an active acquisition
+      scheduled_progress: time makes a business trial eligible at its deadlines without sending provider traffic; independent eligible identities do not share a business capacity pool
+      reversible_owner: Server retains explicit diagnostic task and maintenance custody through join; failed, cancelled or dropped exec preparation restores that owner before reopening business admission
+      dry_run_rule: dry-run observes eligibility without acquiring or sending a recovery trial
+    allowed_writers: [V3ProviderHealthStore::acquire_provider_business_recovery_trial_for_interface, V3ProviderHealthStore::complete_provider_business_recovery_success_with_permit, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, V3ProviderReqOutbound06WirePayload, V3ServerRespOutbound05ClientFrame]
     may_enter_provider_body: false
@@ -1391,7 +1486,7 @@ resources:
     owner_node: V3ProviderHealthStore
     listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
-    semantic_contract: The health owner retains consecutive failures and cooldown deadlines for the complete identity. Ordinary HTTP 429 uses a separate observation streak and can impose a timer-only cooldown. A matching HTTP 2xx probe at or after a one-hour cooldown expiry can restore routing. A failed probe advances its cadence.
+    semantic_contract: The health owner retains consecutive failures and cooldown deadlines for the complete identity. Ordinary HTTP 429 uses a separate observation streak and can impose a timer-only cooldown. A matching governed business trial after the minimum and retry deadlines restores routing. A failed trial advances its cadence.
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::record_provider_failure_action_for_interface, V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
@@ -1413,7 +1508,7 @@ resources:
       cooldown_condition: On non-final attempts, other real recoverable failures start a one-hour cooldown at ten consecutive failures, and a confirmed unrecoverable failure starts it immediately.
       ordinary_http_429: Count the consecutive failures and the span since the first separately. At ten or more failures within 120 seconds, apply a 15-second cooldown. Start a one-hour cooldown from the eleventh failure onward only when the span strictly exceeds 120 seconds.
       cooldown_deadline: The duration runs from the committing health observation. The 15-second cooldown expires without a recovery probe.
-      revival_rule: Matching business success resets the streak. After a one-hour cooldown expires, matching HTTP 2xx probe recovery restores routing using the selected private profile when required.
+      revival_rule: Matching business success resets the streak. A matching governed business trial restores routing once the cooldown and retry deadlines have elapsed.
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
@@ -1430,7 +1525,7 @@ resources:
     owner_node: V3ProviderGlobalCooldownPersistence
     listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
-    semantic_contract: The listener health file retains consecutive failures, the ordinary HTTP 429 observation window, and committed cooldown deadlines. Restart restores no active acquisition. A one-hour cooldown requires recovery after expiry, while a 15-second timer-only cooldown expires without a probe.
+    semantic_contract: The listener health file retains consecutive failures, the ordinary HTTP 429 observation window, cooldown deadlines and retry cadence. Restart restores no active acquisition and dispatches no upstream recovery traffic. A one-hour cooldown requires governed business recovery after expiry, while a 15-second timer-only cooldown expires automatically.
     allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::reset_probe_schedule_for_startup, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::replace_entries_and_rate_limit_episodes]
     allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
@@ -1610,8 +1705,8 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
     identity: [controlInstanceId, startNonce, executablePath, targetDeclaration, snapshots, snapshotStages]
-    allowed_writers: [send_restart_control, remove_restart_plan_for_previous_control_identity, cleanup_previous_exec_restart_owner]
-    allowed_readers: [control_restart_plan, remove_restart_plan_for_previous_control_identity]
+    allowed_writers: [send_restart_control, settle_terminal_restart_plan, remove_verified_generation_plan, remove_restart_plan_for_previous_control_identity, cleanup_previous_exec_restart_owner]
+    allowed_readers: [control_restart_plan, verify_generation_restart_plan, remove_restart_plan_for_previous_control_identity]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1625,12 +1720,13 @@ resources:
     identity: [oldInstanceId, targetInstanceId, startNonce, artifactKind]
     semantic_contract:
       artifact_kinds: [staged_instance_declaration, front_handoff_json, provider_handoff_json]
-      creation: Exec preparation serializes the accepted declaration and owner-produced checkpoints; typed checkpoints retain their original owners.
-      adoption: Exact old instance and nonce authorize renaming handoffs and publishing the staged declaration.
-      cleanup: Rejected exec removes only files created by that attempt; replacement discards Front metadata and restores provider checkpoints through Runtime before removing handoff files.
+      creation: Exec preparation serializes the accepted declaration, origin PID/start-token/nonce and opaque Server control custody in the existing front artifact when needed. Legacy checkpoint arrays retain their previous-release meaning.
+      adoption: Native preparation publishes the typed target front even with empty Server custody. Native and previous-release adoption bind it to an independent generation cache. A legacy checkpoint array carries no endpoint custody. A managed write-ahead update records each intended exact endpoint before publication. Fresh recovery verifies both checkpoint locations, closes the transfer and retires predecessor evidence before final target front settlement. The matching Stopped record remains actionable until the fresh child publishes its own identity and startup state.
+      cleanup: Rejected exec removes its own artifacts and restores any previous retained custody. A failed successor retains its exact front and independent cache if Failed cannot be written, including after Server control publication and physical close. Exited recovery verifies any locked predecessor control before endpoint retirement and closes the abandoned provider handoff in the verified owning directory before releasing its authority. Forced stop reports retained custody in its Stopped detail. Normal adoption restores Provider checkpoints.
+      forced_disposition: A delivered scoped signal binds only its own immediately verified declaration, PID cache, live start token and control. Original exit and unchanged custody permit terminal publication. Listener release alone leaves managed proof with formal recovery. Without bare delivery, return only the verified existing Stopped baseline without rewriting it.
       front_boundary: Front metadata is not accepted-client descriptor or task transfer and does not prove client reattachment.
-    allowed_writers: [restart_managed_runtime_in_place, cleanup_rejected_restart_handoff, finish_exec_restart_adoption, V3ManagedLifecycle::run_managed_child_with_declaration]
-    allowed_readers: [restart_managed_runtime_in_place, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, V3ManagedLifecycle::run_managed_child_with_declaration]
+    allowed_writers: [restart_managed_runtime_in_place, cleanup_rejected_restart_handoff, finish_exec_restart_adoption, V3ManagedLifecycle::run_managed_child_with_declaration, persist_retained_front_control_handoff, recover_exited_front_control_handoff]
+    allowed_readers: [restart_managed_runtime_in_place, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, V3ManagedLifecycle::run_managed_child_with_declaration, verify_exec_front_control_handoff, finish_failed_front_control_handoff, recover_exited_front_control_handoff]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, raw_json_control_reconstruction]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2993,6 +3089,9 @@ resources:
     identity: [requestId, executionId]
     semantic_contract:
       current_binding: Resident Direct/Relay controllers carry one opaque V3RequestExecutionControl across typed protocol handoffs and retain the originating target plan and Error05 state.
+      actual_failure_custody: The request control retains the complete last dispatched identity, canonical typed failure source and optional HTTP witness across mode handoffs. Only the next actual send replaces that evidence; an independent local terminal source stays local.
+      custody_operations: V3RequestExecutionControl::begin_actual_send replaces prior custody only at dispatch; record_failure retains the canonical policy source and HTTP witness; take_failure_for_exhaustion submits that pair to Error qualification. V3PreferredSelection distinguishes Fresh from FailedRetry, and prepare_selected_dispatch handles invalidation before Provider failure accounting.
+      selection_invalidation: A fresh unsent occurrence can be reselected without failed-identity accounting. A failed pending retry that loses its witness closes and excludes the complete identity for this request. No-send health contention is not a Provider failure.
       target_contract: One resident request controller owns immutable target plan, cumulative attempt/deadline budget, cancellation, Error05 recovery execution, and terminal closeout.
       runtime_driver: Provider network requests and lazy response streams remain on a resident Tokio Runtime for their complete lifetime.
     allowed_writers: [plan_v3_responses_protocol_execution_with_recovery, execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core]
@@ -3284,8 +3383,8 @@ resources:
     identity: [requestId, invocationId, attemptId]
     semantic_contract:
       storage_owner: V3OperationRunnerPlanExecution persists one request-local failed-candidate exclusion set; this is not a process-global store or a second admission controller
-      mutation_owner: typed Error action consumption and real provider failures add only the exact attempted candidate keys for this request
-      provenance_rule: exclusion evidence never comes from capacity, permits, FIFO tickets, probes or Deferred state
+      mutation_owner: typed Error action consumption and real provider failures close the exact failed identity. Runtime may also exclude an identity that is currently unavailable for this request without recording a delivery failure.
+      provenance_rule: fresh pool-local occurrence invalidation is not full-identity failure exclusion; exclusive Provider recovery contention may exclude only that identity for this request and cannot mutate another owner's health or trial. Capacity, FIFO and Deferred states never supply exclusions.
       classification: the request immediately scans declared successors after excluding attempted keys; there is no all-busy capacity classification
       request_boundary: exclusion and busy provenance never enter request, response, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [RuntimeErrorActionConsumed, V3OperationRunnerPlanExecution]

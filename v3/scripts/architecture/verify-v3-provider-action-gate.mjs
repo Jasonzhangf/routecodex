@@ -13,6 +13,7 @@ const failures = [];
 const files = {
   gate: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
   policy: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+  policyHealth: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
   policyTests: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
   error: 'v3/crates/routecodex-v3-error/src/lib.rs',
   direct: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
@@ -194,7 +195,7 @@ assertCallerInvokesCallee({
   step_id: 'v3-provider-action-gate-responses-policy-ingress',
   caller_symbol: 'handle_v3_responses_relay_provider_failure',
   caller_file: files.responses,
-  callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source',
+  callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys',
   callee_file: files.policy,
 });
 for (const token of [
@@ -358,7 +359,7 @@ if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
 const relayFailurePolicy = findFunctionBody(
   text.policy,
-  'run_v3_relay_provider_failure_policy_with_response_source',
+  'run_v3_relay_provider_failure_policy_with_response_source_and_active_keys',
   files.policy,
 );
 const targetResolutionFailure = relayFailurePolicy.match(

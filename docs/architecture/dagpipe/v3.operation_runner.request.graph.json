@@ -36,6 +36,7 @@
     },
     {
       "id": "resolve_target",
+      "description": "Carries the observable history turn estimate for ordinary requests in the opaque route plan.",
       "operator": "routecodex.v3.operation.resolve_target",
       "operator_version": "1",
       "inputs": ["canonical-request"],
@@ -50,6 +51,7 @@
     },
     {
       "id": "plan_execution",
+      "description": "Skips model candidates whose declared estimated-turn threshold is reached and providers with a conversation turn-limit restriction before tier ordering or weighted selection. Compaction keeps its declared candidate set.",
       "operator": "routecodex.v3.operation.plan_execution",
       "operator_version": "1",
       "inputs": ["target-resolved-request"],
@@ -58,8 +60,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.operation_runner.request_local_exclusions"],
-        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.request_local_exclusions"]
+        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.target.active_key_policy", "v3.target.active_key_state", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.operation_runner.request_local_exclusions"],
+        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.request_local_exclusions", "v3.target.active_key_attempt"]
       }
     },
     {

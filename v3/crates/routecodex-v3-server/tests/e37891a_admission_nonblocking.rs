@@ -259,7 +259,7 @@ async fn peer_handler(
             .unwrap();
     }
 
-    if probe {
+    if probe || input == "owned recovery" {
         peer.probe_entered.add_permits(1);
         peer.probe_release.acquire().await.unwrap().forget();
         return Response::builder()
@@ -1319,7 +1319,17 @@ targets = [
     let endpoint = format!("{base}/v1/responses");
     let client = client();
 
-    seed_exact_probe(&client, &base, "leading").await;
+    let added = client.post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+        .json(&json!({"provider_id":"leading","interface_id":"default","auth_alias":"key","model_id":"model","kind":"probe","duration_ms":1}))
+        .send().await.unwrap();
+    assert_eq!(added.status(), StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let recovery = tokio::spawn({
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        async move { send_request(&client, &endpoint, "owned recovery").await }
+    });
+    let probe_entered = wait_for_semaphore(&leading.probe_entered, Duration::from_secs(3)).await;
     let seeded = client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
@@ -1334,7 +1344,6 @@ targets = [
         let endpoint = endpoint.clone();
         async move { send_request(&client, &endpoint, "target").await }
     });
-    let probe_entered = wait_for_semaphore(&leading.probe_entered, Duration::from_secs(10)).await;
     let healthy_dispatched =
         wait_for_semaphore(&healthy.target_entered, Duration::from_secs(10)).await;
     let target_outcome = if healthy_dispatched {
@@ -1347,6 +1356,14 @@ targets = [
     };
     let target_sent_before_probe_release = healthy_dispatched;
     leading.probe_release.add_permits(1);
+    let recovery_outcome = timeout(Duration::from_secs(3), recovery)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        recovery_outcome.contains("probe"),
+        "real recovery must return its upstream business result: {recovery_outcome:?}"
+    );
 
     let during = client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
@@ -1372,7 +1389,7 @@ targets = [
 
     assert!(
         probe_entered,
-        "the public cooldown probe must reach the leading exact identity"
+        "the real recovery request must reach the leading exact identity"
     );
     assert!(
         target_sent_before_probe_release,
@@ -1380,11 +1397,16 @@ targets = [
     );
     assert!(
         leading_captures.iter().any(|capture| {
-            capture.probe
+            capture.input == "owned recovery"
+                && !capture.probe
                 && capture.model == "wire-leading"
                 && capture.authorization == format!("Bearer {AUTH_SECRET}")
         }),
         "leading probe must preserve exact provider/model/key identity: {leading_captures:?}"
+    );
+    assert!(
+        leading_captures.iter().all(|capture| !capture.probe),
+        "automatic recovery must emit no synthetic requests"
     );
     assert!(
         !leading_captures

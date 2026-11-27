@@ -25,7 +25,6 @@ async fn quota_peer(
     business_status: Arc<std::sync::atomic::AtomicU16>,
     business: Arc<std::sync::atomic::AtomicUsize>,
     probes: Arc<std::sync::atomic::AtomicUsize>,
-    probe_status: Arc<std::sync::atomic::AtomicU16>,
     marker: &'static str,
 ) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -39,7 +38,6 @@ async fn quota_peer(
         let business_status = business_status.clone();
         let business = business.clone();
         let probes = probes.clone();
-        let probe_status = probe_status.clone();
         async move {
             assert_eq!(body["model"], "wire-test");
             assert!(if direct { body.get("input").is_some() } else { body["messages"].is_array() });
@@ -47,9 +45,8 @@ async fn quota_peer(
                 || body.to_string().contains("Reply exactly OK. Do not call tools.");
             if probe {
                 probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                // A verified HTTP202 is enough. The probe must not parse this body.
-                return (StatusCode::from_u16(probe_status.load(std::sync::atomic::Ordering::SeqCst)).unwrap(),
-                    "not-json; real probe response").into_response();
+                return (StatusCode::SERVICE_UNAVAILABLE,
+                    "automatic recovery must not send synthetic traffic").into_response();
             }
             business.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let status = StatusCode::from_u16(business_status.load(std::sync::atomic::Ordering::SeqCst)).unwrap();
@@ -114,7 +111,7 @@ async fn quota_entries(client: &reqwest::Client, base: &str) -> Vec<Value> {
     value["entries"].as_array().unwrap().clone()
 }
 
-async fn await_quota_probe(
+async fn schedule_quota_trial(
     client: &reqwest::Client,
     base: &str,
     identity: &Value,
@@ -130,20 +127,13 @@ async fn await_quota_probe(
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    timeout(Duration::from_secs(3), async {
-        loop {
-            if probes.load(SeqCst) > before
-                && !quota_entries(client, base).await.iter().any(|entry| {
-                    entry["provider_id"] == identity["provider_id"] && entry["state"] == "probing"
-                })
-            {
-                break;
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the matching recovery probe must complete");
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["scheduled"], true, "{body}");
+    assert_eq!(
+        probes.load(SeqCst),
+        before,
+        "scheduling must not send traffic"
+    );
 }
 
 async fn assert_consecutive_errors(direct: bool) {
@@ -156,13 +146,11 @@ async fn assert_consecutive_errors(direct: bool) {
     let business = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let fallback_business = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let probes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let probe_status = Arc::new(std::sync::atomic::AtomicU16::new(202));
     let (first_url, first_task) = quota_peer(
         direct,
         business_status.clone(),
         business.clone(),
         probes.clone(),
-        probe_status.clone(),
         "quota-window-primary",
     )
     .await;
@@ -171,7 +159,6 @@ async fn assert_consecutive_errors(direct: bool) {
         Arc::new(std::sync::atomic::AtomicU16::new(200)),
         fallback_business.clone(),
         Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        Arc::new(std::sync::atomic::AtomicU16::new(202)),
         "quota-window-fallback",
     )
     .await;
@@ -268,24 +255,24 @@ async fn assert_consecutive_errors(direct: bool) {
     );
     assert_eq!(business.load(SeqCst), 11);
 
-    for status in [503, 202] {
-        probe_status.store(status, SeqCst);
-        await_quota_probe(&client, &base, &identity, &probes).await;
-        let entries = quota_entries(&client, &base).await;
-        assert_eq!(entries.len(), 1, "early probe HTTP {status}");
-        assert_eq!(entries[0]["until_ms"], minimum_end);
-    }
+    schedule_quota_trial(&client, &base, &identity, &probes).await;
+    let entries = quota_entries(&client, &base).await;
+    assert_eq!(
+        entries.len(),
+        1,
+        "early trial action must retain the cooldown"
+    );
+    assert_eq!(entries[0]["until_ms"], minimum_end);
     assert!(quota_business(&client, &base, "quota-early-probe")
         .await
         .contains("quota-window-fallback"));
     assert_eq!(business.load(SeqCst), 11);
     business_status.store(200, SeqCst);
     clock.0.store(minimum_end, SeqCst);
-    await_quota_probe(&client, &base, &identity, &probes).await;
-    assert!(quota_entries(&client, &base).await.is_empty());
     assert!(quota_business(&client, &base, "quota-restored")
         .await
         .contains("quota-window-primary"));
+    assert!(quota_entries(&client, &base).await.is_empty());
     assert_eq!(business.load(SeqCst), 12);
     business_status.store(429, SeqCst);
     assert!(quota_business(&client, &base, "controlled exhausted quota")
@@ -303,7 +290,15 @@ async fn assert_consecutive_errors(direct: bool) {
 
     let burst_start = minimum_end + 3_600_000;
     clock.0.store(burst_start, SeqCst);
-    await_quota_probe(&client, &base, &identity, &probes).await;
+    business_status.store(200, SeqCst);
+    assert!(
+        quota_business(&client, &base, "quota-real-recovery-before-burst")
+            .await
+            .contains("quota-window-primary")
+    );
+    assert!(quota_entries(&client, &base).await.is_empty());
+    assert_eq!(business.load(SeqCst), 14);
+    business_status.store(429, SeqCst);
     for index in 0..10 {
         if index == 9 {
             clock.0.store(burst_start + 120_000, SeqCst);
@@ -313,7 +308,7 @@ async fn assert_consecutive_errors(direct: bool) {
                 .await
                 .contains("quota-window-fallback")
         );
-        assert_eq!(business.load(SeqCst), 14 + index);
+        assert_eq!(business.load(SeqCst), 15 + index);
         if index < 9 {
             assert!(quota_entries(&client, &base).await.is_empty());
         }
@@ -326,19 +321,27 @@ async fn assert_consecutive_errors(direct: bool) {
     assert!(quota_business(&client, &base, "before-short-expiry")
         .await
         .contains("quota-window-fallback"));
-    assert_eq!(business.load(SeqCst), 23);
+    assert_eq!(business.load(SeqCst), 24);
     clock.0.store(short_end, SeqCst);
     assert!(quota_business(&client, &base, "first-after-short-expiry")
         .await
         .contains("quota-window-fallback"));
-    assert_eq!(business.load(SeqCst), 24);
+    assert_eq!(business.load(SeqCst), 25);
     let hour = quota_entries(&client, &base).await;
     assert_eq!(hour.len(), 1);
     assert_eq!(hour[0]["until_ms"], short_end + 3_600_000);
 
     let slow_start = short_end + 3_600_000;
     clock.0.store(slow_start, SeqCst);
-    await_quota_probe(&client, &base, &identity, &probes).await;
+    business_status.store(200, SeqCst);
+    assert!(
+        quota_business(&client, &base, "quota-real-recovery-before-slow-errors")
+            .await
+            .contains("quota-window-primary")
+    );
+    assert!(quota_entries(&client, &base).await.is_empty());
+    assert_eq!(business.load(SeqCst), 26);
+    business_status.store(429, SeqCst);
     for index in 0..11 {
         if index >= 9 {
             clock.0.store(slow_start + 120_001, SeqCst);
@@ -346,7 +349,7 @@ async fn assert_consecutive_errors(direct: bool) {
         assert!(quota_business(&client, &base, &format!("slow-429-{index}"))
             .await
             .contains("quota-window-fallback"));
-        assert_eq!(business.load(SeqCst), 25 + index);
+        assert_eq!(business.load(SeqCst), 27 + index);
         if index < 10 {
             assert!(quota_entries(&client, &base).await.is_empty());
         }
@@ -354,6 +357,11 @@ async fn assert_consecutive_errors(direct: bool) {
     let entries = quota_entries(&client, &base).await;
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["until_ms"], slow_start + 3_720_001);
+    assert_eq!(
+        probes.load(SeqCst),
+        0,
+        "recovery must use business traffic only"
+    );
     handle.shutdown().await;
     first_task.abort();
     second_task.abort();

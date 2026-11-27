@@ -35,6 +35,96 @@ fn catalogue() -> BTreeMap<String, BTreeSet<String>> {
 }
 
 #[test]
+fn active_keys_roundtrip_defaults_and_compile_validation() {
+    let routes = "[servers.any-name.routes.default]\nselection = { strategy = \"active_queue\" }\nactive_keys = { members = [{ provider = \"cc\", alias = \"key\" }] }\ntiers = [[{ use = \"cc/model\" }]]";
+    let parsed = parse_v3_user_config_02_routing(&user_config(routes)).unwrap();
+    let policy = parsed.servers["any-name"].routes["default"]
+        .active_keys
+        .as_ref()
+        .unwrap();
+    assert_eq!(policy.retries, 3);
+    assert_eq!(
+        policy.on_failure,
+        routecodex_v3_config::V3ActiveKeyFailureAction::Hold
+    );
+    let serialized = toml::to_string(&parsed).unwrap();
+    assert_eq!(
+        parse_v3_user_config_02_routing(&serialized).unwrap(),
+        parsed
+    );
+    let path = write_real_config("active-keys", routes);
+    let manifest = V3UserConfigStore::new(&path)
+        .validate_routing_selection(parsed)
+        .unwrap();
+    assert_eq!(
+        manifest.route_groups["any-name"].pools["default"]
+            .active_keys
+            .as_ref()
+            .unwrap()
+            .retries,
+        3
+    );
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    for strategy in ["priority", "weighted"] {
+        assert!(parse_v3_user_config_02_routing(&user_config(
+            &routes.replace("active_queue", strategy)
+        ))
+        .is_err());
+    }
+    assert!(parse_v3_user_config_02_routing(&user_config(
+        "[servers.any-name.routes.default]\nselection = { strategy = \"active_queue\" }\ntiers = [[{ use = \"cc/model\" }]]"
+    ))
+    .is_err());
+    assert!(
+        parse_v3_user_config_02_routing(&user_config(&routes.replace(
+            "[{ provider = \"cc\", alias = \"key\" }]",
+            "[{ provider = \"cc\", alias = \"key\" }, { provider = \"cc\", alias = \"key\" }]"
+        )))
+        .is_err()
+    );
+    assert!(
+        parse_v3_user_config_02_routing(&user_config(&routes.replace(
+            "provider = \"cc\", alias = \"key\"",
+            "provider = \"outside\", alias = \"key\""
+        )))
+        .is_err()
+    );
+    let empty = routes.replace("[{ provider = \"cc\", alias = \"key\" }]", "[]");
+    assert!(parse_v3_user_config_02_routing(&user_config(&empty))
+        .unwrap()
+        .servers["any-name"]
+        .routes["default"]
+        .active_keys
+        .as_ref()
+        .unwrap()
+        .members
+        .is_empty());
+    let mut invalid = project(routes);
+    invalid
+        .route_groups
+        .get_mut("any-name")
+        .unwrap()
+        .pools
+        .retain(|id, _| id == "default");
+    invalid
+        .route_groups
+        .get_mut("any-name")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .active_keys
+        .as_mut()
+        .unwrap()
+        .members[0]
+        .alias = "missing".into();
+    assert!(routecodex_v3_config::compile_v3_config_05_manifest(invalid)
+        .unwrap_err()
+        .to_string()
+        .contains("unknown auth alias"));
+}
+
+#[test]
 fn builtin_classification_pools_do_not_restrict_client_protocol() {
     let authoring = routecodex_v3_config::internal::v3_internal_user_config_authoring();
     let group = &authoring.route_groups["routecodex_v3_4444"];

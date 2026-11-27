@@ -298,6 +298,11 @@ mod tests {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["default".to_string()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "default".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: true,
             path: vec!["responses".to_string()],
         }
@@ -399,8 +404,10 @@ mod tests {
         assert_eq!(wire.body()["input"][0]["content"][0]["text"], "hello");
         assert_eq!(wire.body()["tools"][0]["name"], "mcp__test__lookup");
         assert_eq!(
-            wire.namespace_identities().get("mcp__test__lookup"),
-            Some(&("mcp__test".to_string(), "lookup".to_string()))
+            wire.namespace_identities()
+                .get("mcp__test__lookup")
+                .map(|alias| (alias.namespace.clone(), alias.name.clone())),
+            Some(("mcp__test".to_string(), "lookup".to_string()))
         );
         assert_eq!(wire.custom_tool_function_binding(), Some(&custom));
         assert!(wire.body().get("authorization").is_none());

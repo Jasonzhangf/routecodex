@@ -11,8 +11,15 @@ Feature module boundaries:
 Every supported inbound protocol is decoded by its adjacent codec into Chat
 canonical semantics plus registered Chat payload extensions. Chat Process may
 govern those typed payload semantics, but it may not recover them from raw input
-or MetadataCenter. The adjacent outbound codec consumes Chat semantics and either
-projects an exact target-protocol field or returns `UnmappedOutboundFields`.
+or MetadataCenter. The adjacent outbound codec applies the declared target
+allowlist mechanically. A complete valid business field with no target allowlist
+mapping is warned and recorded as scoped local diagnostic evidence, omitted
+from provider wire, and does not block the mapped remainder.
+Allowlist absence alone does not cause a conversion failure, provider
+reselection, a synthetic status, or request abort. Malformed registered values,
+invalid pairings, control leaks, source-schema invalidity, capability failures,
+and genuinely unrepresentable protocol boundaries retain their existing owners
+and outcomes.
 
 ```text
 source wire
@@ -20,7 +27,7 @@ source wire
   -> Chat canonical + registered payload extensions
   -> Chat Process
   -> adjacent outbound codec
-  -> target wire or explicit UnmappedOutboundFields
+  -> target wire (complete unmatched business fields are omitted non-blockingly after warning/diagnostic evidence)
 ```
 
 MetadataCenter is not a payload extension registry. It carries only RouteCodex
@@ -69,7 +76,7 @@ Its physical Chat representation is fixed as follows:
 | `request.store` | `routecodex_chat_extension.responses_request.store` | registered payload extension |
 | `request.text.output_config` | `routecodex_chat_extension.responses_request.text` | registered payload extension |
 | `request.anthropic_system_blocks` | `routecodex_chat_extension.anthropic_request.system` | registered payload extension |
-| `request.messages.tool_result.extra_fields` | `messages[].routecodex_chat_extension.responses_tool_output_extra_fields` | opaque business fields restored by Responses Outbound; other targets explicitly unmapped |
+| `request.messages.tool_result.extra_fields` | `messages[].routecodex_chat_extension.responses_tool_output_extra_fields` | opaque business fields restored by Responses Outbound; another target without an allowlist mapping warns, diagnoses, and omits the complete unmatched field while the mapped remainder continues |
 | `request.reasoning_effort` | `reasoning_effort` | Chat request field |
 | `request.reasoning_budget_tokens` | `reasoning_budget_tokens` | registered Chat request field |
 | `request.reasoning_summary_policy` | `reasoning_summary_policy` | registered Chat request field |
@@ -92,7 +99,7 @@ representations instead of selecting one.
 | `mapped_exact` | Source and target fields have the same meaning and the concrete value belongs to both target value domains. Field rename and model/value-domain validation remain exact mappings. |
 | `mapped_compatible_registered` | The target lacks a 1:1 field but can carry the source behavior through a named, bounded, reversible compatibility shape. The wrapper, known semantic delta, reverse projection, and positive/negative tests must all be registered. |
 | `source_roundtrip_only` | Preserve in a registered Chat extension so the source protocol can be reconstructed; other targets continue to seek a registered compatibility projection before being classified unsupported. |
-| `unsupported` | Neither an exact mapping nor a registered compatible mapping can preserve the required behavior. Return `UnmappedOutboundFields` with the Chat semantic path. |
+| `unsupported` | No target allowlist mapping exists for a complete valid business field. The field is warned, recorded as scoped local diagnostic evidence, and omitted; the mapped remainder continues. This class excludes malformed registered values, invalid pairings, control leaks, source-schema invalidity, capability failures, and unrepresentable boundaries. |
 
 There is no `approximate` generic projection. An unregistered approximation,
 prompt-marker,
@@ -100,7 +107,9 @@ silent-strip, fallback, or MetadataCenter reconstruction class. A
 `mapped_compatible_registered` mapping is allowed only when its wrapper,
 semantic delta, value subset, and reverse projection are recorded in the field
 matrix and locked by positive and negative tests. Anything outside that
-registered subset is `unsupported` and fails at the adjacent outbound codec.
+registered subset is malformed and retains its existing explicit validation
+outcome at the owning codec. A complete field with no target allowlist mapping
+uses the non-blocking `unsupported` rule above.
 
 ## Canonical request semantics
 
@@ -141,14 +150,19 @@ reconstructed, or modified by a later round.
 `same` means the source and target use the same concrete wire field. `rename`
 means exact semantic projection with a different wire name. `conditional` means
 the target value/model domain must be checked. `roundtrip` means only the source
-protocol can reconstruct it. `unmapped` always returns the canonical Chat path.
+protocol can reconstruct it. `unmapped` means a complete business field has no
+target allowlist mapping: warn, record scoped local diagnostic evidence, omit
+only that field from provider wire, and continue the mapped remainder. Malformed
+registered values, invalid pairings, control leaks, source-schema invalidity,
+capability failures, and genuinely unrepresentable boundaries use their own
+explicit failure classes and owners.
 
 | Chat semantic | Responses | OpenAI Chat | Anthropic | Gemini |
 | --- | --- | --- | --- | --- |
 | `metadata` | same, OpenAI limits | same, OpenAI limits | conditional only for exactly one non-empty `user_id` | unmapped |
-| `client_metadata` | same source extension; never public `metadata` | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown keys fail | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown keys fail | unmapped |
+| `client_metadata` | same source extension; never public `metadata` | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown complete keys warn, diagnose, and omit without blocking the remainder | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown complete keys warn, diagnose, and omit without blocking the remainder | unmapped |
 | `prompt_cache_key` | same | same | valid non-empty key is consumed as local cache hint; malformed fails; never becomes `cache_control` | unmapped |
-| `store` | same | same | `false` consumed before wire; `true` fails | unmapped |
+| `store` | same | same | `false` consumed before wire; complete valid `true` is warned, diagnosed, and omitted while the mapped remainder continues | unmapped |
 | `text.output_config` | rename to `text` | field-wise conditional projection to `verbosity` / `response_format` | conditional projection only where the semantic matrix declares an exact target field | conditional projection only where the semantic matrix declares an exact target field |
 | `reasoning_effort` | rename to `reasoning.effort` | same | conditional rename to `output_config.effort` | conditional enum-case projection to `thinkingLevel` |
 | `reasoning_budget_tokens` | unmapped | unmapped | conditional rename to `thinking.budget_tokens` | conditional rename to `thinkingBudget` |
@@ -195,8 +209,8 @@ does not authorize reuse of the source object or of another target's mapping.
 | `conversation` | typed Responses conversation scope | validate entry/owner/port/group scope; never use session-only lookup | exact Responses only | unmapped | unmapped |
 | `previous_response_id` | typed direct continuation locator plus source extension | restore only at ReqChatProcess continuation owner; reject ordinary Chat/Anthropic entry reuse | exact Responses continuation | unmapped in relay; Direct only | unmapped |
 | `include` | Responses include extension | validate each enum; no output reconstruction in outbound immutable interval | exact Responses only | unmapped | unmapped |
-| `metadata` | public metadata payload extension | validate 16 pairs, key <=64, value <=512; distinct from `client_metadata` | exact metadata | exact `metadata` | only exact `user_id` may project to Anthropic metadata; other keys remain response context or fail per matrix |
-| `client_metadata` | registered client metadata payload extension | preserve every key/value; no MetadataCenter/session reconstruction | exact `client_metadata` | exact `user_id` mapping; registered Codex local keys are consumed before wire; unknown keys fail | exact `user_id` mapping; registered Codex local keys are consumed before wire; unknown keys fail |
+| `metadata` | public metadata payload extension | validate 16 pairs, key <=64, value <=512; distinct from `client_metadata` | exact metadata | exact `metadata` | only exact `user_id` may project to Anthropic metadata; other complete keys are warned, diagnosed, omitted, and leave the mapped remainder running; malformed metadata shape retains its inbound failure |
+| `client_metadata` | registered client metadata payload extension | preserve every key/value; no MetadataCenter/session reconstruction | exact `client_metadata` | exact `user_id` mapping; registered Codex local keys are consumed before wire; unknown complete keys warn, diagnose, and omit while the mapped remainder continues | exact `user_id` mapping; registered Codex local keys are consumed before wire; unknown complete keys warn, diagnose, and omit while the mapped remainder continues |
 | `max_output_tokens` | Chat output token-limit semantic | preserve numeric value; validate positive/domain conflicts | exact | `max_completion_tokens` conditional rename | `max_tokens` conditional rename |
 | `prompt` | Responses reusable-prompt extension | validate object/variables; never inline into instructions silently | exact Responses only | unmapped | unmapped |
 | `prompt_cache_key` | client cache-key payload extension | preserve exact string; not routing/control state | exact | exact | valid local cache hint is consumed before wire; malformed fails; never rebuild `cache_control` |
@@ -207,7 +221,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `reasoning.mode` | `request.reasoning_mode` | preserve mode independently from effort/context | exact Responses | unmapped | unmapped |
 | `safety_identifier` | safety identifier payload extension | validate string; never map to `user` or metadata | exact | exact `safety_identifier` if target schema supports | unmapped |
 | `service_tier` | service-tier request semantic | validate enum; no routing fallback | exact | conditional exact same enum | target-specific exact field only; otherwise unmapped |
-| `store` | storage preference payload extension | validate boolean; never create local continuation truth | exact | exact | `false` compatible no-storage consume; `true` unmapped |
+| `store` | storage preference payload extension | validate boolean; never create local continuation truth | exact | exact | `false` compatible no-storage consume; complete valid `true` is warned, diagnosed, and omitted while the mapped remainder continues |
 | `stream` | transport intent | bind response transport before provider wire; no semantic change | exact | exact | exact |
 | `stream_options.include_obfuscation` | stream transport extension | validate only with stream; never expose as business content | exact Responses only | unmapped unless target has exact option | unmapped |
 | `temperature` / `top_p` | sampling semantics | preserve values and conflict rules | exact | exact | exact where target domain supports |
@@ -426,7 +440,9 @@ Target rules:
   project an object containing exactly one non-empty `user_id`. Session, thread,
   turn, and installation identifiers remain distinct local request-context
   semantics and may not be relabeled as `user_id`; registered Codex local keys
-  are consumed before provider wire, while unknown keys remain unmapped.
+  are consumed before provider wire. Unknown complete keys warn, are recorded as
+  scoped local diagnostic evidence, are omitted from provider wire, and do not
+  block the mapped remainder.
 - Gemini: no general request metadata field with equivalent client payload
   semantics is declared in the audited GenerateContent schema.
 
@@ -444,8 +460,9 @@ continuation, routing, provider-selection, or health state.
   storage preference. RouteCodex continuation save/restore is separately owned by
   the continuation control resource and cannot be inferred from `store`.
   Anthropic has no equivalent request field; `false` is validated and consumed
-  before Anthropic wire, while `true` fails because remote storage semantics
-  cannot be preserved.
+  before Anthropic wire, while complete valid `true` is warned, recorded as scoped
+  local diagnostic evidence, omitted from Anthropic wire, and leaves the mapped
+  remainder running.
 - Responses `text.format` and `text.verbosity` are decoded into the registered
   text output configuration. OpenAI Chat projection is allowed only through its
   declared `response_format` and `verbosity` fields with shape validation.
@@ -464,7 +481,7 @@ provider request is built:
 | `type=function` | `type=function` | Exact field/schema projection; preserve the complete JSON Schema and tool choice. |
 | `type=custom`, `format.type=text` | `type=custom`, `custom.format.type=text` | Exact free-form custom-tool projection; do not wrap the input in a JSON object or rename it to `function`. |
 | `type=custom`, `format.type=grammar` | `type=custom`, `custom.format.type=grammar` with `custom.format.grammar.{syntax,definition}` | Exact grammar projection when the selected Chat model advertises custom grammar support; otherwise fail at the adjacent codec. Never downgrade grammar to an unconstrained function/string schema. |
-| `type=web_search|web_search_preview` | Chat `web_search_options` | Project only options present in the Chat schema. `search_content_types=["text"]` is the target default and may be consumed only after validation; a request that includes `image` is unmapped and must fail. |
+| `type=web_search|web_search_preview` | Chat `web_search_options` | Project only options present in the Chat schema. `search_content_types=["text"]` is the target default and may be consumed only after validation. When the complete `search_content_types` field includes `image` and has no Chat allowlist mapping, warn, record scoped local diagnostic evidence, omit only that option from provider wire, and continue with the mapped remainder. A selected target that lacks web-search capability keeps its distinct capability failure. |
 | `type=tool_search`, `execution=client` | named `function` compatibility tool | This is a named, audited compatibility transform. The response codec must restore `tool_search_call` with exact call identity and arguments; no other custom tool may use this shape. |
 
 The OpenAI Chat SDK/API schema explicitly supports `type=custom` tools,
@@ -566,12 +583,12 @@ must not cross ReqInbound02.
 
 | Responses extension | Anthropic projection |
 | --- | --- |
-| `client_metadata` | Optional non-empty `user_id` projects to `metadata.user_id`; registered Codex local keys are consumed before wire; unknown keys fail because Anthropic has no reversible target field. |
+| `client_metadata` | Optional non-empty `user_id` projects to `metadata.user_id`; registered Codex local keys are consumed before wire. Unknown complete keys have no reversible Anthropic target field, so warn, record scoped local diagnostic evidence, omit those keys, and continue with the mapped remainder. |
 | `prompt_cache_key` | Valid non-empty key is consumed as a local cache hint before wire; malformed values fail; it must not rebuild `cache_control`. |
-| `store` | `false` is validated and consumed before wire; `true` fails because Anthropic cannot preserve remote storage semantics; neither value changes RouteCodex continuation state. |
+| `store` | `false` is validated and consumed before wire; complete valid `true` is warned, recorded as scoped local diagnostic evidence, and omitted from Anthropic wire while the mapped remainder continues; neither value changes RouteCodex continuation state. |
 | `text.verbosity` | Valid low/medium/high value is consumed as a local style hint before wire; invalid values fail; it never becomes Anthropic reasoning effort. |
-| `text.format.type=text` | Conditional exact default-text projection; emits no format object only after the outbound codec verifies no conflicting format field. |
-| `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; `strict=false` is not representable and fails. |
+| `text.format.type=text` | Conditional exact default-text projection; emits no format object after the outbound codec warns and records any unmatched sibling field while the mapped remainder continues. |
+| `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; source-level `strict=false` and other complete fields without a target mapping are warned, recorded as scoped local diagnostic evidence, and omitted from provider wire while the mapped remainder continues. Malformed registered output-format values retain their explicit validation failure. |
 
 No field in this table may enter MetadataCenter, provider selection, retry,
 continuation, SSE, or server-handler compensation.
@@ -579,9 +596,10 @@ continuation, SSE, or server-handler compensation.
 Structured Anthropic system blocks use the separate
 `request.anthropic_system_blocks` source-roundtrip extension. Anthropic outbound
 reconstructs `system` only from that registered field. Responses, OpenAI Chat,
-and Gemini outbound fail explicitly because block-local `cache_control` and block
-boundaries have no exact target field; they must not flatten the extension into
-plain instructions and silently discard those semantics.
+and Gemini outbound have no exact target field for the complete extension, so
+they warn, record scoped local diagnostic evidence, omit only that extension from
+provider wire, and continue with their mapped remainder. They must not flatten
+the extension into plain instructions and silently discard those semantics.
 
 ## Error contract
 
@@ -597,12 +615,14 @@ projection payloads are not required to be persisted. Evidence artifacts never
 enter MetadataCenter, provider wire payloads, or client response bodies, and
 must not be used to reconstruct live business state.
 
-The outbound owner reports the canonical semantic paths, not discarded source
-wire aliases:
+The outbound diagnostic side channel reports canonical semantic paths, not
+discarded source wire aliases, and does not turn allowlist absence into an Error
+terminal:
 
 ```text
-UnmappedOutboundFields target_protocol=anthropic
+unmatched_outbound_business_fields target_protocol=anthropic
 paths=$.request.reasoning_context_policy,$.request.client_metadata.unknown_key
+effect=warned,diagnosed,omitted_from_provider_wire,mapped_remainder_continues
 ```
 
 Malformed source values fail at the inbound codec. Target-domain violations fail
@@ -636,8 +656,10 @@ Before implementation, red tests must prove:
 
 1. `reasoning_effort=medium` reaches Anthropic
    `output_config.effort=medium` and is not silently retained or discarded.
-2. OpenAI `none/minimal` to Anthropic and `xhigh/max` to Gemini fail with the
-   canonical Chat path.
+2. OpenAI `none/minimal` to Anthropic and `xhigh/max` to Gemini follow the
+   registered target-domain mapping when declared; a value outside that
+   registered domain retains its explicit target-domain failure and never uses
+   opaque forwarding or an invented effort approximation.
 3. Numeric budget maps only between Anthropic and Gemini and never becomes
    OpenAI effort.
 4. Summary/context/mode cannot become Anthropic system markers; valid summary
@@ -646,8 +668,12 @@ Before implementation, red tests must prove:
    top-level field carry; Anthropic projects only exact `metadata.user_id` and
    compatible structured format. Cache key, registered client metadata,
    `store=false`, and valid verbosity consume only through registered local
-   compatibility; identifier relabeling, mixed metadata, unknown metadata,
-   `store=true`, and incompatible format fail with canonical Chat paths.
+   compatibility; unknown complete metadata keys warn, diagnose, and omit while
+   the mapped remainder continues. A complete valid `store=true` or
+   `strict=false` value is warned, diagnosed, and omitted while the remainder
+   continues. Identifier relabeling, malformed registered values, invalid
+   pairings, and genuinely unrepresentable boundaries retain their explicit
+   failures.
 6. OpenAI metadata limits are validated before wire emission.
 7. Node snapshots prove source wire -> Chat semantic -> governed Chat semantic ->
    provider semantic, with no raw shortcut and no MetadataCenter copy.

@@ -26,6 +26,7 @@ fn instance_residual_pids_are_discovered_even_when_ports_are_no_longer_listened(
     write_json_atomic(
         &instance_dir.join("pid.cache"),
         &V3ManagedPidCache {
+            retained_control: None,
             schema_version: SCHEMA_VERSION,
             instance_id: declaration.instance_id.clone(),
             pid: residual_pid,
