@@ -17,8 +17,7 @@ use futures_util::StreamExt;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    V3Error05ExecutionAction, V3ErrorActionScope, V3ErrorSourceKind,
-    V3ProviderFailureSessionScope,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use routecodex_v3_provider_responses::{
@@ -34,11 +33,6 @@ use routecodex_v3_sse::{
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
-
-// The shared Relay helper owns Error05 action selection; this owner keeps the
-// typed action contract bound without reimplementing its recovery policy.
-const _: fn(&V3Error05ExecutionAction) -> &'static str =
-    V3Error05ExecutionAction::observability_label;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3AnthropicRelayRuntimeInput {

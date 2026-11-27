@@ -169,6 +169,256 @@ const text = Object.fromEntries(Object.entries(files).map(([key, rel]) => [key, 
 // gate 语义（provider 动作门禁/恢复）同时覆盖主文件与 inner 执行体。
 text.responses = text.responses + '\n' + text.responsesInner;
 
+function braceDepthAt(source, endIndex) {
+  let depth = 0;
+  for (let index = 0; index < endIndex; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}') depth -= 1;
+  }
+  return depth;
+}
+
+function findMatchingDelimiter(source, startIndex) {
+  const open = source[startIndex];
+  const close = { '{': '}', '(': ')', '[': ']' }[open];
+  if (!close) return -1;
+  let depth = 0;
+  for (let index = startIndex; index < source.length; index += 1) {
+    if (source[index] === open) depth += 1;
+    else if (source[index] === close) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function parseRustMatchArms(block) {
+  const arms = [];
+  let start = 1;
+  while (start < block.length - 1) {
+    while (/[\s,]/u.test(block[start] ?? '') && start < block.length - 1) start += 1;
+    if (start >= block.length - 1) break;
+    const stack = [];
+    let arrowIndex = -1;
+    for (let index = start; index < block.length - 1; index += 1) {
+      const char = block[index];
+      if ('{(['.includes(char)) stack.push(char);
+      else if ('})]'.includes(char)) stack.pop();
+      else if (char === '=' && block[index + 1] === '>' && stack.length === 0) {
+        arrowIndex = index;
+        break;
+      }
+    }
+    if (arrowIndex < 0) return null;
+    let bodyStart = arrowIndex + 2;
+    while (/\s/u.test(block[bodyStart] ?? '')) bodyStart += 1;
+    let bodyEnd = bodyStart;
+    if (block[bodyStart] === '{') {
+      const close = findMatchingDelimiter(block, bodyStart);
+      if (close < 0) return null;
+      bodyEnd = close + 1;
+    } else {
+      while (bodyEnd < block.length - 1 && block[bodyEnd] !== ',') bodyEnd += 1;
+    }
+    arms.push({
+      pattern: block.slice(start, arrowIndex).replace(/\s+/gu, ' ').trim(),
+      body: block.slice(bodyStart, bodyEnd).trim(),
+    });
+    start = bodyEnd;
+  }
+  return arms;
+}
+
+function assertAnthropicPolicyBindingAndActionMatch(sharedBody) {
+  const initializerPattern = /\blet\s+mut\s+result\s*=\s*match\s+run_v3_relay_provider_failure_policy_with_response_source\s*\(/gu;
+  const initializers = [...sharedBody.matchAll(initializerPattern)]
+    .filter((match) => braceDepthAt(sharedBody, match.index) === 1);
+  if (initializers.length !== 1) {
+    failures.push(
+      `${files.relayShared}: must bind the top-level policy result with let mut result = match run_v3_relay_provider_failure_policy_with_response_source(...).await`,
+    );
+    return;
+  }
+  const initializer = initializers[0];
+  const callOpen = sharedBody.indexOf('(', initializer.index);
+  const callClose = findMatchingDelimiter(sharedBody, callOpen);
+  if (callClose < 0) {
+    failures.push(`${files.relayShared}: cannot balance the top-level policy call`);
+    return;
+  }
+  const matchOpen = sharedBody.slice(callClose + 1).search(/^\s*\.await\s*\{/u);
+  if (matchOpen < 0) {
+    failures.push(`${files.relayShared}: top-level policy call must be awaited directly in the result match`);
+    return;
+  }
+  const policyBlockOpen = callClose + 1 + matchOpen + sharedBody.slice(callClose + 1).match(/^\s*\.await\s*/u)[0].length;
+  const policyBlockClose = findMatchingDelimiter(sharedBody, policyBlockOpen);
+  if (policyBlockClose < 0) {
+    failures.push(`${files.relayShared}: cannot balance the top-level policy result match`);
+    return;
+  }
+  const policyArms = parseRustMatchArms(sharedBody.slice(policyBlockOpen, policyBlockClose + 1));
+  if (!policyArms || policyArms.length === 0) {
+    failures.push(`${files.relayShared}: cannot parse the top-level policy result match`);
+    return;
+  }
+  const okArms = policyArms.filter((arm) => arm.pattern === 'Ok(result)');
+  if (okArms.length !== 1 || okArms[0].body !== 'result') {
+    failures.push(`${files.relayShared}: must return the policy Ok binding as Ok(result) => result`);
+  }
+  if (!/^\s*;/u.test(sharedBody.slice(policyBlockClose + 1))) {
+    failures.push(`${files.relayShared}: policy result match must initialize a single binding`);
+    return;
+  }
+
+  const actionMatches = [...sharedBody.matchAll(/\bmatch\s+result\s*\.\s*decision\s*\.\s*action\s*\{/gu)]
+    .filter((match) => braceDepthAt(sharedBody, match.index) === 1);
+  if (actionMatches.length !== 1) {
+    failures.push(`${files.relayShared}: must match result.decision.action exactly once at top level`);
+    return;
+  }
+  const actionMatch = actionMatches[0];
+  if (actionMatch.index <= policyBlockClose) {
+    failures.push(`${files.relayShared}: action match must follow the policy result binding`);
+    return;
+  }
+  const between = sharedBody.slice(policyBlockClose + 1, actionMatch.index);
+  const forbiddenBindingChange = /\b(?:let|const|var)\b[^;=]*\b(?:result|decision|action)\b[^;=]*=|\bresult\s*(?:\.\s*(?:decision|action))?\s*=(?!=)|\b(?:decision|action)\s*=(?!=)/u;
+  if (forbiddenBindingChange.test(between)) {
+    failures.push(`${files.relayShared}: policy result must reach the action match unchanged`);
+  }
+
+  const actionBlockOpen = actionMatch.index + actionMatch[0].lastIndexOf('{');
+  const actionBlockClose = findMatchingDelimiter(sharedBody, actionBlockOpen);
+  const actionArms = actionBlockClose < 0
+    ? null
+    : parseRustMatchArms(sharedBody.slice(actionBlockOpen, actionBlockClose + 1));
+  if (!actionArms) {
+    failures.push(`${files.relayShared}: cannot parse the typed action match arms`);
+    return;
+  }
+  const variants = [
+    'ReevaluateTarget',
+    'Reselect',
+    'WaitThenRetrySame',
+    'ProjectTerminal',
+    'ClientDisconnected',
+    'RejectNonProviderError',
+  ];
+  const allowedPatterns = new Map([
+    ...['ReevaluateTarget', 'Reselect', 'ProjectTerminal'].map((variant) => [
+      `V3Error05ExecutionAction::${variant}`,
+      [variant],
+    ]),
+    ['V3Error05ExecutionAction::WaitThenRetrySame { .. }', ['WaitThenRetrySame']],
+    [
+      'V3Error05ExecutionAction::ClientDisconnected | V3Error05ExecutionAction::RejectNonProviderError',
+      ['ClientDisconnected', 'RejectNonProviderError'],
+    ],
+  ]);
+  const seen = new Set();
+  for (const arm of actionArms) {
+    const declared = allowedPatterns.get(arm.pattern);
+    if (!declared) {
+      failures.push(
+        `${files.relayShared}: typed action match must use only explicit typed action patterns (found ${arm.pattern})`,
+      );
+      continue;
+    }
+    for (const variant of declared) {
+      if (seen.has(variant)) {
+        failures.push(`${files.relayShared}: typed action match repeats ${variant}`);
+      }
+      seen.add(variant);
+    }
+  }
+  for (const variant of variants) {
+    if (!seen.has(variant)) {
+      failures.push(
+        `${files.relayShared}: typed action match must handle V3Error05ExecutionAction::${variant}`,
+      );
+    }
+  }
+}
+
+function assertAnthropicTypedError05Binding() {
+  for (const [suffix, helper] of [
+    ['failure', 'handle_provider_failure'],
+    ['response-code', 'handle_provider_failure_with_response_code'],
+  ]) {
+    assertCallerInvokesCallee({
+      step_id: `v3-provider-action-gate-anthropic-${suffix}`,
+      caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+      caller_file: files.anthropic,
+      callee_symbol: helper,
+      callee_file: files.relayShared,
+      call_witness: helper === 'handle_provider_failure'
+        ? /\bhandle_provider_failure\s*\(/u
+        : /\bhandle_provider_failure_with_response_code\s*\(/u,
+    });
+  }
+  const callerBody = findFunctionBody(
+    text.anthropic,
+    'execute_v3_anthropic_relay_runtime_inner',
+    files.anthropic,
+  );
+  const responseCodeCalls = [...callerBody.matchAll(/\bhandle_provider_failure_with_response_code\s*\(/gu)];
+  if (responseCodeCalls.length !== 2) {
+    failures.push(`${files.anthropic}: expected two response-code calls in the execution body`);
+  }
+  for (const [index, call] of responseCodeCalls.entries()) {
+    const callOpen = call.index + call[0].lastIndexOf('(');
+    const callClose = findMatchingDelimiter(callerBody, callOpen);
+    if (callClose < 0) {
+      failures.push(`${files.anthropic}: cannot balance response-code call ${index + 1}`);
+      continue;
+    }
+    if (!/^\s*\.\s*await\s*\?/u.test(callerBody.slice(callClose + 1))) {
+      failures.push(`${files.anthropic}: response-code call ${index + 1} must be awaited with error propagation`);
+    }
+    let argumentStart = callOpen + 1;
+    let finalArgument = '';
+    for (let cursor = argumentStart; cursor < callClose; cursor += 1) {
+      if ('{(['.includes(callerBody[cursor])) {
+        cursor = findMatchingDelimiter(callerBody, cursor);
+        if (cursor < 0) break;
+      } else if (callerBody[cursor] === ',') {
+        finalArgument = callerBody.slice(argumentStart, cursor).trim();
+        argumentStart = cursor + 1;
+      }
+    }
+    const trailingArgument = callerBody.slice(argumentStart, callClose).trim();
+    if ((trailingArgument || finalArgument) !== 'response_processing_code') {
+      failures.push(`${files.anthropic}: response-code call ${index + 1} must forward response_processing_code as its final argument`);
+    }
+  }
+  assertCallerInvokesCallee({
+    step_id: 'v3-provider-action-gate-anthropic-shared-delegation',
+    caller_symbol: 'handle_provider_failure',
+    caller_file: files.relayShared,
+    callee_symbol: 'handle_provider_failure_with_response_code',
+    callee_file: files.relayShared,
+    call_witness: /\bhandle_provider_failure_with_response_code\s*\(/u,
+  });
+  assertCallerInvokesCallee({
+    step_id: 'v3-provider-action-gate-anthropic-typed-policy',
+    caller_symbol: 'handle_provider_failure_with_response_code',
+    caller_file: files.relayShared,
+    callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source',
+    callee_file: files.policy,
+    call_witness: /\brun_v3_relay_provider_failure_policy_with_response_source\s*\(/u,
+  });
+  const sharedBody = findFunctionBody(
+    text.relayShared,
+    'handle_provider_failure_with_response_code',
+    files.relayShared,
+  );
+  assertAnthropicPolicyBindingAndActionMatch(sharedBody);
+}
+
+assertAnthropicTypedError05Binding();
+
 for (const token of [
   '"ProviderReqCompat06ProviderCompat"',
   '"provider_request_compat_error"',
@@ -329,7 +579,6 @@ if (
 for (const [name, source, rel] of [
   ['Direct', text.direct, files.direct],
   ['Responses Relay', text.responses, files.responses],
-  ['Anthropic Relay', text.anthropic, files.anthropic],
   ['Relay Skeleton', `${text.relayCore}\n${text.relayShared}`, `${files.relayCore} + ${files.relayShared}`],
 ]) {
   if (!source.includes('V3Error05ExecutionAction')) {

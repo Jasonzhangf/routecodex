@@ -451,6 +451,7 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
             if target == "openai_chat" {
                 assert_eq!(response["output_text"], "projection accepted");
             }
+            let expected_entry_port = port.to_string();
             for (index, signature) in [FUNCTION_SIG, CUSTOM_SIG].into_iter().enumerate() {
                 if !records
                     .lines()
@@ -467,7 +468,7 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
                             && record["reason"] == "unmapped_target_protocol_field_unrepresentable"
                             && record["drop_site"]
                                 == "project_outbound_payload_for_target_protocol_inner_with_drops"
-                            && record["entry_port"] == port.to_string()
+                            && record["entry_port"].as_str() == Some(expected_entry_port.as_str())
                             && record["request_id"]
                                 .as_str()
                                 .is_some_and(|id| !id.is_empty())

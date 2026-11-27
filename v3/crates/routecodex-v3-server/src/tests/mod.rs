@@ -14,7 +14,6 @@ use std::fs;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex as AsyncMutex;
 
-#[allow(dead_code)]
 #[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 
