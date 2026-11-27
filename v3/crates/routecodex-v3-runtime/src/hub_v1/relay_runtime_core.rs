@@ -11,16 +11,15 @@
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
 use super::relay_runtime_shared::{
-    handle_provider_failure_with_response_code, provider_response_governance_failure,
+    provider_response_governance_failure,
     relay_handoff_entry_state,
 };
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
 use crate::operation_runner::plan_execution::{
-    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
+    V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
 };
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
@@ -31,7 +30,7 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResponseBody,
-    V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
+    V3ProviderSseStream,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -721,7 +720,7 @@ where
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
     let mut active_episode = None::<routecodex_v3_target::V3ActiveKeyEpisode>;
-    let mut active_attempt_dispatched = false;
+    let mut active_attempt_dispatched;
     macro_rules! active_failure {
         ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr $(,)?) => {
             active_failure!($context, $selected, $failure, $state, $retry, $events, None)
@@ -810,7 +809,7 @@ where
                     ));
                 }
                 Err(V3PlanExecutionStop::Exhausted {
-                    expanded: exhausted_expanded,
+                    expanded: _exhausted_expanded,
                     exhaustion,
                     source,
                     ..
@@ -1237,7 +1236,7 @@ where
                 let projection = if has_business_content {
                     refill.round = None;
                     C::project_json_response(
-                        &request_id,
+                        request_id,
                         failure_session_scope.session_id(),
                         provider_value,
                         provider_wire_protocol,
@@ -1339,7 +1338,7 @@ where
                 observability.timing = Some(
                     runtime_timing
                         .finish_runtime()
-                        .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
+                        .map_err(V3RelayCoreError::Target)?,
                 );
                 if let Some(pending) = route_policy_pending.as_ref() {
                     pending
@@ -1606,7 +1605,7 @@ where
                     ));
                 }
                 let projected_sse = match C::project_sse(
-                    &request_id,
+                    request_id,
                     idle_guarded_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
@@ -1962,7 +1961,7 @@ where
                 observability.timing = Some(
                     runtime_timing
                         .finish_runtime()
-                        .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
+                        .map_err(V3RelayCoreError::Target)?,
                 );
                 if let Some(pending) = route_policy_pending.as_ref() {
                     pending
@@ -2058,7 +2057,7 @@ where
             payload.clone(),
             transport,
             provider_health.clone(),
-            retry_policy.clone(),
+            retry_policy,
             Vec::new(),
             true,
             initial_handoff.take(),

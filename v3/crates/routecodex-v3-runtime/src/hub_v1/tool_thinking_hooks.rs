@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct V3ToolThinkingTurnContext {
+pub struct V3ToolThinkingTurnContext {
     enabled: bool,
     original_custom_tool_names: BTreeSet<String>,
 }

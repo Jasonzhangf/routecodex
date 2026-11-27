@@ -157,10 +157,12 @@ pub(crate) async fn add_cooldown(
         .provider_health
         .store()
         .add_cooldown_entry_for_interface(
-            &provider_id,
+            routecodex_v3_runtime::V3ProviderIdentityRef::new(
+                &provider_id,
+                request.auth_alias.as_deref(),
+                request.model_id.as_deref(),
+            ),
             request.interface_id.trim(),
-            request.auth_alias.as_deref(),
-            request.model_id.as_deref(),
             &request.kind,
             request.duration_ms,
             now_ms(),

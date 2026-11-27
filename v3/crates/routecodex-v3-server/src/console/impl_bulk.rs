@@ -1839,6 +1839,7 @@ pub(crate) fn parse_v3_console_provider_key(
 #[cfg(test)]
 mod direct_sse_observability_none_tests {
     use super::*;
+    use crate::request_id::V3RequestCounterState;
     use crate::webui_observability::build_v3_obs_request_key;
     use futures_util::StreamExt;
     use std::collections::BTreeMap;

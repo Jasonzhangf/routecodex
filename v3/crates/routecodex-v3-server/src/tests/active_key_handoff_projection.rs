@@ -3,8 +3,7 @@ use super::*;
 use routecodex_v3_target::V3ActiveKeyEpisode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
-mod fixture;
+use super::hub_v1_fixture as fixture;
 
 fn error_body() -> String {
     json!({"error":{"message":"ordinary controlled upstream failure alias=A status=503","type":"server_error"}}).to_string()
@@ -119,7 +118,7 @@ impl Drop for OwnedFixture {
 }
 
 async fn held_successor_projects_exact_http(relay_first: bool) {
-    let _lock = TEST_HOME_LOCK.lock().unwrap();
+    let _lock = TEST_HOME_LOCK.lock().await;
     let mut owned = OwnedFixture::new();
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let observed_calls = calls.clone();

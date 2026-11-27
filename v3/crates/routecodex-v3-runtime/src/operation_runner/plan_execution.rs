@@ -97,8 +97,8 @@ pub(crate) struct V3PlanExecutionCompleted {
 
 pub(crate) enum V3PlanExecutionStop {
     Exhausted {
-        expanded: V3Target09CandidateSetExpanded,
-        exhaustion: V3TargetExhaustion,
+        expanded: Box<V3Target09CandidateSetExpanded>,
+        exhaustion: Box<V3TargetExhaustion>,
         source: Option<V3Error01SourceRaised>,
     },
     Failed(V3Error01SourceRaised),
@@ -510,10 +510,10 @@ fn run_v3_plan_execution_operator_with_selection_state(
         .take();
     match output {
         Some(PlanExecutionOperatorOutput::Failed(source)) => {
-            return Ok(V3PlanExecutionOutcome::Failed(source))
+            Ok(V3PlanExecutionOutcome::Failed(source))
         }
         Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
-            return Ok(V3PlanExecutionOutcome::OperatorFault(fault))
+            Ok(V3PlanExecutionOutcome::OperatorFault(fault))
         }
         output => {
             let output = output.ok_or_else(|| {
@@ -681,8 +681,8 @@ pub(crate) fn run_v3_plan_execution_preplan_operator_with_active_keys(
             source,
             ..
         }) => Err(V3PlanExecutionStop::Exhausted {
-            expanded,
-            exhaustion,
+            expanded: Box::new(expanded),
+            exhaustion: Box::new(exhaustion),
             source,
         }),
         Some(PlanExecutionOperatorOutput::Failed(source)) => {
@@ -750,7 +750,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
     now_ms: u64,
     deterministic_sample: u64,
     _allow_exhaustion_rescue_probe: bool,
-    mut preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> std::pin::Pin<
     Box<
@@ -835,8 +835,8 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes_active_keys<'a>(
                 source,
                 ..
             } => Err(V3PlanExecutionStop::Exhausted {
-                expanded,
-                exhaustion,
+                expanded: Box::new(expanded),
+                exhaustion: Box::new(exhaustion),
                 source,
             }),
             V3PlanExecutionOutcome::Failed(source) => Err(V3PlanExecutionStop::Failed(source)),

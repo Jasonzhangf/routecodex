@@ -8,8 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
-mod fixture;
+use super::hub_v1_fixture as fixture;
 
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -303,10 +302,8 @@ async fn run_exact_health_child_case(
                     assert_eq!(
                         store
                             .scheduling_projection_for_key_with_interface(
-                                "test",
+                                routecodex_v3_runtime::V3ProviderKeyRef::new("test", "key", "test"),
                                 &interface_id,
-                                "key",
-                                "test",
                                 1,
                                 1,
                                 11,
@@ -329,10 +326,8 @@ async fn run_exact_health_child_case(
                     assert_eq!(
                         store
                             .scheduling_projection_for_key_with_interface(
-                                "test",
+                                routecodex_v3_runtime::V3ProviderKeyRef::new("test", "key", "test"),
                                 &interface_id,
-                                "key",
-                                "test",
                                 1,
                                 1,
                                 11,
@@ -418,10 +413,7 @@ async fn run_exact_health_child_case(
         record_exact_health(directory, "phase_business_outcome", "passed");
         if populated && case == "assertion_shutdown_stall" {
             let assertion = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                assert!(
-                    false,
-                    "intentional exact-health assertion before stalled shutdown"
-                );
+                panic!("intentional exact-health assertion before stalled shutdown");
             }))
             .expect_err("the intentional assertion must fail");
             let message = capture_assertion_message(assertion);
@@ -1648,7 +1640,7 @@ async fn queued_upstream_arrival_during_ready_shutdown_is_counted_and_released()
 
 #[tokio::test]
 async fn exact_health_cleanup_failure_preserves_assertion_and_restores_environment() {
-    let _lock = TEST_HOME_LOCK.lock().unwrap();
+    let _lock = TEST_HOME_LOCK.lock().await;
     let home = std::env::temp_dir().join(format!(
         "target-origin-health-neutrality-cleanup-{}",
         std::process::id()
@@ -1678,7 +1670,7 @@ async fn exact_health_cleanup_failure_preserves_assertion_and_restores_environme
         .collect();
 
     let assertion = std::panic::AssertUnwindSafe(async {
-        assert!(false, "intentional exact-health assertion failure");
+        panic!("intentional exact-health assertion failure");
     })
     .catch_unwind()
     .await;

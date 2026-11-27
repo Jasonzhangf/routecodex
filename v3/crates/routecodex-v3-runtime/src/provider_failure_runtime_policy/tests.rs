@@ -1,9 +1,10 @@
 use super::*;
+use crate::provider_action_gate::V3ProviderActionRecoveryTransition;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    V3Error05ExecutionAction, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ProviderHealthScope,
+    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external, V3ErrorSourceKind,
+    V3Error05ExecutionAction,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderHealthScope,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -523,7 +524,7 @@ fn active_dispatch_observes_health_changes_after_selection_without_spending_a_se
             on_failure: V3ActiveKeyFailureAction::Hold,
         },
         V3SelectionStrategy::ActiveQueue,
-        &[identity.clone()],
+        std::slice::from_ref(&identity),
     )
     .unwrap();
     let selection = keys
@@ -602,7 +603,7 @@ fn hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch(
             on_failure: V3ActiveKeyFailureAction::Hold,
         },
         V3SelectionStrategy::ActiveQueue,
-        &[identity.clone()],
+        std::slice::from_ref(&identity),
     )
     .unwrap();
     let selection = keys
@@ -624,10 +625,12 @@ fn hold_during_recovery_acquisition_releases_trial_without_consuming_a_dispatch(
     health
         .store()
         .add_cooldown_entry_for_interface(
-            &identity.provider_id,
+            routecodex_v3_provider_responses::V3ProviderIdentityRef::new(
+                &identity.provider_id,
+                Some(&identity.auth_alias),
+                Some(&identity.model_id),
+            ),
             &identity.interface_id,
-            Some(&identity.auth_alias),
-            Some(&identity.model_id),
             "probe",
             1000,
             1000,

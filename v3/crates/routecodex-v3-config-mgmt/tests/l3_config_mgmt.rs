@@ -8,7 +8,7 @@ use routecodex_v3_config_mgmt::{
     write_provider_file, ConfigMgmtStore, RevisionStore, V2_PROVIDER_CONFIG_FILE_NAME,
 };
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -70,7 +70,7 @@ targets = [
     routecodex_v3_config::parse_v3_config_02_authoring(raw).expect("parse authoring")
 }
 
-fn write_config(home: &PathBuf, raw: &str) -> PathBuf {
+fn write_config(home: &Path, raw: &str) -> PathBuf {
     let path = home.join("config.v3.toml");
     fs::write(&path, raw).expect("write config");
     path

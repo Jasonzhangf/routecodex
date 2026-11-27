@@ -1398,7 +1398,6 @@ pub fn v3_webui_observability_read_provider_usage_with_limits(
                     detail_started_epoch_ms: None,
                     detail_incomplete: true,
                     gaps: vec!["coverage_unavailable".to_string()],
-                    ..Default::default()
                 },
             )
             .collect();
@@ -1432,7 +1431,6 @@ pub fn v3_webui_observability_read_provider_usage_with_limits(
                     detail_started_epoch_ms: None,
                     detail_incomplete: true,
                     gaps: vec!["coverage_unavailable".to_string()],
-                    ..Default::default()
                 })
                 .collect();
         }
@@ -1729,7 +1727,7 @@ fn write_provider_usage_coverage_with_limits(
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| std::io::Error::other(error))?
+            .map_err(std::io::Error::other)?
             .as_nanos()
     ));
     let result = (|| {
@@ -1898,7 +1896,6 @@ fn reconcile_v3_provider_usage_coverage(
                     detail_started_epoch_ms: Some(started),
                     detail_incomplete: false,
                     gaps: Vec::new(),
-                    ..Default::default()
                 });
             }
         }
@@ -2259,12 +2256,8 @@ mod retention_tests {
         // A writer's unterminated trailing fragment is left for the next read...
         {
             let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
-            write!(
-                file,
-                "{}",
-                r#"{"schema_version":1,"row":{"request_key":"b""#
-            )
-            .unwrap();
+            file.write_all(br#"{"schema_version":1,"row":{"request_key":"b""#)
+                .unwrap();
         }
         let partial = v3_webui_observability_read_raw_rows_from(
             &path,
@@ -2278,7 +2271,7 @@ mod retention_tests {
         // ...and decoded once the writer terminates it.
         {
             let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
-            writeln!(file, "{}", "}}").unwrap();
+            file.write_all(b"}}\n").unwrap();
         }
         let completed = v3_webui_observability_read_raw_rows_from(
             &path,

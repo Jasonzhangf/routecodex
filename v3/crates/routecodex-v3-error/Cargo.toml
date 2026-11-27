@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 serde.workspace = true

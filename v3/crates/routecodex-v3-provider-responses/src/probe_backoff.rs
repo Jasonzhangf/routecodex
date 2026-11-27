@@ -48,6 +48,7 @@ pub(crate) fn provider_failure_cooldown_ms(
         .min(PROVIDER_FAILURE_LADDER_MS.len() - 1)]
 }
 
+#[cfg(test)]
 pub(crate) fn adaptive_probe_interval_ms(
     observed_attempts: u32,
     observed_failures: u32,

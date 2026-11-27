@@ -6,9 +6,9 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderCooldownCoordinator, V3ProviderFailureAction,
     V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderHealthStore,
-    V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore, V3ProviderPrecoolObservationOutcome,
-    V3ProviderProbePurpose, V3ProviderRateLimitProbeDisposition, V3ProviderRecoveryKind,
-    V3ProviderSchedulingProjection,
+    V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore, V3ProviderKeyRef,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
+    V3ProviderRateLimitProbeDisposition, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
 };
 
 fn real_http_provider_action(status: u16, code: &str) -> V3ProviderFailureAction {
@@ -184,10 +184,8 @@ fn two_429_observations_spanning_two_minutes_do_not_cool() {
     assert!(
         store
             .scheduling_projection_for_key_with_interface(
-                "p",
+                V3ProviderKeyRef::new("p", "sibling", "m"),
                 "responses",
-                "sibling",
-                "m",
                 1,
                 1,
                 121000
@@ -209,10 +207,8 @@ fn tenth_mixed_failure_commits_one_hour_and_requires_owned_business_trial() {
     assert!(
         store
             .scheduling_projection_for_key_with_interface(
-                "p",
+                V3ProviderKeyRef::new("p", "k", "m"),
                 "responses",
-                "k",
-                "m",
                 1,
                 1,
                 3_601_010
@@ -1736,10 +1732,8 @@ fn provider_health_cooldown_is_isolated_between_interfaces() {
 
     let cooled_interface = store
         .scheduling_projection_for_key_with_interface(
-            "provider-a",
+            V3ProviderKeyRef::new("provider-a", "key-a", "model-a"),
             "responses",
-            "key-a",
-            "model-a",
             1,
             1,
             900_103,
@@ -1747,10 +1741,8 @@ fn provider_health_cooldown_is_isolated_between_interfaces() {
         .expect("cooled interface projection");
     let sibling_interface = store
         .scheduling_projection_for_key_with_interface(
-            "provider-a",
+            V3ProviderKeyRef::new("provider-a", "key-a", "model-a"),
             "chat",
-            "key-a",
-            "model-a",
             1,
             1,
             900_103,
@@ -1780,13 +1772,25 @@ fn precool_observation_acquires_without_cooldown_score_or_fake_blocked_until() {
         .is_empty());
     assert!(
         store
-            .scheduling_projection_for_key_with_interface("p", "responses", "k", "m", 1, 1, 100)
+            .scheduling_projection_for_key_with_interface(
+                V3ProviderKeyRef::new("p", "k", "m"),
+                "responses",
+                1,
+                1,
+                100
+            )
             .expect("projection")
             .available
     );
     assert_eq!(
         store
-            .scheduling_projection_for_key_with_interface("p", "responses", "k", "m", 1, 1, 100)
+            .scheduling_projection_for_key_with_interface(
+                V3ProviderKeyRef::new("p", "k", "m"),
+                "responses",
+                1,
+                1,
+                100
+            )
             .expect("projection")
             .score_milli,
         100,
@@ -1804,7 +1808,13 @@ fn precool_observation_acquires_without_cooldown_score_or_fake_blocked_until() {
         .provider_precool_observation_permit_is_current(&permit)
         .expect("permit closed"));
     let after = store
-        .scheduling_projection_for_key_with_interface("p", "responses", "k", "m", 1, 1, 101)
+        .scheduling_projection_for_key_with_interface(
+            V3ProviderKeyRef::new("p", "k", "m"),
+            "responses",
+            1,
+            1,
+            101,
+        )
         .expect("after projection");
     assert!(after.available);
     assert_eq!(after.score_milli, 100);
@@ -1873,7 +1883,13 @@ fn cancelled_precool_observation_releases_capacity_without_cooling() {
         .expect("due keys")
         .is_empty());
     let projection = store
-        .scheduling_projection_for_key_with_interface("p", "responses", "k", "m", 1, 1, 200)
+        .scheduling_projection_for_key_with_interface(
+            V3ProviderKeyRef::new("p", "k", "m"),
+            "responses",
+            1,
+            1,
+            200,
+        )
         .expect("projection after cancellation");
     assert!(projection.available);
     assert_eq!(projection.score_milli, 100);

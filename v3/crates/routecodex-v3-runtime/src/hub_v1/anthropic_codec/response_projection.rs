@@ -326,6 +326,21 @@ fn require_nonempty_reasoning_string<'a>(
     Ok(value)
 }
 
+fn optional_reasoning_string<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+) -> Result<Option<&'a str>, V3AnthropicCodecError> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    value
+        .as_str()
+        .map(Some)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning content",
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,19 +373,4 @@ mod tests {
 
         assert_eq!(error.to_string(), "Anthropic codec malformed thinking");
     }
-}
-
-fn optional_reasoning_string<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-) -> Result<Option<&'a str>, V3AnthropicCodecError> {
-    let Some(value) = object.get(key) else {
-        return Ok(None);
-    };
-    value
-        .as_str()
-        .map(Some)
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        })
 }
