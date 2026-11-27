@@ -7317,6 +7317,10 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 capture.body
             );
             assert_eq!(tool_result["content"], "42", "{label}: {}", capture.body);
+            assert!(
+                captures.try_recv().is_err(),
+                "{label}: the selected provider must accept the first attempt without fallback"
+            );
         }
     }
 
