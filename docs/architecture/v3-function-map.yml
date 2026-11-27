@@ -4108,7 +4108,7 @@ features:
 - feature_id: v3.client_sse_head_commit
   status: source_controlled_blackbox_verified
   owner_crate: routecodex-v3-server
-  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt; the channel carries transport-only keepalives before the runtime outcome, frames the projected successful payload through the SSE transport codec afterwards, and closes without an error frame when the outcome has no successful client payload; exec replacement pauses new dispatch without draining business requests, leaves valid existing responses deliverable during preparation, and permits detectable interruption for client-managed retries.
+  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt. The channel carries transport-only keepalives before the runtime outcome. It frames one accepted business payload through the SSE transport codec, or one complete real non-2xx error from the actual exhausted final identity when Error qualified it for entry-protocol projection before business commit. A transport-only head is not business commit. Every other terminal outcome closes only the affected transport without an error frame or fabricated completion. Exec replacement pauses new dispatch without draining business requests, leaves valid existing responses deliverable during preparation, and permits detectable interruption for client-managed retries.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/lib.rs

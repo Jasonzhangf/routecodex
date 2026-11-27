@@ -1145,18 +1145,23 @@ async fn complete_final_provider_http_502_preserves_status_and_body() {
     )
     .await;
     let base = endpoint.trim_end_matches("/v1/responses");
-    let consumed = consume_response(
-        client()
-            .post(&endpoint)
-            .json(&json!({
-                "model":"test.test",
-                "input":"db1f482 complete upstream HTTP 502",
-                "stream":false
-            }))
-            .send()
-            .await,
-    )
-    .await;
+    let response = client()
+        .post(&endpoint)
+        .json(&json!({
+            "model":"test.test",
+            "input":"db1f482 complete upstream HTTP 502",
+            "stream":false
+        }))
+        .send()
+        .await;
+    let content_type = response
+        .as_ref()
+        .ok()
+        .and_then(|response| response.headers().get(CONTENT_TYPE))
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let consumed = consume_response(response).await;
+    assert_eq!(content_type.as_deref(), Some("text/html"), "{consumed:?}");
     assert_eq!(
         consumed.status,
         Some(StatusCode::BAD_GATEWAY),
