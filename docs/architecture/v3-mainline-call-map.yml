@@ -8903,7 +8903,7 @@ chains:
 
 - chain_id: v3.direct_sse_accept_skeleton
   owner_feature_id: v3.direct_sse_accept_skeleton
-  summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.
+  summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes. Runtime buffers each attempt until accepted business frames can cross once; Error may instead qualify a complete real non-2xx response from the actual exhausted final identity for entry-protocol projection before business commit. A transport-only head is not business commit. All other terminal failures abort only the affected transport without a fabricated error frame, reparsed HTTP JSON or completion.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   implementation_symbols: [accept_v3_client_sse_transport, v3_request_wants_sse]
   supporting_callers: [pending_endpoint_after_json_parse, execute_responses_direct_server_outcome]
