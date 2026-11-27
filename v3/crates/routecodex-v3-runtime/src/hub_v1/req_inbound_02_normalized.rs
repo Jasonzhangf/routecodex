@@ -13,10 +13,17 @@ const NORMALIZE_REQUEST_LOSSLESSLY_OPERATOR: &str =
 const NORMALIZE_REQUEST_LOSSLESSLY_NODE: &str = "normalize_request_losslessly";
 const NORMALIZE_REQUEST_LOSSLESSLY_OPERATOR_VERSION: &str = "1";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3HubAssistantItemContentRange {
+    Empty,
+    Parts { start: usize, end: usize },
+    TextRange { byte_start: usize, byte_end: usize },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct V3HubAssistantItemProvenance {
     pub(crate) source_input_order: Option<u64>,
-    pub(crate) chat_content: Value,
+    pub(crate) content_range: V3HubAssistantItemContentRange,
     pub(crate) id: Option<String>,
     pub(crate) status: Option<Value>,
 }
@@ -33,8 +40,10 @@ pub(crate) struct V3HubMessageHistoryProvenance {
     pub(crate) tool_calls: Vec<V3HubToolCallHistoryProvenance>,
     pub(crate) reasoning_item_orders: Vec<Option<u64>>,
     pub(crate) assistant_items: Vec<V3HubAssistantItemProvenance>,
+    pub(crate) assistant_content_digest: Option<u64>,
     pub(crate) omit_tool_output_id: bool,
     pub(crate) preserve_native_tool_output_id: bool,
+    pub(crate) decoder_native_tool_output: bool,
     pub(crate) preserve_orphan_tool_output_literal: bool,
     pub(crate) restore_responses_hosted_web_search: bool,
 }
@@ -137,11 +146,21 @@ impl V3HubExplicitHistoryProvenance {
                     );
                 }
                 if derived_entry.assistant_items.len() > retained_entry.assistant_items.len() {
+                    let retained_len = retained_entry.assistant_items.len();
+                    for (existing, derived) in retained_entry
+                        .assistant_items
+                        .iter_mut()
+                        .zip(&derived_entry.assistant_items[..retained_len])
+                    {
+                        existing.content_range = derived.content_range;
+                    }
                     retained_entry.assistant_items.extend(
-                        derived_entry.assistant_items[retained_entry.assistant_items.len()..]
+                        derived_entry.assistant_items[retained_len..]
                             .iter()
                             .cloned(),
                     );
+                    retained_entry.assistant_content_digest =
+                        derived_entry.assistant_content_digest;
                 }
             } else {
                 message_entries.push(derived_entry.clone());

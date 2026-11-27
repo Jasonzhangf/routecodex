@@ -37,8 +37,8 @@ use super::request_outbound_metadata::{
     validate_openai_metadata,
 };
 use super::responses_openai_codec::{
-    fold_v3_openai_chat_message_contents, responses_tool_output_content,
-    v3_openai_chat_content_is_empty, RESPONSES_REASONING_ITEMS_EXTENSION,
+    chat_content_digest, responses_tool_output_content, v3_openai_chat_content_is_empty,
+    RESPONSES_REASONING_ITEMS_EXTENSION,
 };
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
@@ -1311,20 +1311,20 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
             if let Some(assistant_items) =
                 provenance.and_then(|provenance| provenance.assistant_items(msg_idx))
             {
-                let entry_contents: Vec<Value> = assistant_items
-                    .iter()
-                    .map(|entry| entry.chat_content.clone())
-                    .collect();
-                let expected_content = fold_v3_openai_chat_message_contents(&entry_contents);
-                let matches_canonical = expected_content.as_ref().is_some_and(|expected| {
-                    let actual = row.get("content").unwrap_or(&Value::Null);
-                    super::req_inbound_02_normalized::comparable_chat_content(actual)
-                        == super::req_inbound_02_normalized::comparable_chat_content(expected)
-                });
-                if matches_canonical {
+                let actual = row.get("content").unwrap_or(&Value::Null);
+                let msg_provenance =
+                    provenance.and_then(|provenance| provenance.message_entry(msg_idx));
+                let matches_canonical = msg_provenance
+                    .and_then(|entry| entry.assistant_content_digest)
+                    .is_some_and(|expected_digest| chat_content_digest(actual) == expected_digest);
+                let resolved_contents = if matches_canonical {
+                    resolve_assistant_item_contents(actual, assistant_items)
+                } else {
+                    None
+                };
+                if let Some(entry_contents) = resolved_contents {
                     let mut emitted = false;
-                    for entry in assistant_items {
-                        let chat_content = &entry.chat_content;
+                    for (entry, chat_content) in assistant_items.iter().zip(entry_contents.iter()) {
                         if tool_calls_present && v3_openai_chat_content_is_empty(chat_content) {
                             continue;
                         }
@@ -1390,6 +1390,57 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
         Value::Array(output.into_iter().map(|(_, item)| item).collect()),
         drops,
     ))
+}
+
+fn resolve_assistant_item_contents(
+    actual: &Value,
+    assistant_items: &[super::req_inbound_02_normalized::V3HubAssistantItemProvenance],
+) -> Option<Vec<Value>> {
+    use super::req_inbound_02_normalized::V3HubAssistantItemContentRange;
+
+    let non_empty_count = assistant_items
+        .iter()
+        .filter(|entry| !matches!(entry.content_range, V3HubAssistantItemContentRange::Empty))
+        .count();
+    let empty_value = if actual.is_string() {
+        Value::String(String::new())
+    } else {
+        Value::Array(Vec::new())
+    };
+    let mut resolved = Vec::with_capacity(assistant_items.len());
+    for entry in assistant_items {
+        let slice = match entry.content_range {
+            V3HubAssistantItemContentRange::Empty => empty_value.clone(),
+            V3HubAssistantItemContentRange::Parts { start, end } => match actual {
+                Value::Array(parts) if start <= end && end <= parts.len() => {
+                    Value::Array(parts[start..end].to_vec())
+                }
+                Value::String(text) if non_empty_count == 1 && end == start + 1 => {
+                    Value::String(text.clone())
+                }
+                _ => return None,
+            },
+            V3HubAssistantItemContentRange::TextRange {
+                byte_start,
+                byte_end,
+            } => match actual {
+                Value::String(text)
+                    if byte_start <= byte_end
+                        && byte_end <= text.len()
+                        && text.is_char_boundary(byte_start)
+                        && text.is_char_boundary(byte_end) =>
+                {
+                    Value::String(text[byte_start..byte_end].to_string())
+                }
+                Value::Array(parts) if non_empty_count == 1 && parts.len() == 1 => {
+                    Value::Array(parts.clone())
+                }
+                _ => return None,
+            },
+        };
+        resolved.push(slice);
+    }
+    Some(resolved)
 }
 
 fn chat_assistant_reasoning_to_responses_input_item(

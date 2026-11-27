@@ -552,6 +552,7 @@ fn govern_tool_outputs_at_req04(
         let actual_kind = match item.get("type").and_then(Value::as_str) {
             Some("function_call_output") => V3HubRelayActualToolOutputKind::Function,
             Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
+            Some("tool_search_output") => V3HubRelayActualToolOutputKind::ToolSearch,
             _ => continue,
         };
         output_count += 1;
@@ -724,6 +725,7 @@ fn actual_chat_tool_output_kind(message: &Value) -> V3HubRelayActualToolOutputKi
         .and_then(Value::as_str)
     {
         Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
+        Some("tool_search_output") => V3HubRelayActualToolOutputKind::ToolSearch,
         _ => V3HubRelayActualToolOutputKind::Function,
     }
 }
@@ -731,6 +733,7 @@ fn actual_chat_tool_output_kind(message: &Value) -> V3HubRelayActualToolOutputKi
 enum V3HubRelayExpectedToolOutputKind {
     Function,
     Custom,
+    ToolSearch,
     ApplyPatch,
 }
 
@@ -738,6 +741,7 @@ enum V3HubRelayExpectedToolOutputKind {
 enum V3HubRelayActualToolOutputKind {
     Function,
     Custom,
+    ToolSearch,
 }
 
 impl V3HubRelayExpectedToolOutputKind {
@@ -750,6 +754,9 @@ impl V3HubRelayExpectedToolOutputKind {
             ) | (
                 V3HubRelayExpectedToolOutputKind::Custom,
                 V3HubRelayActualToolOutputKind::Custom
+            ) | (
+                V3HubRelayExpectedToolOutputKind::ToolSearch,
+                V3HubRelayActualToolOutputKind::ToolSearch
             ) | (V3HubRelayExpectedToolOutputKind::ApplyPatch, _)
         )
     }
@@ -777,6 +784,12 @@ fn expected_tool_call_output_from_chat_call(
         == Some("custom_tool_call")
     {
         V3HubRelayExpectedToolOutputKind::Custom
+    } else if call
+        .pointer("/routecodex_chat_extension/responses_tool_call_type")
+        .and_then(Value::as_str)
+        == Some("tool_search_call")
+    {
+        V3HubRelayExpectedToolOutputKind::ToolSearch
     } else {
         V3HubRelayExpectedToolOutputKind::Function
     };
@@ -788,6 +801,7 @@ fn expected_tool_call_output_from_item(
 ) -> Option<(String, V3HubRelayExpectedToolOutputKind)> {
     let expected_kind = match item.get("type").and_then(Value::as_str) {
         Some("custom_tool_call") => V3HubRelayExpectedToolOutputKind::Custom,
+        Some("tool_search_call") => V3HubRelayExpectedToolOutputKind::ToolSearch,
         Some("function_call" | "tool_call") => V3HubRelayExpectedToolOutputKind::Function,
         _ => return None,
     };
@@ -990,5 +1004,89 @@ mod tests {
             "history tool image bytes must survive Relay Req04"
         );
         assert_eq!(output["messages"][4]["content"], "now explain it");
+    }
+
+    #[test]
+    fn govern_chat_request_req04_applies_absence_and_kind_policy_for_tool_search_output() {
+        let mut responses_orphan = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+            build_v3_hub_req_inbound_01_client_raw(
+                json!({
+                    "model": "gpt-5.5",
+                    "input": [{
+                        "type": "tool_search_output",
+                        "call_id": "call_orphan_search",
+                        "tools": []
+                    }]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+        )
+        .expect("responses orphan tool_search_output must normalize");
+        let mut events = Vec::new();
+        let outcome = govern_chat_request_at_req04(
+            &mut responses_orphan,
+            &V3HubRequestHookProfile::enabled(),
+            &mut events,
+        )
+        .expect("responses orphan tool_search_output must pass Req04 absence policy");
+        assert_eq!(outcome.tool_output_count, 1);
+
+        let mut kind_mismatch = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+            build_v3_hub_req_inbound_01_client_raw(
+                json!({
+                    "model": "gpt-5.5",
+                    "input": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_wrong_kind",
+                            "name": "lookup",
+                            "arguments": "{}"
+                        },
+                        {
+                            "type": "tool_search_output",
+                            "call_id": "call_wrong_kind",
+                            "tools": []
+                        }
+                    ]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+        )
+        .expect("kind mismatch normalizes before Req04");
+        let err = govern_chat_request_at_req04(
+            &mut kind_mismatch,
+            &V3HubRequestHookProfile::enabled(),
+            &mut Vec::new(),
+        )
+        .expect_err("tool_search_output paired with function_call must fail Req04 kind check");
+        assert!(matches!(
+            err,
+            V3HubRelayRequestError::ToolOutputKindMismatch { .. }
+        ));
+
+        let mut chat_orphan = normalized_chat(json!({
+            "model": "gpt-5.5",
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "call_chat_orphan",
+                "content": "[]",
+                "routecodex_chat_extension": {"responses_tool_output_type": "tool_search_output"}
+            }]
+        }));
+        let err = govern_chat_request_at_req04(
+            &mut chat_orphan,
+            &V3HubRequestHookProfile::enabled(),
+            &mut Vec::new(),
+        )
+        .expect_err("non-Responses entry orphan tool_search_output must fail Req04");
+        assert!(matches!(
+            err,
+            V3HubRelayRequestError::ProtocolToolIdentityInvalid { .. }
+                | V3HubRelayRequestError::OrphanToolOutput { .. }
+        ));
     }
 }

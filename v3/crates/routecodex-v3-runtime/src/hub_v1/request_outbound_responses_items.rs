@@ -480,6 +480,14 @@ fn build_typed_responses_hosted_web_search_call_item(
     };
     let mut projected = Map::new();
     for (key, value) in object {
+        if key == "action" {
+            let action_path = super::json_path_child(&parent_path, key);
+            projected.insert(
+                key.clone(),
+                project_responses_web_search_action(value, &action_path, drops)?,
+            );
+            continue;
+        }
         if RESPONSES_HOSTED_WEB_SEARCH_CALL_REGISTERED_FIELDS.contains(&key.as_str()) {
             projected.insert(key.clone(), value.clone());
             continue;
@@ -497,6 +505,55 @@ fn build_typed_responses_hosted_web_search_call_item(
         ));
     }
     Ok(Value::Object(projected))
+}
+
+fn project_responses_web_search_action(
+    action: &Value,
+    action_path: &str,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Value, String> {
+    let action_object = action.as_object().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action"
+            .to_string()
+    })?;
+    let action_type = action_object
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.type"
+                .to_string()
+        })?;
+    let registered_fields: &[&str] = match action_type {
+        "search" => &["type", "query", "queries", "sources"],
+        "open_page" => &["type", "url"],
+        "find_in_page" | "find" => &["type", "url", "pattern"],
+        _ => {
+            return Err(
+                "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.type"
+                    .to_string(),
+            );
+        }
+    };
+    let mut projected_action = Map::new();
+    for (key, value) in action_object {
+        if registered_fields.contains(&key.as_str()) {
+            projected_action.insert(key.clone(), value.clone());
+            continue;
+        }
+        if key == "routecodex_chat_extension" {
+            continue;
+        }
+        drops.push(V3ProjectionDropRecord::new(
+            "responses",
+            super::json_path_child(action_path, key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "build_typed_responses_hosted_web_search_call_item",
+        ));
+    }
+    Ok(Value::Object(projected_action))
 }
 
 fn project_responses_item_extension_fields(

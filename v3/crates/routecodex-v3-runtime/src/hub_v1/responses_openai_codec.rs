@@ -1,6 +1,6 @@
 use super::req_inbound_02_normalized::{
-    V3HubAssistantItemProvenance, V3HubExplicitHistoryProvenance, V3HubMessageHistoryProvenance,
-    V3HubToolCallHistoryProvenance,
+    comparable_chat_content, V3HubAssistantItemContentRange, V3HubAssistantItemProvenance,
+    V3HubExplicitHistoryProvenance, V3HubMessageHistoryProvenance, V3HubToolCallHistoryProvenance,
 };
 use super::V3HubEntryProtocol;
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
@@ -146,6 +146,9 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                 if native_responses {
                     prov.message_input_order = Some(input_index as u64);
                     if is_assistant_message {
+                        prov.assistant_content_digest = Some(chat_content_digest(
+                            message.get("content").unwrap_or(&Value::Null),
+                        ));
                         prov.assistant_items
                             .push(build_v3_responses_assistant_item_provenance(
                                 &message,
@@ -175,6 +178,9 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                 let mut prov = V3HubMessageHistoryProvenance::default();
                 if native_responses {
                     prov.message_input_order = Some(input_index as u64);
+                    prov.assistant_content_digest = Some(chat_content_digest(
+                        message.get("content").unwrap_or(&Value::Null),
+                    ));
                     prov.assistant_items
                         .push(build_v3_responses_assistant_item_provenance(
                             &message,
@@ -265,6 +271,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     omit_tool_output_id: native_responses
                         && read_v3_non_empty_str(item.get("id")).is_none(),
                     preserve_native_tool_output_id: native_responses,
+                    decoder_native_tool_output: native_responses,
                     ..Default::default()
                 };
                 append_v3_openai_chat_tool_result_message_with_provenance(
@@ -322,15 +329,6 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                 turn_assistant_tail_index = None;
             }
             "tool_search_output" => {
-                let call_id = read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
-                    "Responses tool_search_output is missing call_id before Chat canonicalization"
-                        .to_string()
-                })?;
-                if !pending_tool_call_ids.iter().any(|entry| entry == call_id) {
-                    return Err(format!(
-                        "OpenAI Chat provider encoding tool_search_output has no preceding assistant tool_call: {call_id}"
-                    ));
-                }
                 let tool_result = build_v3_openai_chat_tool_search_output_message(item)?;
                 let prov = V3HubMessageHistoryProvenance {
                     message_input_order: native_responses.then_some(input_index as u64),
@@ -347,6 +345,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                     tool_result,
                     prov,
                 )?;
+                turn_assistant_tail_index = None;
             }
             "agent_message" => {
                 // OpenAI Responses Beta agent-to-agent message.  author/recipient
@@ -586,6 +585,64 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
+fn initial_assistant_item_content_range(content: &Value) -> V3HubAssistantItemContentRange {
+    if v3_openai_chat_content_is_empty(content) {
+        return V3HubAssistantItemContentRange::Empty;
+    }
+    match content {
+        Value::Array(parts) => V3HubAssistantItemContentRange::Parts {
+            start: 0,
+            end: parts.len(),
+        },
+        Value::String(text) => V3HubAssistantItemContentRange::TextRange {
+            byte_start: 0,
+            byte_end: text.len(),
+        },
+        _ => V3HubAssistantItemContentRange::Empty,
+    }
+}
+
+fn hash_json_value(value: &Value, state: &mut u64) {
+    fn feed_bytes(state: &mut u64, tag: u8, bytes: &[u8]) {
+        const FNV_PRIME: u64 = 1099511628211;
+        *state ^= u64::from(tag);
+        *state = state.wrapping_mul(FNV_PRIME);
+        *state ^= bytes.len() as u64;
+        *state = state.wrapping_mul(FNV_PRIME);
+        for &byte in bytes {
+            *state ^= u64::from(byte);
+            *state = state.wrapping_mul(FNV_PRIME);
+        }
+    }
+    match value {
+        Value::Null => feed_bytes(state, 0, &[]),
+        Value::Bool(flag) => feed_bytes(state, 1, &[u8::from(*flag)]),
+        Value::Number(num) => feed_bytes(state, 2, num.to_string().as_bytes()),
+        Value::String(text) => feed_bytes(state, 3, text.as_bytes()),
+        Value::Array(items) => {
+            feed_bytes(state, 4, &items.len().to_le_bytes());
+            for item in items {
+                hash_json_value(item, state);
+            }
+        }
+        Value::Object(map) => {
+            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            feed_bytes(state, 5, &entries.len().to_le_bytes());
+            for (key, item) in entries {
+                feed_bytes(state, 6, key.as_bytes());
+                hash_json_value(item, state);
+            }
+        }
+    }
+}
+
+pub(super) fn chat_content_digest(content: &Value) -> u64 {
+    let mut state: u64 = 14695981039346656037;
+    hash_json_value(comparable_chat_content(content), &mut state);
+    state
+}
+
 fn build_v3_responses_assistant_item_provenance(
     message: &Value,
     item: &Map<String, Value>,
@@ -593,7 +650,9 @@ fn build_v3_responses_assistant_item_provenance(
 ) -> V3HubAssistantItemProvenance {
     V3HubAssistantItemProvenance {
         source_input_order: Some(input_index as u64),
-        chat_content: message.get("content").cloned().unwrap_or(Value::Null),
+        content_range: initial_assistant_item_content_range(
+            message.get("content").unwrap_or(&Value::Null),
+        ),
         id: read_v3_non_empty_str(item.get("id")).map(str::to_string),
         status: item.get("status").filter(|value| !value.is_null()).cloned(),
     }
@@ -707,17 +766,23 @@ pub(super) fn resolve_orphan_responses_tool_output_media(
                 })
             });
             if !paired {
-                if let Some(raw_output) = message
-                    .pointer("/routecodex_chat_extension/responses_tool_output_content")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-                {
-                    // An orphan (call-ID or named output) has no declared tool media semantics.
-                    message["content"] = Value::String(raw_output);
-                }
-                if message.get("content").is_some_and(Value::is_string) {
-                    if let Some(entry) = provenance.message_entries.get_mut(msg_idx) {
-                        entry.preserve_orphan_tool_output_literal = true;
+                let is_decoder_native = provenance
+                    .message_entries
+                    .get(msg_idx)
+                    .is_some_and(|entry| entry.decoder_native_tool_output);
+                if is_decoder_native {
+                    if let Some(raw_output) = message
+                        .pointer("/routecodex_chat_extension/responses_tool_output_content")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                    {
+                        // An orphan (call-ID or named output) has no declared tool media semantics.
+                        message["content"] = Value::String(raw_output);
+                    }
+                    if message.get("content").is_some_and(Value::is_string) {
+                        if let Some(entry) = provenance.message_entries.get_mut(msg_idx) {
+                            entry.preserve_orphan_tool_output_literal = true;
+                        }
                     }
                 }
             }
@@ -913,6 +978,12 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         .ok_or_else(|| {
             "OpenAI Chat provider encoding pending tool message is not an object".to_string()
         })?;
+    let target_content_before = target.get("content").cloned().unwrap_or(Value::Null);
+    let source_content_val = source.get("content").unwrap_or(&Value::Null);
+    let target_empty = v3_openai_chat_content_is_empty(&target_content_before);
+    let source_empty = v3_openai_chat_content_is_empty(source_content_val);
+    let mut merged_assistant_items_and_digest: Option<(Vec<V3HubAssistantItemProvenance>, u64)> =
+        None;
     if let Some(target_prov) = message_provenance.get_mut(index) {
         if target_prov.message_input_order.is_none() {
             target_prov.message_input_order = source_provenance.message_input_order;
@@ -921,12 +992,102 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         target_prov
             .reasoning_item_orders
             .extend(source_provenance.reasoning_item_orders);
-        target_prov
-            .assistant_items
-            .extend(source_provenance.assistant_items);
         target_prov.omit_tool_output_id |= source_provenance.omit_tool_output_id;
         target_prov.preserve_native_tool_output_id |=
             source_provenance.preserve_native_tool_output_id;
+        target_prov.decoder_native_tool_output |= source_provenance.decoder_native_tool_output;
+
+        let mut source_items = source_provenance.assistant_items;
+        if source_empty {
+            target_prov.assistant_items.extend(source_items);
+            if target_prov.assistant_content_digest.is_none()
+                && !target_prov.assistant_items.is_empty()
+            {
+                target_prov.assistant_content_digest =
+                    Some(chat_content_digest(&target_content_before));
+            }
+        } else if target_empty {
+            target_prov.assistant_items.extend(source_items);
+            target_prov.assistant_content_digest = Some(chat_content_digest(source_content_val));
+        } else if let (Value::String(existing_text), Value::String(source_text)) =
+            (&target_content_before, source_content_val)
+        {
+            let separator_len =
+                usize::from(!existing_text.trim().is_empty() && !source_text.trim().is_empty());
+            let offset = existing_text.len() + separator_len;
+            for item in &mut source_items {
+                if let V3HubAssistantItemContentRange::TextRange {
+                    byte_start,
+                    byte_end,
+                } = item.content_range
+                {
+                    item.content_range = V3HubAssistantItemContentRange::TextRange {
+                        byte_start: offset + byte_start,
+                        byte_end: offset + byte_end,
+                    };
+                }
+            }
+            target_prov.assistant_items.extend(source_items);
+        } else {
+            let mut merged_parts = if let Value::String(existing_str) = &target_content_before {
+                let has_text_ranges = target_prov.assistant_items.iter().any(|item| {
+                    matches!(
+                        item.content_range,
+                        V3HubAssistantItemContentRange::TextRange { .. }
+                    )
+                });
+                if has_text_ranges {
+                    let mut parts = Vec::new();
+                    for item in &mut target_prov.assistant_items {
+                        if let V3HubAssistantItemContentRange::TextRange {
+                            byte_start,
+                            byte_end,
+                        } = item.content_range
+                        {
+                            let idx = parts.len();
+                            parts.push(
+                                json!({"type": "text", "text": &existing_str[byte_start..byte_end]}),
+                            );
+                            item.content_range = V3HubAssistantItemContentRange::Parts {
+                                start: idx,
+                                end: idx + 1,
+                            };
+                        }
+                    }
+                    parts
+                } else {
+                    v3_openai_chat_content_to_parts(&target_content_before)
+                }
+            } else {
+                v3_openai_chat_content_to_parts(&target_content_before)
+            };
+            let prefix_len = merged_parts.len();
+            let source_parts = v3_openai_chat_content_to_parts(source_content_val);
+            let source_parts_len = source_parts.len();
+            merged_parts.extend(source_parts);
+            for item in &mut source_items {
+                item.content_range = match item.content_range {
+                    V3HubAssistantItemContentRange::Empty => V3HubAssistantItemContentRange::Empty,
+                    V3HubAssistantItemContentRange::Parts { start, end } => {
+                        V3HubAssistantItemContentRange::Parts {
+                            start: prefix_len + start,
+                            end: prefix_len + end,
+                        }
+                    }
+                    V3HubAssistantItemContentRange::TextRange { .. } => {
+                        V3HubAssistantItemContentRange::Parts {
+                            start: prefix_len,
+                            end: prefix_len + source_parts_len,
+                        }
+                    }
+                };
+            }
+            target_prov.assistant_items.extend(source_items);
+            let merged_array = Value::Array(merged_parts);
+            let digest = chat_content_digest(&merged_array);
+            merged_assistant_items_and_digest = Some((Vec::new(), digest));
+            target.insert("content".to_string(), merged_array);
+        }
     }
     if let Some(source_tool_calls) = source.get("tool_calls").and_then(Value::as_array) {
         let target_tool_calls = target
@@ -938,8 +1099,17 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
             })?;
         target_tool_calls.extend(source_tool_calls.iter().cloned());
     }
-    if let Some(source_content) = source.get("content") {
-        merge_v3_openai_chat_message_content(target, source_content);
+    if merged_assistant_items_and_digest.is_none() {
+        if let Some(source_content) = source.get("content") {
+            merge_v3_openai_chat_message_content(target, source_content);
+        }
+    }
+    if let Some(target_prov) = message_provenance.get_mut(index) {
+        if let Some((_, digest)) = merged_assistant_items_and_digest {
+            target_prov.assistant_content_digest = Some(digest);
+        } else if !source_empty && !target_prov.assistant_items.is_empty() {
+            target_prov.assistant_content_digest = target.get("content").map(chat_content_digest);
+        }
     }
     if let Some(source_reasoning) = source
         .get("reasoning_content")
@@ -1031,14 +1201,6 @@ fn merge_v3_openai_chat_message_content(target: &mut Map<String, Value>, source_
             *existing_value = Value::Array(parts);
         }
     }
-}
-
-pub(super) fn fold_v3_openai_chat_message_contents(contents: &[Value]) -> Option<Value> {
-    let mut holder = Map::new();
-    for content in contents {
-        merge_v3_openai_chat_message_content(&mut holder, content);
-    }
-    holder.remove("content")
 }
 
 pub(super) fn v3_openai_chat_content_is_empty(value: &Value) -> bool {

@@ -1757,14 +1757,42 @@ fn native_hosted_web_search_call_projects_registered_fields_and_records_unmapped
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_with_provenance(
             &json!({
                 "model": "gpt-test",
-                "input": [{
-                    "type": "web_search_call",
-                    "id": "ws_native_fields",
-                    "status": "completed",
-                    "action": {"type": "search", "query": "RouteCodex"},
-                    "vendor_extra": {"ticket": 7},
-                    "routecodex_chat_extension": {"spoof": true}
-                }]
+                "input": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_native_fields",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "query": "RouteCodex",
+                            "sources": [{"type": "url", "url": "https://example.com"}],
+                            "vendor_extra": {"nested": 11}
+                        },
+                        "vendor_extra": {"ticket": 7},
+                        "routecodex_chat_extension": {"spoof": true}
+                    },
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_open_page",
+                        "status": "completed",
+                        "action": {
+                            "type": "open_page",
+                            "url": "https://example.com",
+                            "query": "wrong variant field"
+                        }
+                    },
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_find",
+                        "status": "completed",
+                        "action": {
+                            "type": "find_in_page",
+                            "url": "https://example.com",
+                            "pattern": "needle",
+                            "extra_find": true
+                        }
+                    }
+                ]
             }),
         )
         .expect("native web_search_call must decode");
@@ -1778,21 +1806,62 @@ fn native_hosted_web_search_call_projects_registered_fields_and_records_unmapped
         .expect("native hosted web_search_call projection must succeed");
     assert_eq!(
         wire["input"],
-        json!([{
-            "type": "web_search_call",
-            "id": "ws_native_fields",
-            "status": "completed",
-            "action": {"type": "search", "query": "RouteCodex"}
-        }])
+        json!([
+            {
+                "type": "web_search_call",
+                "id": "ws_native_fields",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "query": "RouteCodex",
+                    "sources": [{"type": "url", "url": "https://example.com"}]
+                }
+            },
+            {
+                "type": "web_search_call",
+                "id": "ws_open_page",
+                "status": "completed",
+                "action": {
+                    "type": "open_page",
+                    "url": "https://example.com"
+                }
+            },
+            {
+                "type": "web_search_call",
+                "id": "ws_find",
+                "status": "completed",
+                "action": {
+                    "type": "find_in_page",
+                    "url": "https://example.com",
+                    "pattern": "needle"
+                }
+            }
+        ])
     );
     assert!(wire["input"][0].get("vendor_extra").is_none());
+    assert!(wire["input"][0]["action"].get("vendor_extra").is_none());
     assert!(wire["input"][0].get("routecodex_chat_extension").is_none());
-    assert_eq!(drops.len(), 1, "{drops:?}");
-    assert_eq!(drops[0].target_protocol, "responses");
-    assert_eq!(drops[0].json_path, "$.input[0].vendor_extra");
-    assert_eq!(
-        drops[0].reason,
-        "unmapped_target_protocol_field_unrepresentable"
-    );
-    assert_eq!(drops[0].canonical_value, json!({"ticket": 7}));
+    assert_eq!(drops.len(), 4, "{drops:?}");
+    assert!(drops.iter().any(|drop| {
+        drop.target_protocol == "responses"
+            && drop.json_path == "$.input[0].vendor_extra"
+            && drop.reason == "unmapped_target_protocol_field_unrepresentable"
+            && drop.canonical_value == json!({"ticket": 7})
+    }));
+    assert!(drops.iter().any(|drop| {
+        drop.target_protocol == "responses"
+            && drop.json_path == "$.input[0].action.vendor_extra"
+            && drop.reason == "unmapped_target_protocol_field_unrepresentable"
+            && drop.canonical_value == json!({"nested": 11})
+    }));
+    assert!(drops.iter().any(|drop| {
+        drop.target_protocol == "responses"
+            && drop.json_path == "$.input[1].action.query"
+            && drop.canonical_value == json!("wrong variant field")
+    }));
+    assert!(drops.iter().any(|drop| {
+        drop.target_protocol == "responses"
+            && drop.json_path == "$.input[2].action.extra_find"
+            && drop.canonical_value == json!(true)
+    }));
 }

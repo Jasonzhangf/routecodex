@@ -75,6 +75,11 @@ fn responses_pending_assistant_items_keep_boundaries_and_dual_history_equivalenc
                 .is_none(),
         "canonical JSON must not carry decoder provenance markers: {canonical}"
     );
+    let provenance_debug = format!("{provenance:?}");
+    assert!(
+        !provenance_debug.contains("before call") && !provenance_debug.contains("while pending"),
+        "V3HubExplicitHistoryProvenance must hold zero copies of assistant business content: {provenance_debug}"
+    );
     let (projected, _) =
         super::super::request_outbound_format::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
             &canonical,
@@ -878,23 +883,72 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
     );
 }
 #[test]
-fn responses_tool_search_output_without_matching_call_fails_in_inbound_owner() {
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
-        "model": "gpt-5.5",
-        "input": [{
-            "type": "tool_search_output",
-            "call_id": "call_missing",
-            "status": "completed",
-            "execution": "client",
-            "tools": []
-        }]
-    }))
-    .expect_err("orphan tool_search_output must not cross ReqInbound02");
-
-    assert!(
-        error.contains("no preceding assistant tool_call"),
-        "unexpected error: {error}"
+fn responses_orphan_and_second_tool_search_output_decode_at_inbound_while_malformed_fails() {
+    let (orphan_canonical, orphan_prov) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "tool_search_output",
+                "call_id": "call_missing",
+                "status": "completed",
+                "execution": "client",
+                "tools": []
+            }]
+        }))
+        .expect("orphan tool_search_output must decode at ReqInbound02");
+    assert_eq!(orphan_canonical["messages"][0]["role"], json!("tool"));
+    assert_eq!(
+        orphan_canonical["messages"][0]["tool_call_id"],
+        json!("call_missing")
     );
+    assert_eq!(
+        orphan_canonical["messages"][0]["routecodex_chat_extension"]["responses_tool_output_type"],
+        json!("tool_search_output")
+    );
+    assert_eq!(orphan_prov.message_order(0), Some(0));
+
+    let (second_receipt_canonical, second_prov) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "call_id": "call_repeat",
+                    "arguments": {"query": "lookup"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_repeat",
+                    "tools": []
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_repeat",
+                    "tools": [{"type": "function", "name": "later_tool", "parameters": {"type": "object"}}]
+                }
+            ]
+        }))
+        .expect("second tool_search_output receipt after first consumed pending call must decode");
+    assert_eq!(
+        second_receipt_canonical["messages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(second_prov.message_order(2), Some(2));
+
+    for bad_item in [
+        json!({"type": "tool_search_output", "tools": []}),
+        json!({"type": "tool_search_output", "call_id": "", "tools": []}),
+        json!({"type": "tool_search_output", "call_id": "call_bad", "tools": "not-an-array"}),
+    ] {
+        build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [bad_item]
+        }))
+        .expect_err("malformed tool_search_output must still fail at ReqInbound02");
+    }
 }
 #[test]
 fn responses_function_call_item_id_enters_chat_extension() {
@@ -1213,4 +1267,86 @@ fn responses_system_message_between_pending_tool_call_and_result_defers_to_prese
         messages[2]["content"],
         json!([{"type": "text", "text": "system after pending tool call"}])
     );
+}
+
+#[test]
+fn responses_folded_string_and_mixed_assistant_items_keep_boundaries_without_content_copy() {
+    let input = json!([
+        {"type":"message","role":"assistant","id":"msg_s1","status":"completed","content":"first text"},
+        {"type":"output_text","id":"msg_s2","text":"second text"},
+        {"type":"function_call","id":"fc_mix","name":"lookup","call_id":"call_mix","arguments":"{}"},
+        {"type":"message","role":"assistant","id":"msg_arr","status":"completed","content":[{"type":"output_text","text":"third array"}]},
+        {"type":"function_call_output","call_id":"call_mix","output":"done"}
+    ]);
+    let (canonical, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": input
+        }))
+        .expect("mixed string + output_text + array assistant items must decode");
+    let provenance_debug = format!("{provenance:?}");
+    assert!(
+        !provenance_debug.contains("first text")
+            && !provenance_debug.contains("second text")
+            && !provenance_debug.contains("third array"),
+        "provenance must hold zero copies of assistant text: {provenance_debug}"
+    );
+    let (projected, _) =
+        super::super::request_outbound_format::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            &canonical,
+            true,
+            false,
+            Some(&provenance),
+        )
+        .expect("mixed folded assistant items must project back in source order");
+    assert_eq!(
+        projected["input"],
+        json!([
+            {"type":"message","role":"assistant","id":"msg_s1","status":"completed","content":[{"type":"output_text","text":"first text"}]},
+            {"type":"message","role":"assistant","id":"msg_s2","content":[{"type":"output_text","text":"second text"}]},
+            {"type":"function_call","id":"fc_mix","name":"lookup","call_id":"call_mix","arguments":"{}"},
+            {"type":"message","role":"assistant","id":"msg_arr","status":"completed","content":[{"type":"output_text","text":"third array"}]},
+            {"type":"function_call_output","call_id":"call_mix","output":"done"}
+        ])
+    );
+}
+
+#[test]
+fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
+    let mut messages = vec![
+        json!({
+            "role": "tool",
+            "tool_call_id": "call_legacy",
+            "content": "actual",
+            "routecodex_chat_extension": {"responses_tool_output_content": "different"}
+        }),
+        json!({
+            "role": "tool",
+            "tool_call_id": "call_native",
+            "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}],
+            "routecodex_chat_extension": {
+                "responses_tool_output_type": "function_call_output",
+                "responses_tool_output_content": r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#
+            }
+        }),
+    ];
+    let mut provenance = V3HubExplicitHistoryProvenance {
+        message_entries: vec![
+            V3HubMessageHistoryProvenance::default(),
+            V3HubMessageHistoryProvenance {
+                message_input_order: Some(0),
+                preserve_native_tool_output_id: true,
+                decoder_native_tool_output: true,
+                ..Default::default()
+            },
+        ],
+    };
+    resolve_orphan_responses_tool_output_media(&mut messages, &mut provenance);
+    assert_eq!(messages[0]["content"], json!("actual"));
+    assert!(!provenance.preserve_orphan_tool_output_literal(0));
+    assert_eq!(
+        messages[1]["content"],
+        json!(r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#)
+    );
+    assert!(provenance.preserve_orphan_tool_output_literal(1));
 }

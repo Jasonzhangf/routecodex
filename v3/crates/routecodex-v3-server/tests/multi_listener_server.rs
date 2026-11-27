@@ -7940,7 +7940,7 @@ async fn issue4a0b3aa_r13_anthropic_orphan_literal_and_hosted_web_search_project
                 "type": "web_search_call",
                 "id": "ws_native_r13",
                 "status": "completed",
-                "action": {"type": "search", "query": "native r13 search"},
+                "action": {"type": "search", "query": "native r13 search", "vendor_extra": {"nested": 42}},
                 "vendor_extra": {"ticket": 99},
                 "routecodex_chat_extension": {"spoof": true}
             }]
@@ -7980,6 +7980,16 @@ async fn issue4a0b3aa_r13_anthropic_orphan_literal_and_hosted_web_search_project
                 && record["source_value"] == json!({"ticket": 99})
         }),
         "unmapped web_search_call field must record scoped drop diagnostic: {drop_records:?}"
+    );
+    assert!(
+        drop_records.iter().any(|record| {
+            record["target_protocol"] == "responses"
+                && record["json_path"] == "$.input[0].action.vendor_extra"
+                && record["reason"] == "unmapped_target_protocol_field_unrepresentable"
+                && record["canonical_value"] == json!({"nested": 42})
+                && record["source_value"] == json!({"nested": 42})
+        }),
+        "unmapped web_search_call.action.vendor_extra must record scoped drop diagnostic: {drop_records:?}"
     );
 
     let legacy_ws_res = client
@@ -8030,6 +8040,205 @@ async fn issue4a0b3aa_r13_anthropic_orphan_literal_and_hosted_web_search_project
         legacy_ws_capture.body["input"][1]["call_id"],
         json!("call_legacy_ws_r13")
     );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r14_dual_legacy_orphan_and_orphan_tool_search_output_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+
+    let responses_provider_body = json!({
+        "id": "resp_r14",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r14-resp-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    // 1. P1-1: Dual-history POST /v1/responses with a legacy-only orphan (`content: "actual"`,
+    // client-supplied `responses_tool_output_content: "different"`) and a native receipt for
+    // another `call_id` must preserve `"actual"` on the legacy orphan and native literal on the native receipt.
+    let dual_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_legacy_orphan",
+                    "content": "actual",
+                    "routecodex_chat_extension": {"responses_tool_output_content": "different"}
+                }
+            ],
+            "input": [
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_native_orphan",
+                    "output": encoded_image
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("dual-history legacy orphan + native receipt must succeed");
+    assert_eq!(dual_res.status(), StatusCode::OK);
+    let dual_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history capture timeout")
+        .expect("dual-history capture");
+    let dual_input = dual_capture.body["input"]
+        .as_array()
+        .expect("dual-history Responses input array");
+    let legacy_wire = dual_input
+        .iter()
+        .find(|item| item["call_id"] == "call_legacy_orphan")
+        .expect("legacy orphan must reach first Provider");
+    assert_eq!(
+        legacy_wire["output"],
+        json!("actual"),
+        "legacy-only orphan content must NOT be overwritten by client responses_tool_output_content: {}",
+        dual_capture.body
+    );
+    let native_wire = dual_input
+        .iter()
+        .find(|item| item["call_id"] == "call_native_orphan")
+        .expect("native receipt must reach first Provider");
+    assert_eq!(
+        native_wire["output"],
+        json!(encoded_image),
+        "native receipt must preserve exact literal output: {}",
+        dual_capture.body
+    );
+
+    // 2. P1-3: Orphan `tool_search_output` and second `tool_search_output` receipt reach first
+    // Responses Provider unchanged, while malformed and kind-mismatched receipts are rejected.
+    let orphan_tso_input = json!([{
+        "type": "tool_search_output",
+        "id": "tso_orphan_r14",
+        "call_id": "call_orphan_tso_r14",
+        "execution": "client",
+        "status": "completed",
+        "tools": [{
+            "type": "function",
+            "name": "discovered_tool",
+            "description": "Discovered",
+            "parameters": {"type": "object", "properties": {}}
+        }]
+    }]);
+    let orphan_tso_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": orphan_tso_input
+        }))
+        .send()
+        .await
+        .expect("orphan tool_search_output must succeed");
+    assert_eq!(orphan_tso_res.status(), StatusCode::OK);
+    let orphan_tso_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("orphan tool_search_output capture timeout")
+        .expect("orphan tool_search_output capture");
+    assert_eq!(
+        orphan_tso_capture.body["input"], orphan_tso_input,
+        "orphan tool_search_output must reach first Responses Provider unchanged: {}",
+        orphan_tso_capture.body
+    );
+
+    let second_tso_input = json!([
+        {
+            "type": "tool_search_call",
+            "call_id": "call_repeat_tso_r14",
+            "execution": "client",
+            "status": "completed",
+            "arguments": {"query": "repeat"}
+        },
+        {
+            "type": "tool_search_output",
+            "id": "tso_first_r14",
+            "call_id": "call_repeat_tso_r14",
+            "execution": "client",
+            "status": "completed",
+            "tools": []
+        },
+        {
+            "type": "tool_search_output",
+            "id": "tso_second_r14",
+            "call_id": "call_repeat_tso_r14",
+            "execution": "client",
+            "status": "completed",
+            "tools": [{"type": "function", "name": "second_tool", "parameters": {"type": "object"}}]
+        }
+    ]);
+    let second_tso_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": second_tso_input
+        }))
+        .send()
+        .await
+        .expect("second tool_search_output receipt must succeed");
+    assert_eq!(second_tso_res.status(), StatusCode::OK);
+    let second_tso_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("second tool_search_output capture timeout")
+        .expect("second tool_search_output capture");
+    assert_eq!(
+        second_tso_capture.body["input"], second_tso_input,
+        "second tool_search_output receipt must reach first Responses Provider unchanged: {}",
+        second_tso_capture.body
+    );
+
+    for invalid_input in [
+        json!([{"type": "tool_search_output", "call_id": "call_bad_tools", "tools": "not-an-array"}]),
+        json!([{"type": "tool_search_output", "tools": []}]),
+        json!([
+            {"type": "function_call", "call_id": "call_kind_mismatch", "name": "lookup", "arguments": "{}"},
+            {"type": "tool_search_output", "call_id": "call_kind_mismatch", "tools": []}
+        ]),
+    ] {
+        let bad_res = client
+            .post(&resp_endpoint)
+            .json(&json!({
+                "model": "test",
+                "stream": false,
+                "input": invalid_input
+            }))
+            .send()
+            .await;
+        assert!(
+            bad_res.is_err(),
+            "malformed or kind-mismatched tool_search_output must be rejected: {bad_res:?}"
+        );
+        assert!(
+            resp_captures.try_recv().is_err(),
+            "rejected tool_search_output must not dispatch upstream"
+        );
+    }
 
     resp_handle.shutdown().await;
     let _ = resp_shutdown.send(());
