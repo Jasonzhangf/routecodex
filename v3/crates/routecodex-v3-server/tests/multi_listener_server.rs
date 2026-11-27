@@ -18915,13 +18915,12 @@ async fn responses_direct_agent_message_encrypted_content_never_reaches_provider
         }]
     }))
     .unwrap();
-    let (provider_base_url, mut captures, shutdown) =
-        start_controlled_terminal_upstream_with_body(
-            StatusCode::OK,
-            "application/json",
-            provider_body,
-        )
-        .await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
     let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
         free_port(),
         free_port(),
@@ -18969,7 +18968,9 @@ async fn responses_direct_agent_message_encrypted_content_never_reaches_provider
         .iter()
         .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("agent_message"))
         .expect("agent_message must be forwarded to the provider wire");
-    let parts = agent["content"].as_array().expect("agent_message content array");
+    let parts = agent["content"]
+        .as_array()
+        .expect("agent_message content array");
     assert!(
         parts
             .iter()
