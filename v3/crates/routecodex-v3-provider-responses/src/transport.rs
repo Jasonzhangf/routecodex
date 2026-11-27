@@ -1696,6 +1696,11 @@ where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Send,
 {
     let read = async {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(
+                "provider request budget exhausted while reading response body".to_string(),
+            );
+        }
         let next = match deadline {
             Some(deadline) => tokio::time::timeout_at(deadline.into(), byte_stream.next())
                 .await
@@ -1704,6 +1709,11 @@ where
                 })?,
             None => byte_stream.next().await,
         };
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(
+                "provider request budget exhausted while reading response body".to_string(),
+            );
+        }
         match next {
             Some(Ok(chunk)) => Ok(Some(chunk)),
             Some(Err(error)) => Err(crate::shared::format_v3_provider_transport_error(&error)),

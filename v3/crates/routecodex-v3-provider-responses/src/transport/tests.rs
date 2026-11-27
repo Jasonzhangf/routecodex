@@ -1207,7 +1207,7 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         let (mut conn, _) = listener.accept().await.unwrap();
         let mut req_buf = [0_u8; 4096];
         assert!(conn.read(&mut req_buf).await.unwrap() > 0);
-        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: up-case2-req-deadline-200\r\ntransfer-encoding: chunked\r\n\r\n";
         conn.write_all(head.as_bytes()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(140)).await;
         let json_body = r#"{"id":"resp_late_json"}"#;
@@ -1236,10 +1236,28 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
         .await
         .expect_err("mislabeled JSON delayed past request deadline must time out");
     server.abort();
-    assert!(
-        err.to_string().contains("budget exhausted"),
-        "expected request budget timeout error, got {err}"
-    );
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-case2-req-deadline-200"
+                }),
+                "expected retained Case 2 x-request-id: {headers:?}"
+            );
+            assert!(
+                reason.contains("budget exhausted"),
+                "expected request budget timeout error, got {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
 
     // 3. Disguised JSON under text/event-stream whose leading `{` arrives within
     // sse_first_frame_timeout_ms (80ms) continues reading the remaining JSON body up to
@@ -1550,5 +1568,136 @@ async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request
             );
         }
         other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
+
+    // 9. Deterministic ready-when-polled after sniff deadline expiry: JSON prefix yields
+    // Poll::Ready synchronously on poll after waiting past sse_first_frame_budget=0ms,
+    // proving the pre-branch deadline check catches late ready JSON with head provenance.
+    struct LateReadyBodyStream {
+        chunks: Vec<(&'static [u8], u64)>,
+        index: usize,
+    }
+    impl futures_util::Stream for LateReadyBodyStream {
+        type Item = Result<bytes::Bytes, std::io::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            if let Some(&(data, delay_ms)) = self.chunks.get(self.index) {
+                if delay_ms > 0 {
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+                }
+                self.index += 1;
+                std::task::Poll::Ready(Some(Ok(bytes::Bytes::from_static(data))))
+            } else {
+                std::task::Poll::Ready(None)
+            }
+        }
+    }
+    let response_case9: reqwest::Response = axum::http::Response::builder()
+        .status(200)
+        .header("content-type", "text/event-stream")
+        .header("x-request-id", "up-ready-json-past-sniff-200")
+        .body(reqwest::Body::wrap_stream(LateReadyBodyStream {
+            chunks: vec![(br#"{"id":"ready_past_sniff"}"#, 2)],
+            index: 0,
+        }))
+        .unwrap()
+        .into();
+    let err = super::read_json_disguised_as_sse_or_stream(
+        response_case9,
+        "req-ready-past-sniff".into(),
+        "ready-past-sniff-provider".into(),
+        200,
+        vec![
+            V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            },
+            V3ProviderResponseHeader {
+                name: "x-request-id".into(),
+                value: b"up-ready-json-past-sniff-200".to_vec(),
+            },
+        ],
+        None,
+        Some(std::time::Instant::now() + Duration::from_secs(5)),
+        None,
+        Some(0),
+    )
+    .await
+    .expect_err("ready JSON prefix after sniff budget expiry must fail cleanly");
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(headers.iter().any(|h| {
+                h.name.eq_ignore_ascii_case("x-request-id")
+                    && h.value == b"up-ready-json-past-sniff-200"
+            }));
+            assert!(
+                reason.contains("did not produce a first frame"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable on late ready JSON prefix, got {other:?}"),
+    }
+
+    // 10. Deterministic ready-when-polled after request_deadline expiry inside JSON body loop:
+    // opener `{` is ready inside sniff budget, then final chunk becomes Poll::Ready after
+    // deadline expiry and must fail via ResponseBodyUnreadable rather than succeeding.
+    let response_case10: reqwest::Response = axum::http::Response::builder()
+        .status(200)
+        .header("content-type", "text/event-stream")
+        .header("x-request-id", "up-ready-json-past-req-200")
+        .body(reqwest::Body::wrap_stream(LateReadyBodyStream {
+            chunks: vec![(b"{", 0), (br#""id":"ready_past_req"}"#, 15)],
+            index: 0,
+        }))
+        .unwrap()
+        .into();
+    let err = super::read_json_disguised_as_sse_or_stream(
+        response_case10,
+        "req-ready-past-req".into(),
+        "ready-past-req-provider".into(),
+        200,
+        vec![
+            V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            },
+            V3ProviderResponseHeader {
+                name: "x-request-id".into(),
+                value: b"up-ready-json-past-req-200".to_vec(),
+            },
+        ],
+        None,
+        Some(std::time::Instant::now() + Duration::from_millis(5)),
+        None,
+        Some(500),
+    )
+    .await
+    .expect_err("ready JSON chunk completing after request_deadline must fail");
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(headers.iter().any(|h| {
+                h.name.eq_ignore_ascii_case("x-request-id")
+                    && h.value == b"up-ready-json-past-req-200"
+            }));
+            assert!(
+                reason.contains("budget exhausted"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable on late ready JSON body, got {other:?}"),
     }
 }

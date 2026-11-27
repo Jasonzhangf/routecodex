@@ -4499,8 +4499,23 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                         .iter()
                         .any(|msg| msg.get("role").and_then(Value::as_str) == Some("tool"))
                 });
-                let has_preceding_assistant_call = messages.is_some_and(|items| {
+                let is_case3_first_turn = messages.is_some_and(|items| {
                     items.iter().any(|msg| {
+                        msg.get("role").and_then(Value::as_str) == Some("user")
+                            && msg.get("content").and_then(Value::as_str)
+                                == Some("case3: read fixture file and summarize")
+                    })
+                }) && has_read_file_tool
+                    && body.get("tool_choice").and_then(Value::as_str) == Some("required");
+                let is_case3_followup_turn = messages.is_some_and(|items| {
+                    items.iter().any(|msg| {
+                        msg.get("role").and_then(Value::as_str) == Some("user")
+                            && msg.get("content").and_then(Value::as_str)
+                                == Some("case3: read fixture file and summarize")
+                    })
+                }) && !is_case3_first_turn;
+                let assistant_call_idx = messages.and_then(|items| {
+                    items.iter().position(|msg| {
                         msg.get("role").and_then(Value::as_str) == Some("assistant")
                             && msg
                                 .get("tool_calls")
@@ -4523,8 +4538,8 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                                 })
                     })
                 });
-                let has_matched_tool_result = messages.is_some_and(|items| {
-                    items.iter().any(|msg| {
+                let matched_tool_idx = messages.and_then(|items| {
+                    items.iter().position(|msg| {
                         msg.get("role").and_then(Value::as_str) == Some("tool")
                             && msg.get("tool_call_id").and_then(Value::as_str)
                                 == Some("call_read_file_case3")
@@ -4532,8 +4547,12 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                                 == Some("case3-fixture-content-verified")
                     })
                 });
-                if has_any_tool_role
-                    && !(has_read_file_tool && has_preceding_assistant_call && has_matched_tool_result)
+                let has_ordered_call_pair = matches!(
+                    (assistant_call_idx, matched_tool_idx),
+                    (Some(a_idx), Some(t_idx)) if a_idx < t_idx
+                );
+                if (is_case3_followup_turn || has_any_tool_role)
+                    && !(has_read_file_tool && has_ordered_call_pair)
                 {
                     return Response::builder()
                         .status(StatusCode::BAD_REQUEST)
@@ -4541,7 +4560,7 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                         .body(Body::from(
                             json!({
                                 "error": {
-                                    "message": "missing read_file declaration, assistant tool_calls pair, or matched tool output",
+                                    "message": "missing read_file declaration or misordered assistant call/result pair",
                                     "type": "invalid_request_error"
                                 }
                             })
@@ -4549,9 +4568,6 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                         ))
                         .unwrap();
                 }
-                let is_case3_first_turn = !has_any_tool_role
-                    && has_read_file_tool
-                    && body.get("tool_choice").and_then(Value::as_str) == Some("required");
 
                 captured_ref.lock().unwrap().push(body);
                 let response_payload = if is_case3_first_turn {
@@ -4577,7 +4593,7 @@ async fn map002_public_external_web_access_false_omits_openai_chat_web_search_op
                         }],
                         "usage": {"prompt_tokens": 5, "completion_tokens": 6, "total_tokens": 11}
                     })
-                } else if has_matched_tool_result {
+                } else if is_case3_followup_turn && has_ordered_call_pair {
                     json!({
                         "id": "chatcmpl_case3_followup_ok",
                         "object": "chat.completion",
@@ -4808,7 +4824,7 @@ targets = [
         .post(format!("http://127.0.0.1:{listen_port}/v1/responses"))
         .json(&json!({
             "model": "web-search-cap",
-            "input": "call retained function",
+            "input": "case3: read fixture file and summarize",
             "tools": [
                 {"type": "web_search", "external_web_access": false},
                 {
@@ -4855,7 +4871,7 @@ targets = [
         .json(&json!({
             "model": "web-search-cap",
             "input": [
-                {"type": "message", "role": "user", "content": "call retained function"},
+                {"type": "message", "role": "user", "content": "case3: read fixture file and summarize"},
                 body3["output"][0].clone(),
                 {"type": "function_call_output", "call_id": returned_call_id, "output": executed_file_output}
             ],
@@ -4890,25 +4906,37 @@ targets = [
         assert_eq!(followup_tools.len(), 1);
         assert_eq!(followup_tools[0]["function"]["name"], "read_file");
         let followup_msgs = wires[3]["messages"].as_array().unwrap();
-        assert!(followup_msgs.iter().any(|msg| {
-            msg.get("role").and_then(Value::as_str) == Some("assistant")
-                && msg
-                    .get("tool_calls")
-                    .and_then(Value::as_array)
-                    .is_some_and(|calls| {
-                        calls.iter().any(|call| {
-                            call.get("id").and_then(Value::as_str) == Some("call_read_file_case3")
-                                && call.pointer("/function/name").and_then(Value::as_str)
-                                    == Some("read_file")
+        let assistant_idx = followup_msgs
+            .iter()
+            .position(|msg| {
+                msg.get("role").and_then(Value::as_str) == Some("assistant")
+                    && msg
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .is_some_and(|calls| {
+                            calls.iter().any(|call| {
+                                call.get("id").and_then(Value::as_str)
+                                    == Some("call_read_file_case3")
+                                    && call.pointer("/function/name").and_then(Value::as_str)
+                                        == Some("read_file")
+                            })
                         })
-                    })
-        }));
-        assert!(followup_msgs.iter().any(|msg| {
-            msg.get("role").and_then(Value::as_str) == Some("tool")
-                && msg.get("tool_call_id").and_then(Value::as_str) == Some("call_read_file_case3")
-                && msg.get("content").and_then(Value::as_str)
-                    == Some("case3-fixture-content-verified")
-        }));
+            })
+            .expect("expected preceding assistant read_file call on follow-up wire");
+        let tool_idx = followup_msgs
+            .iter()
+            .position(|msg| {
+                msg.get("role").and_then(Value::as_str) == Some("tool")
+                    && msg.get("tool_call_id").and_then(Value::as_str)
+                        == Some("call_read_file_case3")
+                    && msg.get("content").and_then(Value::as_str)
+                        == Some("case3-fixture-content-verified")
+            })
+            .expect("expected matched tool output on follow-up wire");
+        assert!(
+            assistant_idx < tool_idx,
+            "assistant call ({assistant_idx}) must precede matched tool result ({tool_idx}): {followup_msgs:?}"
+        );
     }
 
     // Case 4: Selected model WITHOUT `web_search` capability must still honor
