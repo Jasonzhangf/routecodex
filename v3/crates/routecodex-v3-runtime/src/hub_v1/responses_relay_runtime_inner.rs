@@ -5,7 +5,6 @@ use crate::operation_runner::plan_execution::{
     run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
 };
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use serde_json::{json, Value};
 
 fn construct_responses_relay_transport_request(
@@ -166,7 +165,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         // A request that declares tools enters Relay Chat Process tool
         // governance, which may rewrite tool markup in the complete response.
         // Such a request keeps the whole-attempt client projection.
-        let relay_request_declares_tools = relay_request_declares_tools(&input.payload);
+        let _relay_request_declares_tools = relay_request_declares_tools(&input.payload);
         if input
             .payload
             .get("previous_response_id")
@@ -401,7 +400,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         );
         trace.push("V3HubReqExecution05Planned");
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
-        let mut last_external_http = None;
+        let mut last_external_http;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
         let attempt_budget = request_execution_control.attempt_budget();
         let mut provider_send_attempts = attempt_budget.transport_attempts();

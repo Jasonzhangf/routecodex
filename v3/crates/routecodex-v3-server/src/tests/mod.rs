@@ -1,13 +1,22 @@
 use super::*;
+use crate::endpoint_handlers::{format_v3_request_id_entry, format_v3_request_id_token};
+use crate::request_id::{v3_request_id_clock_now, V3RequestCounterState};
 use crate::webui_observability::{
     build_v3_obs_request_key, record_v3_observability_event, V3ObsErrorProjection, V3ObsErrorTruth,
     V3ObsEventType, V3ObsRequestMeta, V3ObsScope, V3WebuiObservability,
 };
 use axum::body::Bytes;
+use axum::http::{HeaderValue, StatusCode};
 use routecodex_v3_error::V3ErrorSourceKind;
 use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
+use std::fs;
 use std::sync::Mutex as StdMutex;
+use tokio::sync::Mutex as AsyncMutex;
+
+#[allow(dead_code)]
+#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
+mod hub_v1_fixture;
 
 mod foundation_output;
 mod frame_sdk_fault;
@@ -57,7 +66,7 @@ async fn listener_bind_returns_non_eintr_without_retry() {
 }
 
 static TEST_TZ_LOCK: StdMutex<()> = StdMutex::new(());
-static TEST_HOME_LOCK: StdMutex<()> = StdMutex::new(());
+static TEST_HOME_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
 
 fn test_v3_provider_health(
     manifest: &V3Config05ManifestPublished,
@@ -424,7 +433,7 @@ fn codex_sample_scope_blocks_direct_and_preserves_relay() {
 
 #[test]
 fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let _home = TestHomeGuard::unset();
     let log_file = std::env::temp_dir().join(format!(
         "routecodex-v3-missing-home-{}.log",
@@ -458,7 +467,7 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
 
 #[test]
 fn failure_evidence_preserves_distinct_terminal_sources() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-terminal-source-evidence-{}",
         std::process::id()
@@ -564,7 +573,7 @@ fn failure_evidence_preserves_distinct_terminal_sources() {
 
 #[test]
 fn relay_consumers_preserve_sources_without_observation_or_attempts() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-relay-source-consumers-{}",
         std::process::id()
@@ -703,7 +712,7 @@ fn relay_consumers_preserve_sources_without_observation_or_attempts() {
 
 #[tokio::test]
 async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_break() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-direct-policy-terminal-consumer-{}",
         std::process::id()
@@ -892,7 +901,7 @@ fn publish_terminal_outcome(
 /// a distinct cancelled terminal with no fabricated provider HTTP 502.
 #[tokio::test]
 async fn client_cancelled_direct_terminal_is_cancelled_not_provider_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-client-cancel-ledger-{}",
         std::process::id()
@@ -940,7 +949,7 @@ async fn client_cancelled_direct_terminal_is_cancelled_not_provider_502() {
 /// no-response disposition means no provider HTTP status and no `http_502`.
 #[tokio::test]
 async fn delivered_then_cancelled_no_response_is_not_provider_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-delivered-cancel-ledger-{}",
         std::process::id()
@@ -990,7 +999,7 @@ async fn delivered_then_cancelled_no_response_is_not_provider_502() {
 /// typed transport terminal instead of fabricating a provider HTTP 502.
 #[tokio::test]
 async fn provider_response_body_timeout_is_typed_transport_terminal_not_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-body-timeout-ledger-{}",
         std::process::id()
@@ -1036,7 +1045,7 @@ async fn provider_response_body_timeout_is_typed_transport_terminal_not_502() {
 /// fix must not flatten the honest 502 family.
 #[tokio::test]
 async fn genuine_provider_http_502_terminal_still_records_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-genuine-502-ledger-{}",
         std::process::id()
@@ -1093,7 +1102,7 @@ async fn genuine_provider_http_502_terminal_still_records_502() {
 
 #[tokio::test]
 async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-protocol-plan-fault-consumer-{}",
         std::process::id()
@@ -1115,13 +1124,13 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
         "protocol plan failed before dispatch",
     );
     let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
-        policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+        policy_failure: Box::new(routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
             "V3Error06ClientProjected",
             "relay_error_operator_sdk_failure",
             "Error06 SDK rejected the source projection",
-        ),
-        original_source: Some(original_source.clone()),
+        )),
+        original_source: Some(Box::new(original_source.clone())),
     };
     let response = crate::endpoint_handlers::finish_v3_protocol_execution_plan_failure(
         &state,
@@ -1226,7 +1235,7 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
 
 #[test]
 fn responses_relay_operator_fault_terminal_without_error06_records_provider_terminal_row() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-responses-relay-terminal-no-chain-{}",
         std::process::id()
@@ -1452,7 +1461,7 @@ fn v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_o
         );
         return;
     }
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-optional-snapshot-failure-{}",
         std::process::id()
@@ -1657,7 +1666,7 @@ async fn collect_body_bytes(response: Response<Body>) -> Result<Vec<u8>, axum::E
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-sse-sample-{}",
         std::process::id()
@@ -1715,7 +1724,7 @@ async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_persists_source_error_and_preserves_business_error() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-source-error-{}",
         std::process::id()
@@ -1772,7 +1781,7 @@ async fn codex_sample_final_body_capture_persists_source_error_and_preserves_bus
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-drop-{}",
         std::process::id()
@@ -1821,7 +1830,7 @@ async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error(
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-break-{}",
         std::process::id()
@@ -1877,7 +1886,7 @@ async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-write-failure-{}",
         std::process::id()
@@ -1920,7 +1929,7 @@ async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire(
 
 #[test]
 fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-snapshot-redaction-{}",
         std::process::id()
@@ -1996,7 +2005,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
 
 #[test]
 fn relay_missing_provider_snapshot_does_not_project_client_failure() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-relay-missing-provider-snapshot-{}",
         std::process::id()
@@ -2038,7 +2047,7 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
 
 #[test]
 fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-anthropic-client-response-{}",
         std::process::id()
@@ -2092,7 +2101,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
 
 #[test]
 fn responses_direct_provider_snapshots_require_typed_carrier() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-direct-provider-snapshot-{}",
         std::process::id()
@@ -4881,7 +4890,7 @@ fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
 
 #[test]
 fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-recovered-provider-snapshot-{}",
         std::process::id()
@@ -5402,7 +5411,7 @@ fn relay_terminal_projection_uses_typed_http200_body_failure_source() {
 /// request. Nothing is fabricated from the request id alone.
 #[tokio::test]
 async fn provider_attempt_failure_records_raw_artifact_ref_only_when_the_sample_dir_exists() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let home = std::env::temp_dir().join(format!(
         "v3-obs-raw-artifact-{}-{}",
         std::process::id(),
@@ -5563,7 +5572,7 @@ async fn responses_relay_json_error_returns_typed_no_response() {
 
 #[tokio::test]
 async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-external-http-{}",
         std::process::id()
@@ -5573,7 +5582,7 @@ async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
-    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let raw_body = br#"{"error":{"type":"rate_limit_error","message":"later"}}"#.to_vec();
     let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
@@ -5638,7 +5647,7 @@ async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
 
 #[tokio::test]
 async fn provider_terminal_external_http_records_body_read_failure_without_erasing_the_status() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-body-read-failure-{}",
         std::process::id()
@@ -5648,7 +5657,7 @@ async fn provider_terminal_external_http_records_body_read_failure_without_erasi
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
-    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         503,
         vec![("content-type".to_string(), b"application/json".to_vec())],
@@ -5698,7 +5707,7 @@ async fn provider_terminal_external_http_records_body_read_failure_without_erasi
 
 #[tokio::test]
 async fn provider_terminal_no_response_breaks_streaming_client_transport() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-no-response-{}",
         std::process::id()
@@ -5708,7 +5717,7 @@ async fn provider_terminal_no_response_breaks_streaming_client_transport() {
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
-    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let response = provider_terminal_response(
         &state,
         None,

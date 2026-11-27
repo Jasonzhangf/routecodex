@@ -1,27 +1,27 @@
 use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 #[cfg(unix)]
 #[path = "../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 
-/// Tests mutate process environment variables under one lock. Recover a
-/// poisoned guard so one failing test cannot turn later tests into cascades.
+/// Tests mutate process environment variables under one async-aware lock.
 pub(crate) struct TestEnvLock(Mutex<()>);
 
 impl TestEnvLock {
     const fn new() -> Self {
-        Self(Mutex::new(()))
+        Self(Mutex::const_new(()))
     }
 
     pub(crate) fn lock(&self) -> Result<MutexGuard<'_, ()>, std::convert::Infallible> {
-        Ok(self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+        Ok(self.0.blocking_lock())
+    }
+
+    pub(crate) async fn lock_async(&self) -> MutexGuard<'_, ()> {
+        self.0.lock().await
     }
 }
 
@@ -102,7 +102,7 @@ async fn control_response_broken_pipe_is_nonfatal() {
 #[tokio::test]
 #[cfg(unix)]
 async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -155,7 +155,7 @@ async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup
 #[tokio::test]
 #[cfg(unix)]
 async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -221,7 +221,7 @@ async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
 #[tokio::test]
 #[cfg(unix)]
 async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_control() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -328,8 +328,8 @@ async fn live_hooks_group_does_not_block_forced_stop() {
     };
 
     let status = V3ManagedLifecycle::with_state_root(
-        &root.path().join("config.v3.toml"),
-        &root.path().join("state"),
+        root.path().join("config.v3.toml"),
+        root.path().join("state"),
     )
     .force_stop_after_graceful_timeout(&instance_dir, &declaration)
     .await
@@ -348,7 +348,7 @@ async fn live_hooks_group_does_not_block_forced_stop() {
 #[tokio::test]
 #[cfg(unix)]
 async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -1481,7 +1481,7 @@ fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
 
 #[tokio::test]
 async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1506,7 +1506,7 @@ async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
 
 #[tokio::test]
 async fn active_stopping_child_is_not_reaped_when_listeners_have_closed() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1660,7 +1660,7 @@ fn foreign_control_record_is_never_reaped_from_terminal_state() {
 async fn status_finds_live_instance_after_config_content_changes() {
     use std::time::Duration;
 
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1779,7 +1779,7 @@ async fn status_finds_live_instance_after_config_content_changes() {
 async fn status_prefers_live_drifted_instance_over_persisted_terminal_state() {
     use std::time::Duration;
 
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1892,7 +1892,7 @@ async fn status_prefers_live_drifted_instance_over_persisted_terminal_state() {
 
 #[tokio::test]
 async fn status_reports_stopped_when_no_managed_instance_is_live() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock_async().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);

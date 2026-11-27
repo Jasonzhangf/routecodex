@@ -326,21 +326,22 @@ async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_t
     .await
     .expect("opaque Responses fields must roundtrip to a Responses target");
     assert_eq!(result.status, 200);
-    let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1);
-    let items = provider_projection_body(&captures[0])["input"]
-        .as_array()
-        .unwrap();
-    let output = items
-        .iter()
-        .find(|item| item["type"] == "function_call_output")
-        .unwrap();
-    assert_eq!(output["call_id"], "call_extra");
-    assert_eq!(output["output"], "done");
-    assert_eq!(output["id"], "fc_fco_extra");
-    assert_eq!(output["status"], "completed");
-    assert_eq!(output["opaque_business"], serde_json::json!({"ticket":42}));
-    drop(captures);
+    {
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 1);
+        let items = provider_projection_body(&captures[0])["input"]
+            .as_array()
+            .unwrap();
+        let output = items
+            .iter()
+            .find(|item| item["type"] == "function_call_output")
+            .unwrap();
+        assert_eq!(output["call_id"], "call_extra");
+        assert_eq!(output["output"], "done");
+        assert_eq!(output["id"], "fc_fco_extra");
+        assert_eq!(output["status"], "completed");
+        assert_eq!(output["opaque_business"], serde_json::json!({"ticket":42}));
+    }
 
     let transport = normalization_transport();
     let result = execute_v3_responses_relay_runtime(

@@ -102,7 +102,7 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
         routecodex_v3_error::V3Error06ClientProjected,
         routecodex_v3_runtime::V3RelayErrorOperatorFault,
     >,
-) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Box<Response<Body>>> {
     let projected = match projected {
         Ok(projected) => projected,
         Err(fault) => {
@@ -112,8 +112,8 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 path,
                 request_id,
                 &[],
-                Some(&fault.policy_failure),
-                fault.original_source.as_ref(),
+                Some(fault.policy_failure.as_ref()),
+                fault.original_source.as_deref(),
             );
             // The Error06 projection operator itself failed, so there is no
             // projected chain to carry; the typed policy source still names the
@@ -131,13 +131,13 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 None,
                 false,
             );
-            return Err(provider_terminal_response(
+            return Err(Box::new(provider_terminal_response(
                 state,
                 front_connection_identity,
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                 requested_stream,
                 terminal_evidence,
-            ));
+            )));
         }
     };
     Ok(projected)
@@ -369,7 +369,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     project_v3_protocol_execution_plan_failure(failure),
                 ) {
                     Ok(projected) => projected,
-                    Err(response) => return response,
+                    Err(response) => return *response,
                 };
                 if projected.pool_exhausted {
                     // A selection-time pool exhaustion is a provider terminal:
@@ -739,7 +739,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                         None => response,
                     };
                 }
-                V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
+                V3ResponsesDirectServerOutcome::RelayOutput(relay_output) => {
                     if let Some(disposition) = relay_output.terminal_disposition.clone() {
                         // Same entry, same defect as the branch below: a
                         // provider terminal disposition bypasses the relay

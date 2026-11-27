@@ -3,9 +3,7 @@ use crate::direct_response_hooks::{
     V3DirectResponseCompatContext, V3DirectResponseHookFailure,
 };
 use crate::kernel::direct_request_key_hooks::{
-    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
-    V3DirectRequestKeyEdits, V3DirectRequestKeyHookCatalog, V3DirectRequestKeyKind,
-    V3DirectRequestKeyMount, V3DirectRequestKeyView, V3DirectRequestProtocol,
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog, V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
@@ -21,7 +19,7 @@ use crate::shared::{
     V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error05ExecutionDecision,
+    V3Error01SourceRaised, V3Error05ExecutionDecision,
     V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
     V3ExternalErrorLink, V3InternalErrorCode,
 };

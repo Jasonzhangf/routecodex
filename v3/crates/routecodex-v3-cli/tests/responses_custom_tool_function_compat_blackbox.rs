@@ -456,7 +456,7 @@ async fn responses_gateway(
                 )
                     .into_response();
             }
-            return (
+            (
                 StatusCode::OK,
                 Json(json!({
                     "id": "resp_roundtrip_1",
@@ -485,7 +485,7 @@ async fn responses_gateway(
                     "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
                 })),
             )
-                .into_response();
+                .into_response()
         }
         GatewayMode::SseMultiline => {
             let events = [
@@ -502,17 +502,17 @@ async fn responses_gateway(
                 .iter()
                 .map(|event| sse_frame(event, terminator, true))
                 .collect::<String>();
-            return ([("content-type", "text/event-stream")], body).into_response();
+            ([("content-type", "text/event-stream")], body).into_response()
         }
         GatewayMode::SseMalformed => {
-            return (
+            (
                 [("content-type", "text/event-stream")],
                 malformed_sse_frame(),
             )
-                .into_response();
+                .into_response()
         }
         GatewayMode::AllowedToolsRoundTrip => {
-            return (
+            (
                 StatusCode::OK,
                 Json(json!({
                     "id": "resp_allowed_tools",
@@ -531,7 +531,7 @@ async fn responses_gateway(
                     "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
                 })),
             )
-                .into_response();
+                .into_response()
         }
         GatewayMode::NamespaceRoundTrip => {
             let has_history = body["input"]
@@ -562,7 +562,7 @@ async fn responses_gateway(
             }
             let custom_arguments =
                 serde_json::to_string(&json!({"input": NAMESPACE_CUSTOM_RAW_INPUT})).unwrap();
-            return (
+            (
                 StatusCode::OK,
                 Json(json!({
                     "id": "resp_ns_1",
@@ -591,7 +591,7 @@ async fn responses_gateway(
                     "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
                 })),
             )
-                .into_response();
+                .into_response()
         }
         GatewayMode::NamespaceSse => {
             let custom_arguments =
@@ -610,7 +610,7 @@ async fn responses_gateway(
                 .iter()
                 .map(|event| sse_frame(event, terminator, true))
                 .collect::<String>();
-            return ([("content-type", "text/event-stream")], body).into_response();
+            ([("content-type", "text/event-stream")], body).into_response()
         }
     }
 }

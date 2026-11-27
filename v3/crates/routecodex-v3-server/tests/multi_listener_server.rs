@@ -10608,13 +10608,15 @@ async fn responses_relay_refill_projects_only_the_final_error_after_exhaustion()
 }
 
 async fn assert_refill_round_observations(exhausted: bool, relay: bool) {
+    type RefillObservationState = Arc<(Arc<Mutex<Vec<Value>>>, bool)>;
+
     let _guard = TEST_LOCK.lock().await;
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
     let home = TestHomeGuard::new("issue4aeb668-refill-observations");
     let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let state = Arc::new((calls.clone(), exhausted));
+    let state: RefillObservationState = Arc::new((calls.clone(), exhausted));
     let app = Router::new().route("/v1/responses", post(
-        |State(state): State<Arc<(Arc<Mutex<Vec<Value>>>, bool)>>,
+        |State(state): State<RefillObservationState>,
          axum::Json(body): axum::Json<Value>| async move {
             assert!(body["input"].is_array() || body["input"].is_string(), "provider requires Responses input: {body}");
             assert!(body.get("messages").is_none(), "conflicting Chat history: {body}");
@@ -15000,11 +15002,8 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     // An ordinary RuntimeFailure is not ProviderFailure eligibility. Consume
     // the terminal so this test exercises the debug surfaces below; its
     // transport shape stays owned by the dedicated transport gates.
-    match runtime_response {
-        Ok(response) => {
-            let _ = response.bytes().await;
-        }
-        Err(_) => {}
+    if let Ok(response) = runtime_response {
+        let _ = response.bytes().await;
     }
 
     let status: serde_json::Value = client

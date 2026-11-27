@@ -3,7 +3,7 @@
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
 use routecodex_v3_admin::{router, AppState};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn temp_home() -> PathBuf {
@@ -16,7 +16,7 @@ fn temp_home() -> PathBuf {
     dir
 }
 
-fn write_init_config(home: &PathBuf) -> PathBuf {
+fn write_init_config(home: &Path) -> PathBuf {
     let provider_dir = home.join("provider").join("p1");
     std::fs::create_dir_all(&provider_dir).expect("provider dir");
     std::fs::write(
@@ -216,7 +216,7 @@ fn observability_attempt_row_with_failed(
         "finished_epoch_ms": null,
         "duration_ms": null,
         "meta": {
-            "request_id": request_key.split(':').last().unwrap_or(request_key),
+            "request_id": request_key.split(':').next_back().unwrap_or(request_key),
             "endpoint": "/v1/chat/completions",
             "provider_status": provider_status,
             "error_category": format!("provider_http_{provider_status}"),

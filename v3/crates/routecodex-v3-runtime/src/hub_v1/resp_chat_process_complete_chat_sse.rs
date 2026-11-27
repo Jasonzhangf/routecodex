@@ -68,11 +68,15 @@ pub(crate) fn projected_sse_has_business_content(
 
 /// Keep exact surviving source spans, including literal/code contexts and
 /// opaque invocations. Never synthesize text or touch native tool arguments.
+type V3CompleteChatSseResult =
+    Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError>;
+type V3ToolCarrierMap = BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)>;
+
 #[cfg(test)]
 fn govern_complete_chat_sse(
     frames: &[Vec<u8>],
     source_terminal: Option<usize>,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
+) -> V3CompleteChatSseResult {
     govern_complete_chat_sse_with_context(
         frames,
         source_terminal,
@@ -84,10 +88,9 @@ pub(crate) fn govern_complete_chat_sse_with_context(
     frames: &[Vec<u8>],
     source_terminal: Option<usize>,
     context: &V3HubRelaySerializedToolContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
+) -> V3CompleteChatSseResult {
     let mut events = decode(frames).map_err(V3RelayCompleteResponseError::Processing)?;
-    let mut carriers: BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)> =
-        BTreeMap::new();
+    let mut carriers: V3ToolCarrierMap = BTreeMap::new();
     let mut used = HashSet::new();
     let mut next_indices = BTreeMap::<String, usize>::new();
     let mut opaque_choices = BTreeSet::new();

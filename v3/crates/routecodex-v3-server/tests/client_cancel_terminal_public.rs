@@ -515,7 +515,7 @@ fn session_rows<'a>(rows: &'a [Value], event_type: &str) -> Vec<&'a Value> {
         .collect()
 }
 
-fn session_terminal_rows<'a>(rows: &'a [Value]) -> Vec<&'a Value> {
+fn session_terminal_rows(rows: &[Value]) -> Vec<&Value> {
     rows.iter()
         .filter(|row| row["scope"]["session"] == json!(SESSION_ID) && is_terminal(row))
         .collect()

@@ -9,10 +9,10 @@
 // 协议差异全部收敛在 `V3DirectProtocolCodec`。
 
 pub async fn execute_v3_direct_runtime_kernel_core<
-    C: V3DirectProtocolCodec,
+    C,
     T: ResponsesTransport + ?Sized + 'static,
 >(
-    mut control: C::Control,
+    control: C::Control,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     transport: &T,
@@ -23,7 +23,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -46,10 +46,10 @@ where
 }
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
-    C: V3DirectProtocolCodec,
+    C,
     T: ResponsesTransport + ?Sized + 'static,
 >(
-    mut control: C::Control,
+    control: C::Control,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     transport: &T,
@@ -61,7 +61,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -82,7 +82,7 @@ where
 }
 
 async fn execute_v3_direct_runtime_kernel_core_resident<
-    C: V3DirectProtocolCodec,
+    C,
     T: ResponsesTransport + ?Sized + 'static,
 >(
     mut control: C::Control,
@@ -97,7 +97,7 @@ async fn execute_v3_direct_runtime_kernel_core_resident<
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -201,9 +201,9 @@ where
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let mut last_external_http = None::<V3ExternalHttpWitness>;
+    let mut last_external_http: Option<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
-    let mut provider_request_snapshot = None;
+    let mut provider_request_snapshot;
     let mut provider_response_snapshot = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));

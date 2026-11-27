@@ -277,7 +277,7 @@ fn protocol_plan_failure(
     node_trace: Vec<&'static str>,
 ) -> V3ResponsesProtocolExecutionPlanFailure {
     V3ResponsesProtocolExecutionPlanFailure {
-        source,
+        source: Box::new(source),
         node_trace,
         error_operator_fault: None,
         recovery_candidates: None,
@@ -628,9 +628,7 @@ pub async fn execute_v3_responses_direct_dry_run_runtime_with_client_identity(
         .and_then(|captured| captured.clone())
         .map(|request| debug.project_verbatim(request))
         .unwrap_or_else(|| json!(null));
-    let dry_run_status = if response_replay {
-        output.client_payload.status
-    } else if provider_request.is_null() {
+    let dry_run_status = if response_replay || provider_request.is_null() {
         output.client_payload.status
     } else {
         200

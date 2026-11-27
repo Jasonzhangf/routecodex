@@ -186,7 +186,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                     .provider_response_snapshot
                     .as_ref()
                     .and_then(|snapshot| snapshot.get("body"))
-                    .map(|body| crate::hub_v1::has_v3_source_explicit_nonempty_summary(body))
+                    .map(crate::hub_v1::has_v3_source_explicit_nonempty_summary)
                     .unwrap_or(false);
                 (
                     V3ResponsesDirectRefillFacts {
@@ -259,7 +259,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                 // irrevocable. Count the business items they
                                 // carried so the assembly never synthesizes a
                                 // second `output_item.done` for them.
-                                let sealed_frames = stream.sealed_frames();
+                                let _sealed_frames = stream.sealed_frames();
                                 let delivered_item_count = 0;
                                 let chunks = collect_direct_committed_sse(stream).await;
                                 let segments =

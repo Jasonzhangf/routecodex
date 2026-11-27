@@ -24,7 +24,7 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3Error05ExecutionAction, V3Error06ClientProjected,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind, V3ExternalErrorKind,
     V3ExternalErrorLink, V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS,
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
@@ -347,7 +347,7 @@ pub(crate) fn bind_v3_selected_business_auth_kind(
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    mut failure: V3RelayProviderFailure,
+    failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
@@ -1419,8 +1419,7 @@ mod tests {
             body: vec![],
             body_read_failure: Some("truncated body".into()),
         };
-        let last = Some(external_http_witness(&incomplete));
-        let latest = last.expect("the new response head is real evidence");
+        let latest = external_http_witness(&incomplete);
         assert_eq!(latest.status(), 400);
         assert_eq!(latest.body_read_failure(), Some("truncated body"));
         assert_ne!(latest, prior);

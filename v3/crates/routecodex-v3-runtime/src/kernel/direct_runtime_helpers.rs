@@ -13,7 +13,10 @@ fn v3_direct_retired_continuation_error(
 
 fn v3_direct_admit_pinned_target(
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-) -> Result<routecodex_v3_target::V3Target10ConcreteProviderSelected, V3ResponsesDirectRuntimeOutput>
+) -> Result<
+    routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    Box<V3ResponsesDirectRuntimeOutput>,
+>
 {
     // A pinned route is selected once by Router/Target. Sending the request is
     // not a second admission boundary.
@@ -156,8 +159,8 @@ pub(crate) struct V3DirectProviderFailurePolicyContext<
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DirectPolicyFailure {
-    pub(crate) original_source: V3Error01SourceRaised,
-    pub(crate) policy_failure: V3Error01SourceRaised,
+    pub(crate) original_source: Box<V3Error01SourceRaised>,
+    pub(crate) policy_failure: Box<V3Error01SourceRaised>,
 }
 
 pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
@@ -172,14 +175,14 @@ fn direct_policy_failure(
     error: impl std::fmt::Display,
 ) -> DirectPolicyFailure {
     DirectPolicyFailure {
-        original_source: original_source.clone(),
+        original_source: Box::new(original_source.clone()),
         // A policy failure is the diagnostic leaf, not another Source01 run.
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             source_stage,
             "v3_route_target_runtime_failure",
             error.to_string(),
-        ),
+        )),
     }
 }
 
@@ -427,7 +430,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
         )
         .expect_err("the SDK must reject a non-object Error02 projection");
 
-        assert_eq!(failure.original_source, original_source);
+        assert_eq!(failure.original_source.as_ref(), &original_source);
         assert_eq!(
             failure.policy_failure.source_kind,
             V3ErrorSourceKind::RuntimeFailure
@@ -457,7 +460,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
         );
         assert_eq!(
             output.diagnostic_source.as_ref(),
-            Some(&failure.policy_failure)
+            Some(failure.policy_failure.as_ref())
         );
         assert_eq!(output.diagnostic_cause.as_ref(), Some(&original_source));
         assert_eq!(
@@ -473,7 +476,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
         );
         assert_eq!(
             no_response.diagnostic_source.as_ref(),
-            Some(&policy_failure)
+            Some(policy_failure.as_ref())
         );
         assert_eq!(
             no_response.diagnostic_cause.as_ref(),
@@ -902,7 +905,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     state
         .failed_candidates
         .extend(request_local_excluded.iter().cloned());
-    let mut failed_with_current = state.failed_candidates.clone();
+    let failed_with_current = state.failed_candidates.clone();
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
@@ -961,7 +964,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                                     failure_now_ms,
                                 )
                                 .available)
-                            .then(|| key)
+                            .then_some(key)
                     });
                 }
             }
@@ -1052,13 +1055,15 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             Ok(record) => record,
             Err(Ok(policy_failure)) => {
                 return Err(DirectPolicyFailure {
-                    original_source: source.clone(),
-                    policy_failure,
+                    original_source: Box::new(source.clone()),
+                    policy_failure: Box::new(policy_failure),
                 })
             }
             Err(Err(fault)) => {
                 return Err(DirectPolicyFailure {
-                    original_source: fault.original_source.unwrap_or_else(|| source.clone()),
+                    original_source: fault
+                        .original_source
+                        .unwrap_or_else(|| Box::new(source.clone())),
                     policy_failure: fault.policy_failure,
                 })
             }

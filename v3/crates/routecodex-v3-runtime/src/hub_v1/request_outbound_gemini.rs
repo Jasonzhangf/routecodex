@@ -395,7 +395,7 @@ fn add_gemini_native_content<'a>(
 
 fn project_gemini_native_function_response(
     message: &Map<String, Value>,
-    content_index: usize,
+    _content_index: usize,
     records: &[Value],
     call_names: &std::collections::HashMap<String, String>,
 ) -> Result<(usize, Value), String> {

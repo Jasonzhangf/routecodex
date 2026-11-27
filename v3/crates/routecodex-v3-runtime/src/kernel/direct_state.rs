@@ -338,10 +338,11 @@ impl V3ResponsesProtocolExecutionPlan {
 
 #[derive(Debug, Clone)]
 pub struct V3ResponsesProtocolExecutionPlanFailure {
-    pub source: V3Error01SourceRaised,
+    pub source: Box<V3Error01SourceRaised>,
     pub node_trace: Vec<&'static str>,
     pub error_operator_fault: Option<crate::V3RelayErrorOperatorFault>,
-    pub(crate) recovery_candidates: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    pub(crate) recovery_candidates:
+        Option<Box<routecodex_v3_target::V3Target09CandidateSetExpanded>>,
 }
 
 pub(crate) fn protocol_plan_operator_fault(
@@ -349,7 +350,7 @@ pub(crate) fn protocol_plan_operator_fault(
     node_trace: Vec<&'static str>,
 ) -> V3ResponsesProtocolExecutionPlanFailure {
     V3ResponsesProtocolExecutionPlanFailure {
-        source: fault.policy_failure.clone(),
+        source: Box::new((*fault.policy_failure).clone()),
         node_trace,
         error_operator_fault: Some(fault),
         recovery_candidates: None,
@@ -363,7 +364,7 @@ pub fn project_v3_protocol_execution_plan_failure(
         return Err(fault);
     }
     crate::provider_failure_runtime_policy::project_v3_relay_error_source(
-        failure.source,
+        *failure.source,
         V3ErrorActionScope::None,
         0,
         None,

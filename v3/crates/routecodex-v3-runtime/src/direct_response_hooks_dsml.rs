@@ -587,11 +587,14 @@ fn rewrite_snapshot(
     true
 }
 
+type V3DirectDsmlRewriteResult =
+    Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure>;
+
 pub(crate) fn rewrite_v3_direct_dsml_attempt(
     frames: &[Vec<u8>],
     flushed: usize,
     context: &V3DirectDsmlContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
+) -> V3DirectDsmlRewriteResult {
     use routecodex_v3_sse::{
         build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
     };
@@ -794,8 +797,8 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
         }
         if position == terminal {
             for (pi, plan) in plans.iter().enumerate() {
-                if !emitted[pi] {
-                    if !resume_emitted_items(
+                if !emitted[pi]
+                    && !resume_emitted_items(
                         &mut output,
                         &mut sequence,
                         plan,
@@ -804,7 +807,6 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
                     ) {
                         return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
                     }
-                }
             }
             event["response"] = response.clone();
             terminal_index = output.len();
@@ -1348,17 +1350,16 @@ fn resume_emitted_items(
             else {
                 return false;
             };
-            if !remaining.is_empty() {
-                if !kinds.delta
+            if !remaining.is_empty()
+                && (!kinds.delta
                     || !push_event(
                         output,
                         sequence,
                         json!({"type":"response.output_text.delta","output_index":index,"item_id":first["id"],"content_index":content_index,"delta":remaining}),
-                    )
+                    ))
                 {
                     return false;
                 }
-            }
             if kinds.text_done
                 && !part_state.is_some_and(|part_state| part_state.text_done)
                 && !push_event(

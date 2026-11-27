@@ -161,17 +161,11 @@ pub struct V3RelayProviderSnapshots {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub struct V3ResponsesRelayRetryPolicy {
     pub same_candidate_retries: usize,
 }
 
-impl Default for V3ResponsesRelayRetryPolicy {
-    fn default() -> Self {
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
-}
 
 impl V3ResponsesRelayRetryPolicy {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
@@ -537,7 +531,7 @@ impl V3RuntimeStreamObservation {
             snapshot.usage = incoming.usage.clone();
         }
         if incoming.timing.is_some() {
-            snapshot.timing = incoming.timing.clone();
+            snapshot.timing = incoming.timing;
         }
         if !incoming.typed_object_types.is_empty() {
             snapshot.typed_object_types = incoming.typed_object_types.clone();

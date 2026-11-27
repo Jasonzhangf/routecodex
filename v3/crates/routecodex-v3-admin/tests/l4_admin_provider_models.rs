@@ -492,9 +492,7 @@ async fn discover_keeps_models_shape_and_adds_structured_entries() {
     assert!(capabilities.contains(&"tools"), "{detected}");
     assert!(capabilities.contains(&"reasoning"), "{detected}");
     assert!(
-        !capabilities
-            .iter()
-            .any(|capability| *capability == "temperature"),
+        !capabilities.contains(&"temperature"),
         "sampling parameters are not capabilities: {detected}"
     );
 

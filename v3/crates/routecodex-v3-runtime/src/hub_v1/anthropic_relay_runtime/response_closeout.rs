@@ -20,7 +20,7 @@ where
             None,
             Some(request_id),
         )
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error))?;
+        .map_err(V3AnthropicRelayRuntimeError::Target)?;
     trace.push("V3HubRespInbound02Normalized");
     closeout_anthropic_relay_normalized_response(
         resp02,
@@ -60,7 +60,7 @@ where
 
 fn closeout_anthropic_relay_normalized_response<F>(
     resp02: V3HubRespInbound02Normalized,
-    request_id: &str,
+    _request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     refill: Option<&mut crate::hub_v1::relay_runtime_core::V3RelayRefillCarrier>,

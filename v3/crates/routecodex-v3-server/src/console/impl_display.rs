@@ -250,7 +250,7 @@ pub(crate) fn emit_v3_frame_error_console_line_for_context(
 pub(crate) fn v3_server_frame_error_body_for_console(
     frame: &V3Server16HttpFrame,
 ) -> Option<&Value> {
-    frame.error_body.as_ref().or_else(|| match &frame.body {
+    frame.error_body.as_ref().or(match &frame.body {
         V3Server16Body::Json(value) => Some(value),
         V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) | V3Server16Body::CommittedSse(_) => None,
     })
