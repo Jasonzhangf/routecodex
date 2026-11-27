@@ -4278,7 +4278,7 @@ features:
   - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client, are preserved on retry/refill, and release only at RuntimeRequestFinalizer
   - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
   - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
-  - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; Error06 never authorizes a model-client error candidate; Runtime consumes retry or terminal no-commit decisions and Server/SSE commits only success or aborts the affected transport
+  - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; for a complete genuine non-2xx response from the current exhausted final identity before business commit, Error06 produces typed final-external-HTTP-projection eligibility and Server projects the actual status and body under the entry protocol; every other terminal failure ends only the affected transport without reusing an earlier attempt witness
   - retry belongs to Error05 typed error execution decision, not to the response graph; cancel/disconnect belong to Runtime ownership and the unified finalizer
   - no protocol-configurable optional flow or second runner bypasses the fixed request/response/error graphs
   - Config publishes declarations only and references the field/operator profile manifest; legacy conversion tables are migration baselines and cannot remain a competing field-mapping owner after cutover
