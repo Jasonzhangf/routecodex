@@ -18,6 +18,7 @@ node_ids:
   - V3ConsoleResp03HumanBlock
   - V3ConsoleStartup07HumanBlock
   - V3DebugSink01WriteFailed
+  - V3DirectGovernedSseResult
   - V3Error01SourceRaised
   - V3Error06ClientProjected
   - V3RuntimeStreamObservation
@@ -372,6 +373,22 @@ edges:
         - v3.runtime.responses_observability
       side_channel_writes:
         - v3.error.source
+  - step_id: v3-console-realtime-07
+    from_node: V3DirectGovernedSseResult
+    to_node: V3RuntimeStreamObservation
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.response.client_payload
+        - v3.runtime.responses_observability
+      produces: []
+      side_channel_reads:
+        - v3.runtime.responses_observability
+      side_channel_writes:
+        - v3.runtime.responses_observability
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

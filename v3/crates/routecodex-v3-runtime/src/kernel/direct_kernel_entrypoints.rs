@@ -202,6 +202,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             V3ClientBody::CommittedSse(stream) => {
                 let governed = direct_runtime_helpers_stream::inspect_direct_sse_governed_frames(
                     stream.sealed_frames().as_slice(),
+                    output.stream_observation.as_ref(),
                 );
                 // The attempt-scoped typed fact is recorded from the complete
                 // native stream while each provider event is decoded. The raw
