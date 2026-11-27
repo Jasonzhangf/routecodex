@@ -3460,7 +3460,7 @@ features:
   - A barrier reports a failure snapshot without draining it; a cancelled barrier reply cannot erase failures needed by shutdown.
   - Worker shutdown drains and returns the bounded failure ledger, including an omitted-count summary; aggregate shutdown and exec preparation return that terminal report.
   - The persistence worker starts only after fallible startup preparation and before listener tasks begin accepting requests.
-  - Startup retention and sample writes use one Debug-owned process-shared filesystem lock; concurrent CLI instances with a shared HOME and 500 old samples all become healthy, return real provider responses, preserve their request samples, and enforce the global 100-request retention limit.
+  - Startup retention and sample writes use one Debug-owned process-shared filesystem lock; concurrent CLI instances with a shared HOME and 500 old samples all become healthy, return real provider responses, preserve their request samples, and enforce the global 100-success-directory budget while keeping the separate failure reserve.
   - An invalid sample lock produces an explicit file-qualified startup error rather than silently accepting uncoordinated retention.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, or routing truth.
