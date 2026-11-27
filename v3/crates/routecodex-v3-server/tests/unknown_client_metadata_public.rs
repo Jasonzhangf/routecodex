@@ -382,6 +382,7 @@ async fn run(stream: bool, root: &Path) -> Result<(), String> {
         .timeout(Duration::from_secs(10))
         .build()
         .unwrap();
+    let port_text = port.to_string();
     let result = async {
         let mut request = json!({"model":"metadata-client","stream":stream,"client_metadata":metadata(),
             "input":[{"role":"user","content":"calculate 19 plus 23"}],
@@ -405,7 +406,7 @@ async fn run(stream: bool, root: &Path) -> Result<(), String> {
             let key = match record["json_path"].as_str() { Some("$.client_metadata.unknown") => "unknown",Some("$.client_metadata[\"future.key\"]") => "future.key", _ => return Err(format!("unexpected metadata drop: {record}")) };
             if record["source_value"] != metadata()[key] || record["canonical_value"] != metadata()[key]
                 || record["target_protocol"] != "openai_chat" || record["stage"] != "outbound_target_protocol_projection"
-                || record["reason"] != "unmapped_target_protocol_field_unrepresentable" || record["entry_port"] != port.to_string()
+                || record["reason"] != "unmapped_target_protocol_field_unrepresentable" || record["entry_port"].as_str() != Some(port_text.as_str())
                 || record["ts"].as_u64().unwrap_or(0) == 0 || record["request_id"].as_str().unwrap_or("").is_empty() {
                 return Err(format!("incorrect scoped diagnostic: {record}"));
             }
@@ -425,11 +426,6 @@ async fn run(stream: bool, root: &Path) -> Result<(), String> {
     let _ = backup_stop.send(());
     primary_task.await.unwrap();
     backup_task.await.unwrap();
-    let captures = captures.lock().unwrap();
-    println!(
-        "PROVIDER_CAPTURES {}",
-        serde_json::to_string(&*captures).unwrap()
-    );
     for address in [addr, primary_addr, backup_addr] {
         assert!(
             tokio::net::TcpStream::connect(address).await.is_err(),
@@ -437,6 +433,11 @@ async fn run(stream: bool, root: &Path) -> Result<(), String> {
         );
     }
     println!("OWNED_LISTENERS_RELEASED {addr} {primary_addr} {backup_addr}");
+    let captures = captures.lock().unwrap();
+    println!(
+        "PROVIDER_CAPTURES {}",
+        serde_json::to_string(&*captures).unwrap()
+    );
     result?;
     let phases: Vec<_> = captures
         .iter()
