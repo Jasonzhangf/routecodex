@@ -269,7 +269,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
             | "custom_tool_call_output"
             | "tool_result"
             | "tool_message" => {
-                let (message, decoder_captured_tool_output) =
+                let (message, decoder_captured_responses_tool_output) =
                     build_v3_openai_chat_tool_result_message(item, native_responses)?;
                 let prov = V3HubMessageHistoryProvenance {
                     message_input_order: native_responses.then_some(input_index as u64),
@@ -277,7 +277,7 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_semantic_with_orpha
                         && read_v3_non_empty_str(item.get("id")).is_none(),
                     preserve_native_tool_output_id: native_responses,
                     decoder_native_tool_output: native_responses,
-                    decoder_captured_tool_output,
+                    decoder_captured_responses_tool_output,
                     ..Default::default()
                 };
                 append_v3_openai_chat_tool_result_message_with_provenance(
@@ -804,20 +804,21 @@ pub(super) fn resolve_orphan_responses_tool_output_media(
                 })
             });
             if !paired {
-                let is_decoder_native = provenance
-                    .message_entries
-                    .get(msg_idx)
-                    .is_some_and(|entry| entry.decoder_native_tool_output);
+                let entry_ref = provenance.message_entries.get(msg_idx);
+                let is_decoder_native =
+                    entry_ref.is_some_and(|entry| entry.decoder_native_tool_output);
+                let is_decoder_captured =
+                    entry_ref.is_some_and(|entry| entry.decoder_captured_responses_tool_output);
                 if is_decoder_native {
-                    if let Some(raw_output) = provenance
-                        .message_entries
-                        .get(msg_idx)
-                        .and_then(|entry| entry.decoder_captured_tool_output.as_ref())
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                    {
-                        // An orphan (call-ID or named output) has no declared tool media semantics.
-                        message["content"] = Value::String(raw_output);
+                    if is_decoder_captured {
+                        if let Some(raw_output) = message
+                            .pointer("/routecodex_chat_extension/responses_tool_output_content")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                        {
+                            // An orphan (call-ID or named output) has no declared tool media semantics.
+                            message["content"] = Value::String(raw_output);
+                        }
                     }
                     if message.get("content").is_some_and(Value::is_string) {
                         if let Some(entry) = provenance.message_entries.get_mut(msg_idx) {
@@ -1046,10 +1047,8 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         target_prov.preserve_native_tool_output_id |=
             source_provenance.preserve_native_tool_output_id;
         target_prov.decoder_native_tool_output |= source_provenance.decoder_native_tool_output;
-        if target_prov.decoder_captured_tool_output.is_none() {
-            target_prov.decoder_captured_tool_output =
-                source_provenance.decoder_captured_tool_output;
-        }
+        target_prov.decoder_captured_responses_tool_output |=
+            source_provenance.decoder_captured_responses_tool_output;
 
         let mut source_items = source_provenance.assistant_items;
         if source_empty {
@@ -1765,7 +1764,7 @@ pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
 fn build_v3_openai_chat_tool_result_message(
     item: &Map<String, Value>,
     native_responses: bool,
-) -> Result<(Value, Option<Value>), String> {
+) -> Result<(Value, bool), String> {
     let call_id = read_v3_non_empty_str(item.get("tool_call_id"))
         .or_else(|| read_v3_non_empty_str(item.get("call_id")))
         .or_else(|| read_v3_non_empty_str(item.get("tool_use_id")));
@@ -1783,18 +1782,10 @@ fn build_v3_openai_chat_tool_result_message(
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
     }
-    let captured_output = (native_responses
-        && matches!(
-            item_type,
-            "function_call_output" | "custom_tool_call_output"
-        )
-        && (output.is_string() || output.is_array()))
-    .then(|| output.clone());
-    if let Some(captured) = &captured_output {
-        extension.insert(
-            "responses_tool_output_content".to_string(),
-            captured.clone(),
-        );
+    let decoder_captured_responses_tool_output =
+        native_responses && (output.is_string() || output.is_array());
+    if decoder_captured_responses_tool_output {
+        extension.insert("responses_tool_output_content".to_string(), output.clone());
     }
     let extra_fields: Map<String, Value> = item
         .iter()
@@ -1842,7 +1833,7 @@ fn build_v3_openai_chat_tool_result_message(
                 "content":content,
                 "routecodex_chat_extension":Value::Object(named_extension)
             }),
-            captured_output,
+            decoder_captured_responses_tool_output,
         ));
     };
     copy_v3_responses_tool_result_status(item, &mut extension)?;
@@ -1854,7 +1845,7 @@ fn build_v3_openai_chat_tool_result_message(
             "content":content,
             "routecodex_chat_extension":Value::Object(extension)
         }),
-        captured_output,
+        decoder_captured_responses_tool_output,
     ))
 }
 

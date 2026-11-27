@@ -1286,8 +1286,13 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
                 msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
             let restore_responses_hosted_web_search =
                 msg_provenance.is_some_and(|p| p.restore_responses_hosted_web_search);
-            let decoder_captured_tool_output =
-                msg_provenance.and_then(|p| p.decoder_captured_tool_output.as_ref());
+            let decoder_captured_tool_output = msg_provenance
+                .is_some_and(|p| p.decoder_captured_responses_tool_output)
+                .then(|| {
+                    row.get("routecodex_chat_extension")
+                        .and_then(|ext| ext.get("responses_tool_output_content"))
+                })
+                .flatten();
             let source_input_index = msg_provenance
                 .and_then(|p| p.message_input_order)
                 .and_then(|order| usize::try_from(order).ok());
@@ -1302,7 +1307,13 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
             )? {
                 let preserve_literal = matches!(
                     item.get("type").and_then(Value::as_str),
-                    Some("function_call_output" | "custom_tool_call_output")
+                    Some(
+                        "function_call_output"
+                            | "custom_tool_call_output"
+                            | "tool_result"
+                            | "tool_call_output"
+                            | "tool_message"
+                    )
                 ) && msg_provenance
                     .is_some_and(|p| p.preserve_orphan_tool_output_literal);
                 output.push((message_order(msg_idx), item, preserve_literal));
@@ -1446,7 +1457,13 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
         .filter(|(_, item, _)| {
             matches!(
                 item.get("type").and_then(Value::as_str),
-                Some("function_call_output" | "custom_tool_call_output")
+                Some(
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "tool_result"
+                        | "tool_call_output"
+                        | "tool_message"
+                )
             )
         })
         .map(|(_, _, preserve_literal)| *preserve_literal)

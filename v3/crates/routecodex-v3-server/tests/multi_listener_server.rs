@@ -8268,6 +8268,7 @@ async fn issue4a0b3aa_r14_dual_legacy_orphan_and_orphan_tool_search_output_publi
 async fn issue4a0b3aa_r15_dual_alias_and_legacy_json_string_public() {
     let _test_guard = TEST_LOCK.lock().await;
     let client = reqwest::Client::new();
+    let alias_image_json = r#"[{"type":"input_image","image_url":"https://example.com/a.png"}]"#;
     let legacy_json_string = r#"[{"type":"input_text","text":"legacy"}]"#;
 
     let responses_provider_body = json!({
@@ -8301,9 +8302,15 @@ async fn issue4a0b3aa_r15_dual_alias_and_legacy_json_string_public() {
             "messages": [
                 {
                     "role": "tool",
-                    "tool_call_id": "call_native_alias_r15",
+                    "tool_call_id": "call_legacy_spoof_r15",
                     "content": "actual",
                     "routecodex_chat_extension": {"responses_tool_output_content": "different"}
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_legacy_spoof_image_r15",
+                    "content": [{"type": "image_url", "image_url": {"url": "https://example.com/client.png"}}],
+                    "routecodex_chat_extension": {"responses_tool_output_content": alias_image_json}
                 },
                 {
                     "role": "tool",
@@ -8318,7 +8325,7 @@ async fn issue4a0b3aa_r15_dual_alias_and_legacy_json_string_public() {
                 {
                     "type": "tool_result",
                     "call_id": "call_native_alias_r15",
-                    "output": "actual"
+                    "output": alias_image_json
                 }
             ]
         }))
@@ -8344,8 +8351,33 @@ async fn issue4a0b3aa_r15_dual_alias_and_legacy_json_string_public() {
     );
     assert_eq!(
         alias_wire["output"],
+        json!(alias_image_json),
+        "native tool_result alias must keep exact JSON image string instead of array: {}",
+        dual_alias_capture.body
+    );
+    let legacy_spoof_wire = dual_alias_input
+        .iter()
+        .find(|item| item["call_id"] == "call_legacy_spoof_r15")
+        .expect("legacy spoof orphan must reach first Provider");
+    assert_eq!(
+        legacy_spoof_wire["output"],
         json!("actual"),
-        "native tool_result alias must keep \"actual\" instead of client \"different\": {}",
+        "client-supplied legacy row must keep \"actual\" instead of spoofed responses_tool_output_content: {}",
+        dual_alias_capture.body
+    );
+    let legacy_spoof_image_wire = dual_alias_input
+        .iter()
+        .find(|item| item["call_id"] == "call_legacy_spoof_image_r15")
+        .expect("legacy image spoof orphan must reach first Provider");
+    assert_ne!(
+        legacy_spoof_image_wire["output"],
+        json!(alias_image_json),
+        "client-supplied legacy row carrying responses_tool_output_content must NOT be restored as an orphan literal: {}",
+        dual_alias_capture.body
+    );
+    assert!(
+        legacy_spoof_image_wire["output"].is_array(),
+        "client-supplied legacy image row must remain array-projected rather than orphan literal string: {}",
         dual_alias_capture.body
     );
     let legacy_json_wire = dual_alias_input
@@ -8362,6 +8394,105 @@ async fn issue4a0b3aa_r15_dual_alias_and_legacy_json_string_public() {
         json!(legacy_json_string),
         "legacy-only JSON string content must stay exact: {}",
         dual_alias_capture.body
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r16_dual_messages_and_input_repeated_tool_search_output_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+
+    let responses_provider_body = json!({
+        "id": "resp_r16_dual_tso",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r16-dual-tso-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let tool_one =
+        json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+    let tool_two =
+        json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+    let dual_tso_res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_one).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_item_id": "tso_1",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                }
+            ],
+            "input": [
+                {
+                    "type": "tool_search_output",
+                    "id": "tso_2",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_two
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("dual-history prior Chat tso_1 + new native tso_2 sharing call_1 must succeed");
+    assert_eq!(dual_tso_res.status(), StatusCode::OK);
+    let dual_tso_capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history tso capture timeout")
+        .expect("dual-history tso capture");
+    assert_eq!(
+        dual_tso_capture.body["input"],
+        json!([
+            {
+                "type": "tool_search_output",
+                "id": "tso_1",
+                "call_id": "call_1",
+                "execution": "client",
+                "status": "completed",
+                "tools": tool_one
+            },
+            {
+                "type": "tool_search_output",
+                "id": "tso_2",
+                "call_id": "call_1",
+                "execution": "client",
+                "status": "completed",
+                "tools": tool_two
+            }
+        ]),
+        "prior Chat tool_search_output tso_1 and new native tool_search_output tso_2 sharing call_1 must both reach first Provider cleanly: {}",
+        dual_tso_capture.body
     );
 
     resp_handle.shutdown().await;

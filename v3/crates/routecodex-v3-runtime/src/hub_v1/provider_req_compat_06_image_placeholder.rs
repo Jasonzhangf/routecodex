@@ -38,7 +38,13 @@ pub(super) fn project_default_text_attempt_images_with_tool_policy(
         if protocol == V3HubProviderWireProtocol::Responses
             && matches!(
                 message["type"].as_str(),
-                Some("function_call_output" | "custom_tool_call_output")
+                Some(
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "tool_result"
+                        | "tool_call_output"
+                        | "tool_message"
+                )
             )
         {
             let preserve_literal = orphan_tool_output_literals

@@ -1346,16 +1346,14 @@ fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
                 message_input_order: Some(0),
                 preserve_native_tool_output_id: true,
                 decoder_native_tool_output: true,
-                decoder_captured_tool_output: None,
+                decoder_captured_responses_tool_output: false,
                 ..Default::default()
             },
             V3HubMessageHistoryProvenance {
                 message_input_order: Some(1),
                 preserve_native_tool_output_id: true,
                 decoder_native_tool_output: true,
-                decoder_captured_tool_output: Some(json!(
-                    r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#
-                )),
+                decoder_captured_responses_tool_output: true,
                 ..Default::default()
             },
         ],
@@ -1370,4 +1368,27 @@ fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
         json!(r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#)
     );
     assert!(provenance.preserve_orphan_tool_output_literal(2));
+}
+
+#[test]
+fn tool_result_alias_captures_responses_tool_output_content_bool_provenance() {
+    let alias_image_json = r#"[{"type":"input_image","image_url":"https://example.com/a.png"}]"#;
+    let (canonical, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "tool_result",
+                "call_id": "call_alias_img",
+                "output": alias_image_json
+            }]
+        }))
+        .expect("tool_result alias with JSON image array must decode");
+    assert_eq!(
+        canonical["messages"][0]["routecodex_chat_extension"]["responses_tool_output_content"],
+        json!(alias_image_json)
+    );
+    assert_eq!(canonical["messages"][0]["content"], json!(alias_image_json));
+    let entry = provenance.message_entry(0).expect("provenance entry");
+    assert!(entry.decoder_captured_responses_tool_output);
+    assert!(entry.preserve_orphan_tool_output_literal);
 }

@@ -43,7 +43,7 @@ pub(crate) struct V3HubMessageHistoryProvenance {
     pub(crate) omit_tool_output_id: bool,
     pub(crate) preserve_native_tool_output_id: bool,
     pub(crate) decoder_native_tool_output: bool,
-    pub(crate) decoder_captured_tool_output: Option<Value>,
+    pub(crate) decoder_captured_responses_tool_output: bool,
     pub(crate) preserve_orphan_tool_output_literal: bool,
     pub(crate) restore_responses_hosted_web_search: bool,
 }
@@ -625,10 +625,18 @@ fn merge_responses_chat_histories(
                 .get(dec_idx)
                 .cloned()
                 .unwrap_or_default();
+            let result_item_id = tool_output_item_id(result);
             if let Some(pos) = (0..original_source_len).find(|&idx| {
-                !source_matched[idx]
-                    && merged[idx]["role"] == "tool"
-                    && merged[idx].get("tool_call_id") == result.get("tool_call_id")
+                if source_matched[idx]
+                    || merged[idx]["role"] != "tool"
+                    || merged[idx].get("tool_call_id") != result.get("tool_call_id")
+                {
+                    return false;
+                }
+                match (tool_output_item_id(&merged[idx]), result_item_id) {
+                    (Some(source_id), Some(incoming_id)) => source_id == incoming_id,
+                    _ => true,
+                }
             }) {
                 source_matched[pos] = true;
                 let call_id = merged[pos].get("tool_call_id").and_then(Value::as_str);
@@ -863,13 +871,16 @@ fn responses_merged_chat_canonical(
         canonical["messages"] = Value::Array(merged_messages);
         provenance = merged_provenance;
     }
-    if let Some(messages) = canonical.get_mut("messages").and_then(Value::as_array_mut) {
-        super::responses_openai_codec::resolve_orphan_responses_tool_output_media(
-            messages,
-            &mut provenance,
-        );
-    }
     Ok((canonical, provenance))
+}
+
+fn tool_output_item_id(message: &Value) -> Option<&str> {
+    message
+        .pointer("/routecodex_chat_extension/responses_item_id")
+        .or_else(|| message.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 /// The complete business contribution inbound accepts for a Responses payload.
@@ -1478,6 +1489,140 @@ mod tests {
             messages[1]["content"][0]["future_sibling"],
             json!({"occurrence":2}),
             "image siblings must follow source occurrence, not the first equal URL"
+        );
+    }
+
+    #[test]
+    fn req_inbound02_records_bool_provenance_without_resolving_orphan_literal() {
+        let alias_image_json =
+            r#"[{"type":"input_image","image_url":"https://example.com/a.png"}]"#;
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "input": [{
+                    "type": "tool_result",
+                    "call_id": "call_orphan_alias",
+                    "output": alias_image_json
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("Responses tool_result alias must normalize at ReqInbound02");
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert!(
+            messages[0]["content"].is_array(),
+            "ReqInbound02 must not resolve orphan literal before Req04: {}",
+            messages[0]
+        );
+        assert_eq!(
+            messages[0]["routecodex_chat_extension"]["responses_tool_output_content"],
+            json!(alias_image_json)
+        );
+        let entry = normalized
+            .explicit_history_pairing
+            .message_entry(0)
+            .expect("provenance entry");
+        assert!(entry.decoder_native_tool_output);
+        assert!(entry.decoder_captured_responses_tool_output);
+        assert!(!entry.preserve_orphan_tool_output_literal);
+        let provenance_debug = format!("{:?}", normalized.explicit_history_pairing);
+        assert!(
+            !provenance_debug.contains("https://example.com/a.png"),
+            "V3HubExplicitHistoryProvenance must not hold a copy of tool output business payload: {provenance_debug}"
+        );
+    }
+
+    #[test]
+    fn dual_history_tool_search_output_matches_by_item_id_and_preserves_distinct_receipts() {
+        let tool_one =
+            json!([{"type": "function", "name": "tool_one", "parameters": {"type": "object"}}]);
+        let tool_two =
+            json!([{"type": "function", "name": "tool_two", "parameters": {"type": "object"}}]);
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_one).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_item_id": "tso_1",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                }],
+                "input": [{
+                    "type": "tool_search_output",
+                    "id": "tso_2",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_two
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("distinct tool_search_output item_ids sharing call_id must append cleanly");
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(messages.len(), 2, "{messages:#?}");
+        assert_eq!(
+            messages[0]["routecodex_chat_extension"]["responses_item_id"],
+            json!("tso_1")
+        );
+        assert_eq!(
+            messages[1]["routecodex_chat_extension"]["responses_item_id"],
+            json!("tso_2")
+        );
+
+        let conflicting_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": serde_json::to_string(&tool_one).unwrap(),
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_type": "tool_search_output",
+                        "responses_output_field": "tools",
+                        "responses_item_id": "tso_1",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                }],
+                "input": [{
+                    "type": "tool_search_output",
+                    "id": "tso_1",
+                    "call_id": "call_1",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": tool_two
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(conflicting_raw)
+            .expect_err(
+                "same tool_call_id and same item_id with different tools must still conflict",
+            );
+        assert!(
+            err.contains("conflicting tool output representations"),
+            "unexpected error: {err}"
         );
     }
 }
