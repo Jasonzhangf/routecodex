@@ -985,7 +985,7 @@ fn gemini_native_request_inverse_preserves_associations_and_governed_text() {
 }
 
 #[test]
-fn gemini_selected_target_without_reasoning_validates_malformed_first_and_strips_native_thinking_config(
+fn gemini_selected_target_without_reasoning_enforces_malformed_unmapped_drop_and_capability_error(
 ) {
     let malformed = json!({
         "model": "gemini-flash",
@@ -1000,6 +1000,44 @@ fn gemini_selected_target_without_reasoning_validates_malformed_first_and_strips
     .expect_err("non-string reasoning_effort must fail MalformedOutboundField even without reasoning capability");
     assert!(err.contains("MalformedOutboundField"), "{err}");
 
+    let unmapped_non_reasoning = json!({
+        "model": "gemini-flash",
+        "messages": [{"role": "user", "content": "hi"}],
+        "reasoning_effort": "ultra"
+    });
+    let (wire_ultra, drops_ultra) =
+        project_outbound_payload_for_selected_target_protocol_with_drops(
+            &unmapped_non_reasoning,
+            V3OutboundTargetProtocol::Gemini,
+            &["text".to_string()],
+        )
+        .expect("unmapped reasoning_effort value must omit cleanly even without reasoning capability");
+    assert!(
+        wire_ultra.pointer("/generationConfig/thinkingConfig").is_none(),
+        "{wire_ultra}"
+    );
+    assert!(
+        drops_ultra.iter().any(|d| d.json_path == "$.reasoning_effort"
+            && d.reason == "unmapped_target_protocol_field_unrepresentable"),
+        "{drops_ultra:?}"
+    );
+
+    let mapped_effort = json!({
+        "model": "gemini-flash",
+        "messages": [{"role": "user", "content": "hi"}],
+        "reasoning_effort": "high"
+    });
+    let cap_err = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &mapped_effort,
+        V3OutboundTargetProtocol::Gemini,
+        &["text".to_string()],
+    )
+    .expect_err("mapped reasoning_effort targeting non-reasoning model must preserve explicit capability failure");
+    assert!(
+        cap_err.contains("missing_capability=reasoning"),
+        "expected missing_capability=reasoning, got: {cap_err}"
+    );
+
     let native_source = json!({
         "contents": [{"role": "user", "parts": [{"text": "native thinking"}]}],
         "generationConfig": {
@@ -1013,20 +1051,52 @@ fn gemini_selected_target_without_reasoning_validates_malformed_first_and_strips
     });
     let canonical = crate::hub_v1::build_v3_chat_canonical_request_from_gemini_payload(&native_source)
         .expect("Gemini inbound normalizes native thinkingConfig");
-    let (wire, drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
+    let native_cap_err = project_outbound_payload_for_selected_target_protocol_with_drops(
         &canonical,
         V3OutboundTargetProtocol::Gemini,
         &["text".to_string()],
     )
-    .expect("target without reasoning capability must omit native thinkingConfig cleanly");
+    .expect_err("mapped native thinkingConfig targeting non-reasoning model must fail capability check");
     assert!(
-        wire.pointer("/generationConfig/thinkingConfig").is_none(),
-        "thinkingConfig must not leak to target without reasoning capability: {wire}"
+        native_cap_err.contains("missing_capability=reasoning"),
+        "expected missing_capability=reasoning, got: {native_cap_err}"
     );
-    assert!(
-        drops.iter().any(|d| d.reason == "missing_target_capability_reasoning"
-            && (d.json_path.contains("thinkingBudget")
-                || d.json_path.contains("reasoning_budget_tokens"))),
-        "expected capability drop diagnostic: {drops:?}"
+
+    let (supported_wire, _) = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &mapped_effort,
+        V3OutboundTargetProtocol::Gemini,
+        &["text".to_string(), "reasoning".to_string()],
+    )
+    .expect("reasoning-capable Gemini target must project mapped reasoning_effort");
+    assert_eq!(
+        supported_wire["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+        "HIGH"
     );
+
+    for caps in [vec!["text".to_string()], vec!["text".to_string(), "reasoning".to_string()]] {
+        let empty_effort = json!({
+            "model": "gemini-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning_effort": "   "
+        });
+        let err = project_outbound_payload_for_selected_target_protocol_with_drops(
+            &empty_effort,
+            V3OutboundTargetProtocol::Gemini,
+            &caps,
+        )
+        .expect_err("whitespace-only reasoning_effort must fail MalformedOutboundField");
+        assert!(err.contains("MalformedOutboundField"), "{err}");
+
+        let empty_native_level = json!({
+            "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+            "generationConfig": {"thinkingConfig": {"thinkingLevel": "  "}}
+        });
+        let err = project_outbound_payload_for_selected_target_protocol_with_drops(
+            &empty_native_level,
+            V3OutboundTargetProtocol::Gemini,
+            &caps,
+        )
+        .expect_err("whitespace-only native thinkingLevel must fail MalformedOutboundField");
+        assert!(err.contains("MalformedOutboundField"), "{err}");
+    }
 }

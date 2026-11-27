@@ -153,7 +153,8 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
             }
         }
     }
-    filter_unknown_responses_output_items_in_event_response(&mut event)?;
+    let terminal_original_slots =
+        filter_unknown_responses_output_items_in_event_response(&mut event)?;
     let transport_object = V3ResponsesSseTransportObject::new(
         object.event_name().map(ToOwned::to_owned),
         event.clone(),
@@ -175,12 +176,13 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     observation
         .record_provider_event_json(&projected_event)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    apply_v3_typed_responses_event(&projected_event, reducer)
+    apply_v3_typed_responses_event(&projected_event, reducer, &terminal_original_slots)
 }
 
 fn apply_v3_typed_responses_event(
     event: &Value,
     reducer: &mut V3ResponsesSseReducerState,
+    terminal_original_slots: &[usize],
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     if let Some(error) = extract_v3_provider_event_error(event) {
         return Err(error);
@@ -206,7 +208,8 @@ fn apply_v3_typed_responses_event(
     match reducer.terminal {
         Some(V3ResponsesSseTerminalState::Completed)
         | Some(V3ResponsesSseTerminalState::Incomplete) => {
-            build_typed_responses_terminal_response(event, reducer).map(Some)
+            build_typed_responses_terminal_response(event, reducer, terminal_original_slots)
+                .map(Some)
         }
         Some(V3ResponsesSseTerminalState::Failed)
         | Some(V3ResponsesSseTerminalState::Cancelled) => {
@@ -226,19 +229,23 @@ fn apply_v3_typed_responses_event(
 
 fn filter_unknown_responses_output_items_in_event_response(
     event: &mut Value,
-) -> Result<(), V3ResponsesRelayRuntimeError> {
+) -> Result<Vec<usize>, V3ResponsesRelayRuntimeError> {
     let Some(output) = event
         .get_mut("response")
         .and_then(Value::as_object_mut)
         .and_then(|response| response.get_mut("output"))
         .and_then(Value::as_array_mut)
     else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let mut retained = Vec::with_capacity(output.len());
-    for item in output.drain(..) {
+    let mut retained_slots = Vec::with_capacity(output.len());
+    for (original_index, item) in output.drain(..).enumerate() {
         match classify_v3_responses_sse_output_item(&item) {
-            Ok(_) => retained.push(item),
+            Ok(_) => {
+                retained.push(item);
+                retained_slots.push(original_index);
+            }
             Err(V3ResponsesSseTreeError::UnsupportedItemType { item_type }) => {
                 eprintln!(
                     "[v3-sse-warning] protocol=responses stage=responses_provider_event_codec item_type={item_type:?} reason=unregistered_output_item_ignored"
@@ -252,7 +259,7 @@ fn filter_unknown_responses_output_items_in_event_response(
         }
     }
     *output = retained;
-    Ok(())
+    Ok(retained_slots)
 }
 
 fn is_supported_typed_responses_event(event_type: &str) -> bool {
@@ -302,6 +309,7 @@ fn is_supported_typed_responses_event(event_type: &str) -> bool {
 fn build_typed_responses_terminal_response(
     event: &Value,
     reducer: &V3ResponsesSseReducerState,
+    terminal_original_slots: &[usize],
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let mut response = event
         .get("response")
@@ -333,12 +341,29 @@ fn build_typed_responses_terminal_response(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let mut output_slots: Vec<Option<usize>> = (0..output.len())
+        .map(|index| {
+            terminal_original_slots
+                .get(index)
+                .copied()
+                .or_else(|| {
+                    output[index]
+                        .get("output_index")
+                        .and_then(Value::as_u64)
+                        .and_then(|value| usize::try_from(value).ok())
+                })
+                .or_else(|| terminal_original_slots.is_empty().then_some(index))
+        })
+        .collect();
     for item in reducer
         .items
         .iter()
         .map(|item| item.item().to_normalized_value())
     {
-        let output_index = item.get("output_index").and_then(Value::as_u64);
+        let output_index = item
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok());
         let identity = item
             .get("call_id")
             .or_else(|| item.get("id"))
@@ -352,20 +377,37 @@ fn build_typed_responses_terminal_response(
                     == Some(identity)
             }) {
                 output[index] = item;
+                output_slots[index] = output_index.or(output_slots[index]);
                 continue;
             }
         }
-        if let Some(output_index) = output_index.and_then(|value| usize::try_from(value).ok()) {
-            if let Some(index) = output.iter().position(|existing| {
-                existing.get("output_index").and_then(Value::as_u64) == Some(output_index as u64)
+        if let Some(output_index) = output_index {
+            if let Some(index) = output.iter().enumerate().position(|(idx, existing)| {
+                existing
+                    .get("output_index")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    == Some(output_index)
+                    || (output_slots.get(idx).copied().flatten() == Some(output_index)
+                        && existing.get("type") == item.get("type"))
             }) {
-                output[index] = item;
+                if typed_output_item_has_payload(&item)
+                    || !typed_output_item_has_payload(&output[index])
+                {
+                    output[index] = item;
+                }
+                output_slots[index] = Some(output_index);
                 continue;
             }
-            let insert_at = output_index.min(output.len());
+            let insert_at = output_slots
+                .iter()
+                .position(|slot| slot.is_some_and(|slot| slot >= output_index))
+                .unwrap_or(output.len());
             output.insert(insert_at, item);
+            output_slots.insert(insert_at, Some(output_index));
         } else {
             output.push(item);
+            output_slots.push(None);
         }
     }
     // A provider may send text deltas without output_item events, then close
@@ -408,6 +450,37 @@ fn build_typed_responses_terminal_response(
         );
     }
     Ok(response)
+}
+
+fn typed_output_item_has_payload(item: &Value) -> bool {
+    match item.get("type").and_then(Value::as_str) {
+        Some("message") => item
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|parts| !parts.is_empty()),
+        Some("refusal") => item
+            .get("refusal")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty()),
+        Some("output_text") => item
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty()),
+        Some("function_call") => item
+            .get("arguments")
+            .and_then(Value::as_str)
+            .is_some_and(|args| !args.is_empty()),
+        Some("custom_tool_call") => item.get("input").is_some_and(|input| !input.is_null()),
+        Some("reasoning") => {
+            item.get("summary")
+                .and_then(Value::as_array)
+                .is_some_and(|summary| !summary.is_empty())
+                || item
+                    .get("content")
+                    .is_some_and(|content| !content.is_null())
+        }
+        _ => true,
+    }
 }
 
 pub(super) fn parse_v3_runtime_sse_frame_fields(
@@ -715,6 +788,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
                 }
             }),
             &mut reducer,
+            &[],
         )
         .expect("an output-cap response.incomplete is valid partial output")
         .expect("response.incomplete must project a terminal response");
@@ -730,6 +804,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
                 "response": {"id": "resp_missing_usage", "status": "completed"}
             }),
             &mut reducer,
+            &[],
         )
         .expect("response.completed without usage must remain valid")
         .expect("response.completed must be terminal");
@@ -756,6 +831,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
                 }
             }),
             &mut reducer,
+            &[],
         )
         .expect("output-cap incomplete terminal must be admitted")
         .expect("response.incomplete must be terminal");
@@ -781,6 +857,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
                 }
             }),
             &mut reducer,
+            &[],
         )
         .expect("content_filter is representable")
         .expect("incomplete is terminal");
@@ -802,7 +879,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
         ] {
             let mut reducer = V3ResponsesSseReducerState::default();
-            let response = apply_v3_typed_responses_event(&payload, &mut reducer)
+            let response = apply_v3_typed_responses_event(&payload, &mut reducer, &[])
                 .expect("reason is opaque business data")
                 .expect("incomplete is terminal");
             assert_eq!(response["status"], "incomplete");
@@ -826,6 +903,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
                 }
             }),
             &mut reducer,
+            &[],
         )
         .expect_err("response.failed must remain an explicit provider event failure");
         assert!(error.to_string().contains("upstream model crashed"));

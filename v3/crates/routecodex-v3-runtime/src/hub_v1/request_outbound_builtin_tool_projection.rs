@@ -316,6 +316,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     let mut normalized_tool_indexes = HashMap::<String, usize>::new();
     let mut web_search_options = Map::new();
     let mut has_web_search = false;
+    let mut dropped_hosted_tool_search = false;
     for (index, tool) in tools.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
         if tool_type == Some("namespace") {
@@ -365,8 +366,9 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             // gpt 模型 + provider 无 web_search 能力：web_search 工具声明与
             // web_search_options 完全移除（无能力 provider 不收到搜索工具，
             // 避免未知字段/误调用）。
-        } else {
-            let normalized = normalize_openai_chat_provider_tool_with_drops(tool, index, drops)?;
+        } else if let Some(normalized) =
+            normalize_openai_chat_provider_tool_with_drops(tool, index, drops)?
+        {
             push_provider_tool_with_refresh_precedence(
                 &mut normalized_tools,
                 &mut normalized_tool_indexes,
@@ -374,10 +376,35 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
                 "openai_chat",
                 &refreshed_provider_tool_names,
             )?;
+        } else if tool_type == Some("tool_search") {
+            dropped_hosted_tool_search = true;
         }
     }
     if !normalized_tools.is_empty() {
-        root.insert("tools".to_string(), Value::Array(normalized_tools));
+        root.insert("tools".to_string(), Value::Array(normalized_tools.clone()));
+    }
+    if dropped_hosted_tool_search {
+        let retains_function_tool_search = normalized_tools.iter().any(|item| {
+            item.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                == Some("tool_search")
+                || item.get("name").and_then(Value::as_str) == Some("tool_search")
+        });
+        if root.get("tool_choice").is_some_and(|choice| {
+            is_explicit_hosted_tool_search_choice(choice)
+                || (!retains_function_tool_search && is_named_tool_search_choice(choice))
+        }) {
+            if let Some(choice) = root.remove("tool_choice") {
+                drops.push(V3ProjectionDropRecord::new(
+                    "openai_chat",
+                    "$.tool_choice",
+                    "unmapped_target_protocol_field_unrepresentable",
+                    choice,
+                    "project_openai_chat_provider_tools_for_web_search_mode_recording",
+                ));
+            }
+        }
     }
     if has_web_search {
         let projected = Value::Object(web_search_options);
@@ -465,9 +492,10 @@ fn merge_openai_chat_web_search_options(
             )
         })?;
         // openai_chat hosted web_search 只能表达文本结果（web_search_options 无
-        // search_content_types 字段）。非 "text"/"image" 内容类型在无对应映射时
-        // 仅记录投影诊断并省略，不阻断 web_search_options 主体投影；非字符串或空元素
-        // 仍按已注册字段格式错误拦截。
+        // search_content_types 字段）。非 "text" 内容类型（如 "image" 或未来类型）
+        // 在无对应映射时记录一条请求作用域投影诊断并省略，不阻断 web_search_options
+        // 主体投影；非字符串或空元素仍按已注册字段格式错误拦截。
+        let mut has_unmapped_content_type = false;
         for value in values {
             let content_type = value
                 .as_str()
@@ -478,15 +506,18 @@ fn merge_openai_chat_web_search_options(
                         "MalformedOutboundField target_protocol=openai_chat path={path}.search_content_types"
                     )
                 })?;
-            if !matches!(content_type, "text" | "image") {
-                drops.push(V3ProjectionDropRecord::new(
-                    "openai_chat",
-                    format!("{path}.search_content_types"),
-                    "unmapped_target_protocol_field_unrepresentable",
-                    value.clone(),
-                    "merge_openai_chat_web_search_options",
-                ));
+            if content_type != "text" {
+                has_unmapped_content_type = true;
             }
+        }
+        if has_unmapped_content_type {
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                format!("{path}.search_content_types"),
+                "unmapped_target_protocol_field_unrepresentable",
+                search_content_types.clone(),
+                "merge_openai_chat_web_search_options",
+            ));
         }
     }
     for key in ["search_context_size", "user_location"] {
@@ -503,28 +534,20 @@ fn merge_openai_chat_web_search_options(
     Ok(())
 }
 
-pub(super) fn normalize_openai_chat_provider_tool(
-    tool: &Value,
-    index: usize,
-) -> Result<Value, String> {
-    let mut drops = Vec::new();
-    normalize_openai_chat_provider_tool_with_drops(tool, index, &mut drops)
-}
-
 pub(super) fn normalize_openai_chat_provider_tool_with_drops(
     tool: &Value,
     index: usize,
     drops: &mut Vec<V3ProjectionDropRecord>,
-) -> Result<Value, String> {
+) -> Result<Option<Value>, String> {
     let Some(row) = tool.as_object() else {
-        return Ok(tool.clone());
+        return Ok(Some(tool.clone()));
     };
     let path = format!("$.tools[{index}]");
     match row.get("type").and_then(Value::as_str) {
-        Some("function") => normalize_openai_chat_function_tool(row, &path),
+        Some("function") => normalize_openai_chat_function_tool(row, &path).map(Some),
         Some("tool_search") => normalize_openai_chat_tool_search(row, &path, drops),
-        Some("custom") => normalize_openai_chat_custom_tool(row, &path, drops),
-        _ => Ok(tool.clone()),
+        Some("custom") => normalize_openai_chat_custom_tool(row, &path, drops).map(Some),
+        _ => Ok(Some(tool.clone())),
     }
 }
 
@@ -584,7 +607,29 @@ fn normalize_openai_chat_tool_search(
     row: &Map<String, Value>,
     path: &str,
     drops: &mut Vec<V3ProjectionDropRecord>,
-) -> Result<Value, String> {
+) -> Result<Option<Value>, String> {
+    if let Some(execution) = row.get("execution") {
+        let mode = execution
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                format!("MalformedOutboundField target_protocol=openai_chat path={path}.execution")
+            })?;
+        if mode != "client" {
+            // 仅 client-executed tool_search 拥有合法 function 兼容性映射；
+            // 显式 server-executed（或其他非 client 模式）在 Chat wire 无等效表示，
+            // 不能伪装成客户端可调用函数工具，只能诊断并省略该声明。
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                path.to_string(),
+                "unmapped_target_protocol_field_unrepresentable",
+                Value::Object(row.clone()),
+                "normalize_openai_chat_tool_search",
+            ));
+            return Ok(None);
+        }
+    }
     for (key, value) in row {
         if !matches!(
             key.as_str(),
@@ -599,24 +644,6 @@ fn normalize_openai_chat_tool_search(
             ));
         }
     }
-    if let Some(execution) = row.get("execution") {
-        let mode = execution
-            .as_str()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                format!("MalformedOutboundField target_protocol=openai_chat path={path}.execution")
-            })?;
-        if mode != "client" {
-            drops.push(V3ProjectionDropRecord::new(
-                "openai_chat",
-                format!("{path}.execution"),
-                "unmapped_target_protocol_field_unrepresentable",
-                execution.clone(),
-                "normalize_openai_chat_tool_search",
-            ));
-        }
-    }
     let mut function_row = Map::new();
     function_row.insert("type".to_string(), Value::String("function".to_string()));
     function_row.insert("name".to_string(), Value::String("tool_search".to_string()));
@@ -625,7 +652,30 @@ fn normalize_openai_chat_tool_search(
             function_row.insert(key.to_string(), value.clone());
         }
     }
-    normalize_openai_chat_function_tool(&function_row, path)
+    normalize_openai_chat_function_tool(&function_row, path).map(Some)
+}
+
+fn is_explicit_hosted_tool_search_choice(choice: &Value) -> bool {
+    choice
+        .as_object()
+        .and_then(|map| map.get("type"))
+        .and_then(Value::as_str)
+        == Some("tool_search")
+}
+
+fn is_named_tool_search_choice(choice: &Value) -> bool {
+    match choice {
+        Value::Object(map) => {
+            is_explicit_hosted_tool_search_choice(choice)
+                || map
+                    .get("function")
+                    .and_then(|value| value.get("name"))
+                    .and_then(Value::as_str)
+                    == Some("tool_search")
+                || map.get("name").and_then(Value::as_str) == Some("tool_search")
+        }
+        _ => false,
+    }
 }
 
 fn normalize_openai_chat_function_tool(

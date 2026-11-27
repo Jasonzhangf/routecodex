@@ -28,6 +28,7 @@ const ADJUST_PROVIDER_PRIVATE_REQUEST_NODE: &str = "adjust_provider_private_requ
 struct AdjustProviderPrivateRequestOutcome {
     opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
     custom_tool_function_binding: Option<CustomToolFunctionBinding>,
+    projection_drops: Vec<crate::projection_drop_log::V3ProjectionDropRecord>,
 }
 
 #[derive(Debug)]
@@ -70,34 +71,37 @@ impl Operator for AdjustProviderPrivateRequestOperator {
     }
 
     fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
-        let result = apply_v3_provider_req_compat_to_provider_payload(
+        let result = apply_v3_provider_req_compat_to_provider_payload_with_drops(
             input,
             &self.selected_target,
             self.provider_protocol,
             &self.profile,
         )
-        .map(|(mut payload, custom_tool_function_binding)| {
-            let opencode_zen_tcm_bridge = if self
-                .profile
-                .as_str()
-                .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
-                && self.entry_protocol == super::V3HubEntryProtocol::Responses
-                && self.provider_protocol == V3HubProviderWireProtocol::OpenAiChat
-                && self.execution_mode == super::V3HubExecutionMode::Relay
-            {
-                compile_opencode_zen_tcm_bridge(&self.governed_source, &payload)
-            } else {
-                None
-            };
-            if let Some(binding) = &opencode_zen_tcm_bridge {
-                apply_opencode_zen_tcm_request(&mut payload, binding);
-            }
-            let outcome = AdjustProviderPrivateRequestOutcome {
-                opencode_zen_tcm_bridge,
-                custom_tool_function_binding,
-            };
-            (payload, outcome)
-        })
+        .map(
+            |(mut payload, custom_tool_function_binding, projection_drops)| {
+                let opencode_zen_tcm_bridge = if self
+                    .profile
+                    .as_str()
+                    .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
+                    && self.entry_protocol == super::V3HubEntryProtocol::Responses
+                    && self.provider_protocol == V3HubProviderWireProtocol::OpenAiChat
+                    && self.execution_mode == super::V3HubExecutionMode::Relay
+                {
+                    compile_opencode_zen_tcm_bridge(&self.governed_source, &payload)
+                } else {
+                    None
+                };
+                if let Some(binding) = &opencode_zen_tcm_bridge {
+                    apply_opencode_zen_tcm_request(&mut payload, binding);
+                }
+                let outcome = AdjustProviderPrivateRequestOutcome {
+                    opencode_zen_tcm_bridge,
+                    custom_tool_function_binding,
+                    projection_drops,
+                };
+                (payload, outcome)
+            },
+        )
         .map_err(|error| AdjustProviderPrivateRequestError { error });
         let mut side_output =
             self.side_output.outcome.lock().map_err(|_| {
@@ -182,7 +186,8 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     let output = output
         .map_err(|error| classify_v3_provider_compat_error("request", &profile, error.message))?;
     let namespace_registry = input.namespace_registry.clone();
-    let drops = input.drops.clone();
+    let mut drops = input.drops.clone();
+    drops.extend(outcome.projection_drops);
     Ok(ProviderReqCompat06Projected {
         node: ProviderReqCompat06ProviderCompat {
             previous: input,
@@ -209,12 +214,40 @@ pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> 
 }
 
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
-    mut payload: Value,
+    payload: Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
-    project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
+    let (projected, binding, _drops) = apply_v3_provider_req_compat_to_provider_payload_with_drops(
+        payload,
+        selected,
+        provider_protocol,
+        profile,
+    )?;
+    Ok((projected, binding))
+}
+
+pub(crate) fn apply_v3_provider_req_compat_to_provider_payload_with_drops(
+    mut payload: Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    profile: &V3ProviderCompatProfileId,
+) -> Result<
+    (
+        Value,
+        Option<CustomToolFunctionBinding>,
+        Vec<crate::projection_drop_log::V3ProjectionDropRecord>,
+    ),
+    V3ProviderCompatError,
+> {
+    let mut drops = Vec::new();
+    project_reasoning_effort_for_selected_target_with_drops(
+        &mut payload,
+        selected,
+        provider_protocol,
+        &mut drops,
+    )?;
     let custom_tool_function_binding = (profile
         .as_str()
         .eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE)
@@ -253,7 +286,12 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     {
         image_placeholder::project_default_text_attempt_images(&mut result, provider_protocol);
     }
-    project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
+    project_reasoning_effort_for_selected_target_with_drops(
+        &mut result,
+        selected,
+        provider_protocol,
+        &mut drops,
+    )?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);
     drop_glm_unsupported_chat_fields(&mut result, selected, provider_protocol);
     project_provider_declared_output_cap(&mut result, selected, provider_protocol);
@@ -279,7 +317,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
             V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::Gemini => {}
         }
     }
-    Ok((result, custom_tool_function_binding))
+    Ok((result, custom_tool_function_binding, drops))
 }
 
 #[path = "provider_req_compat_06_output_cap.rs"]
@@ -292,7 +330,7 @@ pub(crate) use image_placeholder::project_image_part;
 
 #[path = "provider_req_compat_06_reasoning_effort.rs"]
 mod provider_req_compat_06_reasoning_effort;
-use provider_req_compat_06_reasoning_effort::project_reasoning_effort_for_selected_target;
+use provider_req_compat_06_reasoning_effort::project_reasoning_effort_for_selected_target_with_drops;
 
 #[path = "provider_req_compat_06_deepseek.rs"]
 mod provider_req_compat_06_deepseek;
@@ -529,23 +567,24 @@ mod tests {
     }
 
     #[test]
-    fn gemini_provider_req_omits_reasoning_effort_without_selected_reasoning_capability() {
-        let req07 = relay_req07_for_entry_with_candidate(
+    fn gemini_provider_req_omits_unmapped_effort_and_rejects_mapped_effort_without_reasoning_capability(
+    ) {
+        let req07_ultra = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
                 "messages": [{"role":"user","content":"think"}],
-                "reasoning_effort": "high"
+                "reasoning_effort": "ultra"
             }),
             V3HubProviderWireProtocol::Gemini,
             selected_candidate(V3HubProviderWireProtocol::Gemini),
         )
-        .expect("Gemini Node07 must warn/omit unrepresentable reasoning_effort instead of failing");
-        assert!(req07
+        .expect("Gemini Node07 must warn/omit unmapped reasoning_effort instead of failing");
+        assert!(req07_ultra
             .drops
             .iter()
             .any(|drop| drop.json_path == "$.reasoning_effort"));
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07_ultra)
             .expect("Gemini Node06 compat must accept omitted reasoning_effort");
         assert!(req_compat
             .provider_semantic_payload()
@@ -555,6 +594,22 @@ mod tests {
             .provider_semantic_payload()
             .pointer("/generationConfig/thinkingConfig")
             .is_none());
+
+        let err = relay_req07_for_entry_with_candidate(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"think"}],
+                "reasoning_effort": "high"
+            }),
+            V3HubProviderWireProtocol::Gemini,
+            selected_candidate(V3HubProviderWireProtocol::Gemini),
+        )
+        .expect_err("mapped reasoning_effort without selected reasoning capability must preserve explicit capability failure");
+        assert!(
+            err.reason.contains("missing_capability=reasoning"),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -1561,6 +1616,43 @@ mod tests {
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning"]["effort"],
             "low"
+        );
+
+        let mut unmapped_req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "ultra"}
+            }),
+            V3HubProviderWireProtocol::Responses,
+        );
+        unmapped_req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
+        unmapped_req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
+        unmapped_req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
+        unmapped_req07
+            .previous
+            .selected_target
+            .compatibility_profile = Some("compat:passthrough".to_string());
+        let unmapped_projected =
+            build_provider_req_compat_06_from_v3_hub_req_outbound_07(unmapped_req07)
+                .expect("unmapped OpenCode Zen effort must omit cleanly rather than clamp");
+        assert!(
+            unmapped_projected
+                .node
+                .provider_semantic_payload()
+                .get("reasoning")
+                .is_none(),
+            "{}",
+            unmapped_projected.node.provider_semantic_payload()
+        );
+        assert!(
+            unmapped_projected
+                .drops
+                .iter()
+                .any(|drop| drop.json_path == "$.reasoning.effort"),
+            "{:?}",
+            unmapped_projected.drops
         );
     }
 

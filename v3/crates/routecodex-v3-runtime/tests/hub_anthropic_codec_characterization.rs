@@ -2912,11 +2912,17 @@ fn anthropic_terminal_projection_rejects_missing_or_non_string_and_tolerates_qui
             "content":[{"type":"text","text":"sequence"}],
             "stop_reason":"stop_sequence"
         }),
+        json!({
+            "id":"msg_unknown_stop",
+            "role":"assistant",
+            "content":[{"type":"text","text":"unknown"}],
+            "stop_reason":"future_reason"
+        }),
     ];
 
     for payload in malformed {
         let error = project_v3_anthropic_message_as_responses_response(&payload)
-            .expect_err("missing/non-string stop_reason or missing stop_sequence must fail at the Anthropic codec owner");
+            .expect_err("missing/non-string/unknown stop_reason or missing stop_sequence must fail at the Anthropic codec owner");
         let message = error.to_string();
         assert!(
             message.contains("stop_reason") || message.contains("stop_sequence"),
@@ -2924,21 +2930,13 @@ fn anthropic_terminal_projection_rejects_missing_or_non_string_and_tolerates_qui
         );
     }
 
-    for tolerated in [
-        json!({
-            "id":"msg_unknown_stop",
-            "role":"assistant",
-            "content":[{"type":"text","text":"unknown"}],
-            "stop_reason":"future_reason"
-        }),
-        json!({
-            "id":"msg_contradictory_sequence",
-            "role":"assistant",
-            "content":[{"type":"text","text":"done"}],
-            "stop_reason":"end_turn",
-            "stop_sequence":"unexpected"
-        }),
-    ] {
+    for tolerated in [json!({
+        "id":"msg_contradictory_sequence",
+        "role":"assistant",
+        "content":[{"type":"text","text":"done"}],
+        "stop_reason":"end_turn",
+        "stop_sequence":"unexpected"
+    })] {
         let projected = project_v3_anthropic_message_as_responses_response(&tolerated)
             .expect("terminal quirk must not block deliverable content");
         assert_eq!(projected["status"], "completed");

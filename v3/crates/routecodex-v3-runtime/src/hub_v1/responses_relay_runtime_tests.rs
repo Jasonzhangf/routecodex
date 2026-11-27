@@ -1482,4 +1482,28 @@ async fn responses_sse_materializer_rejects_cross_protocol_midstream_and_tolerat
         empty_err.to_string().contains("provider_response_empty"),
         "{empty_err}"
     );
+
+    let refusal_only = Box::pin(stream::iter(vec![
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refusal\",\"status\":\"completed\",\"output\":[{\"type\":\"refusal\",\"refusal\":\"policy decline\"}]}}\n\n".to_vec()),
+    ]));
+    let refusal_mat = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        refusal_only,
+    )
+    .await
+    .expect("refusal output item must be preserved as deliverable response");
+    assert_eq!(refusal_mat["output"][0]["type"], "refusal");
+    assert_eq!(refusal_mat["output"][0]["refusal"], "policy decline");
+
+    let refusal_plus_text = Box::pin(stream::iter(vec![
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refusal_mix\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]},{\"type\":\"refusal\",\"refusal\":\"partial decline\"}]}}\n\n".to_vec()),
+    ]));
+    let mix_mat = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        refusal_plus_text,
+    )
+    .await
+    .expect("refusal alongside text must keep both items");
+    assert_eq!(mix_mat["output"].as_array().unwrap().len(), 2);
+    assert_eq!(mix_mat["output"][1]["type"], "refusal");
 }

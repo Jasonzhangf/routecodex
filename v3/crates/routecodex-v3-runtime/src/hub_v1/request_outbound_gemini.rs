@@ -16,6 +16,7 @@ fn project_gemini_compatible_fields_for_selected_target(
     model_capabilities: &[String],
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
+    validate_gemini_preprojection_thinking_fields(source, drops)?;
     let root_effort = source.get("reasoning_effort").cloned();
     let root_budget = source.get("reasoning_budget_tokens").cloned();
     let root_include = source.get("reasoning_include_thoughts").cloned();
@@ -28,7 +29,6 @@ fn project_gemini_compatible_fields_for_selected_target(
     let had_native_include_thoughts = source
         .pointer("/generationConfig/thinkingConfig/includeThoughts")
         .is_some();
-    validate_gemini_preprojection_thinking_fields(source, drops)?;
     project_gemini_compatible_fields_inner(source, drops)?;
     validate_gemini_thinking_config_for_selected_target(
         source,
@@ -958,6 +958,31 @@ fn validate_gemini_preprojection_thinking_fields(
             );
         }
     }
+    let mut drop_unmapped_root_effort = false;
+    if let Some(effort) = source.get("reasoning_effort") {
+        let trimmed = effort
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                "MalformedOutboundField target_protocol=gemini path=$.reasoning_effort".to_string()
+            })?;
+        if !matches!(trimmed, "minimal" | "low" | "medium" | "high") {
+            drops.push(V3ProjectionDropRecord::new(
+                "gemini",
+                "$.reasoning_effort",
+                "unmapped_target_protocol_field_unrepresentable",
+                effort.clone(),
+                "project_gemini_reasoning_effort",
+            ));
+            drop_unmapped_root_effort = true;
+        }
+    }
+    if drop_unmapped_root_effort {
+        if let Some(root) = source.as_object_mut() {
+            root.remove("reasoning_effort");
+        }
+    }
     if let Some(include_thoughts) = source.get("reasoning_include_thoughts") {
         if include_thoughts.as_bool().is_none() {
             return Err(
@@ -1071,9 +1096,6 @@ fn validate_gemini_thinking_config_for_selected_target(
     {
         requested.push(("$.reasoning_include_thoughts", value.clone()));
     }
-    if let Some(value) = source.pointer("/reasoning_thinking_mode") {
-        requested.push(("$.reasoning_thinking_mode", value.clone()));
-    }
     if had_native_thinking_level || root_effort.is_none() {
         if let Some(value) = source.pointer("/generationConfig/thinkingConfig/thinkingLevel") {
             requested.push((
@@ -1098,25 +1120,17 @@ fn validate_gemini_thinking_config_for_selected_target(
             ));
         }
     }
-    for (path, value) in requested {
-        drops.push(V3ProjectionDropRecord::new(
-            "gemini",
-            path,
-            "missing_target_capability_reasoning",
-            value,
-            "validate_gemini_thinking_config_for_selected_target",
-        ));
+    if requested.is_empty() || gemini_selected_target_supports_reasoning(model_capabilities) {
+        return Ok(());
     }
-    if let Some(root) = source.as_object_mut() {
-        root.remove("reasoning_effort");
-        root.remove("reasoning_budget_tokens");
-        root.remove("reasoning_include_thoughts");
-        root.remove("reasoning_thinking_mode");
-    }
-    remove_gemini_thinking_config_field(source, "thinkingLevel");
-    remove_gemini_thinking_config_field(source, "thinkingBudget");
-    remove_gemini_thinking_config_field(source, "includeThoughts");
-    Ok(())
+    Err(format!(
+        "UnmappedOutboundFields target_protocol=gemini paths={} missing_capability=reasoning",
+        requested
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect::<Vec<_>>()
+            .join(",")
+    ))
 }
 
 fn remove_gemini_thinking_config_field(source: &mut Value, field: &str) {
@@ -1147,6 +1161,7 @@ fn validate_gemini_thinking_level_value(
     let trimmed = value
         .as_str()
         .map(str::trim)
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("MalformedOutboundField target_protocol=gemini path={path}"))?;
     match trimmed.to_ascii_lowercase().as_str() {
         "minimal" | "low" | "medium" | "high" => Ok(true),
@@ -1249,9 +1264,13 @@ fn project_gemini_reasoning_effort(
     effort: Value,
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
-    let value = effort.as_str().map(str::trim).ok_or_else(|| {
-        "MalformedOutboundField target_protocol=gemini path=$.reasoning_effort".to_string()
-    })?;
+    let value = effort
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "MalformedOutboundField target_protocol=gemini path=$.reasoning_effort".to_string()
+        })?;
     let level = match value {
         "minimal" | "low" | "medium" | "high" => value.to_ascii_uppercase(),
         _ => {

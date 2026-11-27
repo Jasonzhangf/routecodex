@@ -1695,4 +1695,93 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
     )
     .expect_err("non-string tool_search.execution must fail MalformedOutboundField");
     assert!(err.contains("execution"), "{err}");
+
+    let (text_image_wire, text_image_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [{
+                    "type": "web_search",
+                    "external_web_access": true,
+                    "search_content_types": ["text", "image"]
+                }]
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("standard text+image search_content_types must project web_search_options cleanly");
+    assert!(text_image_wire.get("web_search_options").is_some());
+    assert!(
+        text_image_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0].search_content_types"),
+        "image search_content_types omission must emit scoped drop record: {text_image_drops:?}"
+    );
+
+    let (server_tool_search_wire, server_tool_search_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "tool_search", "execution": "server"},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": {"type": "tool_search"}
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("server-executed tool_search without Chat target must be omitted cleanly");
+    assert!(
+        server_tool_search_wire["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["function"]["name"] != "tool_search"),
+        "server-executed tool_search must not become client-callable function: {server_tool_search_wire}"
+    );
+    assert!(server_tool_search_wire.get("tool_choice").is_none());
+    assert!(
+        server_tool_search_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0]"),
+        "expected drop record for unrepresentable server tool_search: {server_tool_search_drops:?}"
+    );
+
+    let (mixed_fn_wire, mixed_fn_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "tool_search", "execution": "server"},
+                    {"type": "function", "function": {"name": "tool_search", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": {"type": "function", "function": {"name": "tool_search"}}
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("omitting hosted server tool_search must preserve colocated function named tool_search and its forced tool_choice");
+    let mixed_tools = mixed_fn_wire["tools"].as_array().unwrap();
+    assert_eq!(mixed_tools.len(), 1, "{mixed_fn_wire}");
+    assert_eq!(mixed_tools[0]["function"]["name"], "tool_search");
+    assert_eq!(
+        mixed_fn_wire["tool_choice"],
+        json!({"type": "function", "function": {"name": "tool_search"}}),
+        "ordinary function tool_choice must be preserved when hosted tool_search is omitted: {mixed_fn_wire}"
+    );
+    assert!(
+        mixed_fn_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0]"),
+        "{mixed_fn_drops:?}"
+    );
+    assert!(
+        !mixed_fn_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "ordinary function tool_choice must not be dropped: {mixed_fn_drops:?}"
+    );
 }

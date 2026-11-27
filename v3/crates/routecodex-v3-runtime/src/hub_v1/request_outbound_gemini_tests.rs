@@ -216,18 +216,19 @@ fn gemini_wire_reasoning_effort_overrides_existing_thinking_level() {
 }
 
 #[test]
-fn gemini_selected_target_omits_reasoning_effort_without_reasoning_capability_and_records_drop() {
-    let payload = json!({
+fn gemini_selected_target_omits_unmapped_effort_and_rejects_mapped_effort_without_reasoning_capability(
+) {
+    let unmapped = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
-        "reasoning_effort": "high"
+        "reasoning_effort": "ultra"
     });
     let (request, drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
-        &payload,
+        &unmapped,
         V3OutboundTargetProtocol::Gemini,
         &["text".to_string(), "tools".to_string()],
     )
-    .expect("Gemini missing reasoning capability must warn/omit instead of blocking request");
+    .expect("Gemini unmapped reasoning_effort must warn/omit instead of blocking request");
     assert!(request.get("reasoning_effort").is_none(), "{request}");
     assert!(
         request
@@ -241,10 +242,23 @@ fn gemini_selected_target_omits_reasoning_effort_without_reasoning_capability_an
             .any(|drop| drop.json_path == "$.reasoning_effort"),
         "expected drop record for $.reasoning_effort: {drops:?}"
     );
+
+    let mapped = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "reasoning_effort": "high"
+    });
+    let err = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &mapped,
+        V3OutboundTargetProtocol::Gemini,
+        &["text".to_string(), "tools".to_string()],
+    )
+    .expect_err("mapped reasoning_effort on non-reasoning target must preserve capability error");
+    assert!(err.contains("missing_capability=reasoning"), "{err}");
 }
 
 #[test]
-fn gemini_selected_target_omits_thinking_budget_without_reasoning_capability_and_records_drop() {
+fn gemini_selected_target_rejects_mapped_thinking_budget_without_reasoning_capability() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
@@ -254,25 +268,13 @@ fn gemini_selected_target_omits_thinking_budget_without_reasoning_capability_and
             }
         }
     });
-    let (request, drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
+    let err = project_outbound_payload_for_selected_target_protocol_with_drops(
         &payload,
         V3OutboundTargetProtocol::Gemini,
         &["text".to_string(), "tools".to_string()],
     )
-    .expect("Gemini missing reasoning capability must omit thinkingBudget and preserve contents");
-    assert!(
-        request
-            .pointer("/generationConfig/thinkingConfig/thinkingBudget")
-            .is_none(),
-        "{request}"
-    );
-    assert_eq!(request["contents"][0]["parts"][0]["text"], "think");
-    assert!(
-        drops
-            .iter()
-            .any(|drop| drop.json_path == "$.generationConfig.thinkingConfig.thinkingBudget"),
-        "expected drop record for thinkingBudget: {drops:?}"
-    );
+    .expect_err("mapped thinkingBudget without reasoning capability must fail explicitly");
+    assert!(err.contains("missing_capability=reasoning"), "{err}");
 }
 
 #[test]

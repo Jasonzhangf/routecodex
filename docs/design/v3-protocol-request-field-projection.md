@@ -296,17 +296,17 @@ terminality on the wire is `status` (plus `incomplete_details` /
 | `stop_sequence` | `stop_sequence`, canonical `finish_reason=stop_sequence` | `status=completed`, exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
 | `pause_turn` | `pause_turn`, canonical `finish_reason=pause_turn` | `status=in_progress` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
 | `refusal` | `content_filter`, canonical `finish_reason=content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
-| `model_context_window_exceeded` | `context_window_exceeded` | `status=incomplete` without invented `max_output_tokens` reason | `mapped_compatible_registered` | Preserves context-window exhaustion without relabeling it as `max_output_tokens`. |
-| other non-empty string `stop_reason` | warning + fallback `stop` when deliverable output exists | `status=completed` | `unmapped_tolerant` | Unknown `stop_reason` values warn and do not drop deliverable content; missing/null/non-string `stop_reason` fails at the same terminal owner. |
+| `model_context_window_exceeded` | `context_window_exceeded` | no exact Responses incomplete reason | `unsupported_fail_fast` | Fail with the exact source value; never relabel input-context exhaustion as `max_output_tokens`. |
 
 `stop_reason=null` is valid only on the Anthropic streaming `message_start`
 shape. A materialized final message, whether sourced from JSON or SSE, requires
-a non-empty string `stop_reason`. When `stop_reason=stop_sequence`, a non-empty
-string `stop_sequence` is required and fails at the terminal owner if missing
-or malformed. Extraneous `stop_sequence` on other terminal kinds warns and is
-omitted without blocking deliverable output; non-object `stop_details` fails at
-the same terminal owner. The SSE transport may only frame the resulting
-canonical response; it does not own another stop-reason mapping.
+a listed non-null value. When `stop_reason=stop_sequence`, a non-empty string
+`stop_sequence` is required and fails at the terminal owner if missing or
+malformed. Extraneous `stop_sequence` on other terminal kinds warns and is
+omitted without blocking deliverable output; unknown/non-string `stop_reason`
+and non-object `stop_details` fail at the same terminal owner. The SSE
+transport may only frame the resulting canonical response; it does not own
+another stop-reason mapping.
 
 ### Typed tool-result error projection
 

@@ -124,27 +124,25 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
     .map_err(|error| V3AnthropicCodecError::InvalidTerminalField {
         field: "stop_reason",
         reason: format!("finish_reason_map failed: {error}"),
+    })?
+    .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
+        field: "stop_reason",
+        reason: format!("unknown value '{stop_reason}'"),
     })?;
 
     let kind = match hub_reason {
-        Some("stop") => V3AnthropicTerminalKind::EndTurn,
-        Some("tool_calls") => V3AnthropicTerminalKind::ToolUse,
-        Some("max_tokens") => V3AnthropicTerminalKind::MaxTokens,
-        Some("stop_sequence") => V3AnthropicTerminalKind::StopSequence,
-        Some("pause_turn") => V3AnthropicTerminalKind::PauseTurn,
-        Some("content_filter") => V3AnthropicTerminalKind::Refusal,
-        Some("context_window_exceeded") => V3AnthropicTerminalKind::ContextWindowExceeded,
-        Some(other) => {
-            eprintln!(
-                "[v3-response-warning] protocol=anthropic stage=terminal_projection stop_reason={stop_reason:?} hub_reason={other:?} reason=unmapped_stop_reason_defaulting_end_turn"
-            );
-            V3AnthropicTerminalKind::EndTurn
-        }
-        None => {
-            eprintln!(
-                "[v3-response-warning] protocol=anthropic stage=terminal_projection stop_reason={stop_reason:?} reason=unknown_stop_reason_defaulting_end_turn"
-            );
-            V3AnthropicTerminalKind::EndTurn
+        "stop" => V3AnthropicTerminalKind::EndTurn,
+        "tool_calls" => V3AnthropicTerminalKind::ToolUse,
+        "max_tokens" => V3AnthropicTerminalKind::MaxTokens,
+        "stop_sequence" => V3AnthropicTerminalKind::StopSequence,
+        "pause_turn" => V3AnthropicTerminalKind::PauseTurn,
+        "content_filter" => V3AnthropicTerminalKind::Refusal,
+        "context_window_exceeded" => V3AnthropicTerminalKind::ContextWindowExceeded,
+        other => {
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_reason",
+                reason: format!("finish_reason_map produced unsupported hub value '{other}'"),
+            })
         }
     };
 
