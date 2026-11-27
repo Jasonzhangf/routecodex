@@ -1,3 +1,4 @@
+use super::V3HubEntryProtocol;
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
@@ -12,6 +13,14 @@ pub(super) use tool_output::{
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
 ) -> Result<Value, String> {
+    build_v3_chat_canonical_request_from_responses_semantic(payload, V3HubEntryProtocol::Responses)
+}
+
+pub(super) fn build_v3_chat_canonical_request_from_responses_semantic(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<Value, String> {
+    let native_responses = entry_protocol == V3HubEntryProtocol::Responses;
     let root = payload.as_object().ok_or_else(|| {
         "Responses request payload must be an object before OpenAI Chat encoding".to_string()
     })?;
@@ -138,8 +147,10 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             }
             "function_call" | "tool_call" | "custom_tool_call" => {
                 let mut message = build_v3_openai_chat_assistant_tool_call_message(item)?;
-                message["tool_calls"][0]["routecodex_chat_extension"]
-                    ["responses_tool_input_order"] = json!(input_index);
+                if native_responses {
+                    message["tool_calls"][0]["routecodex_chat_extension"]
+                        ["responses_tool_input_order"] = json!(input_index);
+                }
                 append_v3_openai_chat_tool_call_message(
                     &mut messages,
                     &mut pending_tool_message_index,
@@ -154,9 +165,11 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             | "custom_tool_call_output"
             | "tool_result"
             | "tool_message" => {
-                let mut message = build_v3_openai_chat_tool_result_message(item)?;
-                message["routecodex_chat_extension"]["responses_tool_input_order"] =
-                    json!(input_index);
+                let mut message = build_v3_openai_chat_tool_result_message(item, native_responses)?;
+                if native_responses {
+                    message["routecodex_chat_extension"]["responses_tool_input_order"] =
+                        json!(input_index);
+                }
                 append_v3_openai_chat_tool_result_message(
                     &mut messages,
                     &mut pending_tool_message_index,
@@ -1086,7 +1099,10 @@ pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
     tool_call
 }
 
-fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result<Value, String> {
+fn build_v3_openai_chat_tool_result_message(
+    item: &Map<String, Value>,
+    native_responses: bool,
+) -> Result<Value, String> {
     let call_id = read_v3_non_empty_str(item.get("tool_call_id"))
         .or_else(|| read_v3_non_empty_str(item.get("call_id")))
         .or_else(|| read_v3_non_empty_str(item.get("tool_use_id")));
@@ -1103,13 +1119,14 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
     extension.insert("responses_tool_output_type".to_string(), json!(item_type));
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
-    } else {
+    } else if native_responses {
         extension.insert(
             "responses_tool_output_id_omitted".to_string(),
             Value::Bool(true),
         );
     }
-    if item_type == "function_call_output"
+    if native_responses
+        && item_type == "function_call_output"
         && output.as_array().is_some_and(|parts| {
             parts
                 .iter()
