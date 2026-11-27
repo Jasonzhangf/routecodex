@@ -177,6 +177,10 @@ impl V3Provider12ResponsesWirePayload {
         &self.body
     }
 
+    pub fn body_mut(&mut self) -> &mut Value {
+        &mut self.body
+    }
+
     pub fn custom_tool_function_binding(
         &self,
     ) -> Option<&provider_compat_core::CustomToolFunctionBinding> {
@@ -435,6 +439,30 @@ pub fn apply_v3_response_cipher_policy(
 pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_response_cipher: bool) {
     if !retain_response_cipher {
         strip_v3_response_encrypted_fields_recursive(payload, false);
+    }
+}
+
+/// 请求侧密文防御（direct 与 relay 共用，仅用于 Responses wire）：
+/// `retain_request_cipher=true`（仅 gpt 模型且路由只有单一 provider 候选时，
+/// 由调用方 VR 路由决策用 `is_v3_retain_response_cipher` 算好传入）保留
+/// `reasoning.encrypted_content`；非单 provider 路由（含 gpt 模型）与非 gpt
+/// 模型均剥离无法跨 provider 解密的 `reasoning.encrypted_content` 与
+/// `agent_message` 协议密文 part 作为防御。不对 Responses reasoning 注入合成 `text`。
+pub fn apply_v3_request_cipher_policy(body: &mut Value, retain_request_cipher: bool) {
+    strip_v3_request_agent_message_cipher_parts(body);
+    if retain_request_cipher {
+        return;
+    }
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) == Some("reasoning") {
+            obj.remove("encrypted_content");
+        }
     }
 }
 
