@@ -78,7 +78,7 @@
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.config.resource_registry"],
-        "writes": ["v3.config.published_manifest"]
+        "writes": ["v3.config.published_manifest", "v3.target.active_key_policy"]
       }
     },
     {
@@ -115,9 +115,10 @@
       "resources": {
         "reads": [
           "v3.config.published_manifest",
-          "v3.config.provider_priority_schedule"
+          "v3.config.provider_priority_schedule",
+          "v3.target.active_key_policy"
         ],
-        "writes": ["v3.target.candidate_set"]
+        "writes": ["v3.target.candidate_set", "v3.target.active_candidate_set"]
       }
     },
     {
@@ -136,11 +137,13 @@
       "resources": {
         "reads": [
           "v3.target.candidate_set",
+          "v3.target.active_candidate_set",
+          "v3.target.active_key_state",
           "v3.provider.availability_projection",
           "v3.error.action_plan",
           "v3.provider.responses_transport_capability"
         ],
-        "writes": ["v3.target.concrete_provider"]
+        "writes": ["v3.target.concrete_provider", "v3.target.active_key_attempt"]
       }
     }
   ],

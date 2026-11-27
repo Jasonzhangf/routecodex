@@ -293,6 +293,11 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "test".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: false,
             path: vec!["provider".into()],
         },
@@ -375,6 +380,11 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "test".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: false,
             path: vec!["provider".into()],
         },
@@ -456,6 +466,11 @@ fn provider_req_compat_loads_selected_target_profile() {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "test".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: false,
             path: vec!["provider".into()],
         },
@@ -906,6 +921,11 @@ fn v3_output_cap_test_candidate(
         oauth_declaration: None,
         required_capabilities: Vec::new(),
         pool_ids: vec!["test".into()],
+        occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+            pool_id: "test".into(),
+            tier_index: 0,
+            plan_index: 0,
+        }],
         default_pool_member: false,
         path: vec!["provider".into()],
     }

@@ -2,6 +2,296 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.active_key_selection_control
+  owner_feature_id: v3.virtual_router_target_interpreter
+  summary: Server-owned local endpoint discovery connects Admin selection controls to the selected listener; Target remains the sole queue-state owner.
+  edges:
+  - step_id: v3-active-control-status-http
+    from_node: V3AdminSelectionControlForwarded
+    to_node: V3ServerActiveKeysStatus
+    caller_symbol: forward_selection_control
+    caller_file: v3/crates/routecodex-v3-admin/src/api/routes.rs
+    callee_symbol: active_keys_status
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.admin_observability_aggregation
+    status: anchored
+    notes: HTTP GET /_routecodex/selection/active-keys over the resolved loopback SocketAddr; this is a transport edge, not a Rust direct call.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-release-http
+    from_node: V3AdminSelectionControlForwarded
+    to_node: V3ServerActiveKeysRelease
+    caller_symbol: forward_selection_control
+    caller_file: v3/crates/routecodex-v3-admin/src/api/routes.rs
+    callee_symbol: active_keys_release
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.admin_observability_aggregation
+    status: anchored
+    notes: HTTP POST /_routecodex/selection/active-keys/release forwards an exact member command through the same Server-owned control address.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-companion-publish
+    from_node: V3ServerActiveKeyControlBound
+    to_node: V3ServerActiveKeyControlPublished
+    caller_symbol: start_active_key_control_companion
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: publish_startup_record
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    resource_flow:
+      consumes: []
+      produces: [v3.server.active_key_control_endpoint_record]
+      side_channel_reads: []
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-owner-close
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: ActiveKeyControlOwner::close_until
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: remove_owned_record_until
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-storage-publish
+    from_node: V3ServerActiveKeyControlBound
+    to_node: V3ServerActiveKeyControlPublished
+    caller_symbol: publish_startup_record
+    caller_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    callee_symbol: V3ActiveKeyControlPaths::with_write_until
+    callee_file: v3/crates/routecodex-v3-config/src/active_key_control_storage.rs
+    owner_feature_id: v3.config_interpreter_contract
+    status: anchored
+    notes: Business accept starts first. Inside the cancellably acquired namespace lock, Server verifies complete endpoint authority and makes intended managed custody durable before modification. Config completes the locked transaction. No expired acquisition can publish later.
+    resource_flow:
+      consumes: []
+      produces: [v3.server.active_key_control_endpoint_record]
+      side_channel_reads: []
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-storage-remove
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: remove_owned_record_until
+    caller_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    callee_symbol: V3ActiveKeyControlPaths::with_write_until
+    callee_file: v3/crates/routecodex-v3-config/src/active_key_control_storage.rs
+    owner_feature_id: v3.config_interpreter_contract
+    status: anchored
+    notes: Explicit close awaits bounded async acquisition and complete ownership comparison/removal/pruning off the business worker. Failed selected owners remain pending for explicit retry. The stable namespace lock survives endpoint close.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-storage-read
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3AdminSelectionControlForwarded
+    caller_symbol: forward_selection_control
+    caller_file: v3/crates/routecodex-v3-admin/src/api/routes.rs
+    callee_symbol: V3ActiveKeyControlPaths::read_until
+    callee_file: v3/crates/routecodex-v3-config/src/active_key_control_storage.rs
+    owner_feature_id: v3.config_interpreter_contract
+    status: anchored
+    notes: Admin asynchronously acquires the shared lock under a deadline, reads off the business worker and releases before HTTP. Contention expiry is explicit503; only actual NotFound is absence.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-partial-release
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: V3ServerAggregateHandle::shutdown_listener_ports
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: ActiveKeyControlOwner::close_until
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    notes: Match actual non-admin listener server_id and bound SocketAddr. Revoke the selected control lifetime before closing accepts and awaiting exact cleanup. Accepted business remains independent.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-managed-release
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: run_managed_control_loop
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3ServerAggregateHandle::shutdown_listener_ports
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    notes: After authentication, ReleasePorts accepts declared business ports and exact ports of pending Server owners. It acknowledges only after scoped revocation and cleanup. Failures retain exact custody without stopping live siblings.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-drop-try
+    from_node: V3ServerActiveKeyControlPublished
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: ActiveKeyControlOwner::drop
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: try_remove_owned_record
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    notes: Drop closes transports immediately and tries record cleanup once without waiting or detached work. Contention retains an explicit owner cleanup error; it cannot schedule a later remover.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+- chain_id: v3.active_key_control_exec_handoff
+  owner_feature_id: v3.config_server_full_function
+  summary: Borrowed managed exec retains original controls until verified successor adoption gives Server exact inherited ownership.
+  edges:
+  - step_id: v3-active-control-exec-capture
+    from_node: V3ServerAggregateHandle
+    to_node: V3ServerExecPreparation
+    caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ServerAggregateHandle::exact_active_key_custody
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    notes: Capture complete owned records and canonical addresses without file or transport changes; failed/cancelled exec keeps the original owner.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: [v3.server.active_key_control_exec_handoff]
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-exec-prepare
+    from_node: V3ManagedRestartPlan
+    to_node: V3ServerExecPreparation
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    notes: Stage opaque exact custody in the target front artifact bound to the originating managed process and target declaration. A final client check still precedes native exec.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: [v3.server.active_key_control_exec_handoff]
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: []
+  - step_id: v3-active-control-exec-adopt
+    from_node: V3ManagedExecOwnerAdopted
+    to_node: V3ServerActiveKeyControlPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: spawn_v3_server_aggregate_for_managed_startup
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    notes: Verify durable exact control custody before adoption. Startup failure retires it within one acquisition deadline or retains authority for explicit recovery; business-first startup and separate control diagnostics remain intact.
+    resource_flow:
+      consumes: [v3.server.active_key_control_exec_handoff]
+      produces: [v3.server.active_key_control_endpoint_record]
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-exec-retire
+    from_node: V3ManagedExecOwnerAdopted
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: spawn_v3_server_aggregate_with_health_dependencies
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: retire_inherited_record_until
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    notes: Retire only exact inherited addresses no longer used under the same batch acquisition deadline; preserve conflicting foreign records and retain pending cleanup.
+    resource_flow:
+      consumes: [v3.server.active_key_control_exec_handoff, v3.server.active_key_control_endpoint_record]
+      produces: []
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-record-only-publish
+    from_node: V3ServerActiveKeyControlBound
+    to_node: V3ServerActiveKeyControlPublished
+    caller_symbol: spawn_v3_server_aggregate_with_health_dependencies
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: publish_startup_record
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.config_server_full_function
+    status: anchored
+    notes: Loopback and wildcard record-only controls use the same full inherited comparison/publication transaction; unchanged PID or equal endpoint bytes never substitute for explicit handoff ownership.
+    resource_flow:
+      consumes: [v3.server.active_key_control_exec_handoff]
+      produces: [v3.server.active_key_control_endpoint_record]
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-exec-fatal-retire
+    from_node: V3ManagedExecOwnerAdopted
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: finish_failed_front_control_handoff
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/active_key_startup.rs
+    callee_symbol: V3ActiveKeyControlExecHandoff::retire_failed_startup
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    notes: Completed adoption permits physical retirement on constructor failure. Lifecycle publishes the original failure with its physical disposition before settling the exact handoff and cache. Interrupted adoption retains both generations for verified restart.
+    resource_flow:
+      consumes: [v3.server.active_key_control_exec_handoff]
+      produces: []
+      side_channel_reads: [v3.lifecycle.exec_restart_artifacts, v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-fresh-recovery
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: recover_exited_front_control_handoff
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/active_key_startup.rs
+    callee_symbol: V3ActiveKeyControlExecHandoff::retire_after_managed_exit
+    callee_file: v3/crates/routecodex-v3-server/src/active_key_control.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    notes: Start and restart select interrupted old-handler or native adoption before requiring complete target metadata. Recovery locks the predecessor and verifies the transition and both checkpoint locations. It disposes abandoned checkpoints, closes predecessor control, front, status, plan and cache, then settles the target transition and removes its retry front last. Scoped forced stop reports pending controls and retains their PID cache. A confirmed foreign endpoint replacement resolves its scope and reports the control conflict.
+    resource_flow:
+      consumes: [v3.server.active_key_control_exec_handoff]
+      produces: []
+      side_channel_reads: [v3.lifecycle.exec_restart_artifacts, v3.lifecycle.pid_cache, v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts, v3.server.active_key_control_endpoint_record]
+  - step_id: v3-active-control-legacy-normalization
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3ManagedExecOwnerAdopted
+    caller_symbol: recover_exited_front_control_handoff
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/active_key_startup.rs
+    callee_symbol: normalize_previous_release_handoff
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    resource_flow:
+      consumes: [v3.lifecycle.previous_release_restart_transfer]
+      produces: [v3.lifecycle.exec_restart_artifacts]
+      side_channel_reads: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache]
+      side_channel_writes: [v3.lifecycle.pid_cache, v3.lifecycle.exec_restart_artifacts]
+  - step_id: v3-active-control-failed-close
+    from_node: V3ManagedExecOwnerAdopted
+    to_node: V3ServerActiveKeyControlClosed
+    caller_symbol: close_failed_aggregate
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3ServerAggregateHandle::close_active_key_controls
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.managed_server_lifecycle
+    status: anchored
+    notes: Close physical controls before the bounded persistence wait. Lifecycle retains the prior authority until Failed is durable, then settles the typed pending controls.
+    resource_flow:
+      consumes: [v3.server.active_key_control_endpoint_record]
+      produces: [v3.server.active_key_control_exec_handoff]
+      side_channel_reads: [v3.server.active_key_control_endpoint_record]
+      side_channel_writes: [v3.server.active_key_control_endpoint_record]
 - chain_id: v3.rcc_internal_hooks_sidecar
   owner_feature_id: v3.rcc_internal_hooks_sidecar
   summary: Optional RouteCodex lifecycle starts the installed rccv3-hooksd; the daemon uses only the default Codex App Server socket for session status, send, and continuation evidence.
@@ -580,6 +870,24 @@ chains:
   owner_feature_id: v3.virtual_router_target_interpreter
   summary: Target09 candidate sets become Target10 concrete providers through one session-first selection owner shared by Direct planning, Direct pre-send revalidation, initial Relay resolution, and Relay failure reselection.
   edges:
+  - step_id: v3-target-active-key-core
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: V3TargetInterpreter::select_available_with_health_active
+    caller_file: v3/crates/routecodex-v3-target/src/lib.rs
+    callee_symbol: V3ActiveKeySelectionState::choose
+    callee_file: v3/crates/routecodex-v3-target/src/active_keys.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_target_interpreter
+    semantic_contract:
+      - Explicit active membership intersects each declared pool before alternative counting. Active queue, round robin and accepted-success sticky order only the final existing health/tier/priority bucket.
+      - Listener custody supplies the Target state handle. Attempt and episode witnesses remain request-local; health can end retries early. Versioned delivery feedback counts consecutive failures across requests; the fourth failure invalidates affinity and applies hold/tail once, while early episode closure preserves the streak.
+      - Runtime owns optional listener custody and per-dispatch feedback through Direct and Relay. Server exposes read-only queue and health views plus exact-member release; control outcomes never enter business payloads.
+    resource_flow:
+      consumes: [v3.target.candidate_set, v3.target.active_candidate_set, v3.target.active_key_policy, v3.provider.availability_projection]
+      produces: [v3.target.concrete_provider, v3.target.active_key_attempt]
+      side_channel_reads: [v3.target.active_key_state]
+      side_channel_writes: [v3.target.active_key_state]
   - step_id: v3-rd-target-select-live-recovery
     from_node: V3Server03HttpRequestRaw
     to_node: V3Target10ConcreteProviderSelected
@@ -619,7 +927,7 @@ chains:
   - step_id: v3-rd-target-select-rate-limit-alternative
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: run_v3_direct_provider_failure_policy
+    caller_symbol: run_v3_direct_provider_failure_policy_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
     callee_symbol: select_v3_target_with_session_then_global
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -661,7 +969,7 @@ chains:
     owner_feature_id: v3.virtual_router_target_interpreter
     semantic_contract:
       - Initial Relay resolution selects from Target09 with session availability and the request-local exclusion set supplied by the owning runtime.
-      - Context-oversized candidates are filtered before Relay provider transport; near-limit candidates remain eligible, are demoted only below normal candidates in the same route tier, and a higher route tier still beats a lower-tier normal candidate.
+      - Context token estimates only affect ordering within a tier. A model's declared turn threshold filters that candidate before scheduling a non-compact request.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]
@@ -1042,7 +1350,7 @@ chains:
       side_channel_reads: []
       side_channel_writes: [v3.lifecycle.exec_restart_artifacts]
     semantic_contract:
-    - Caller creates staged declaration and Front/provider JSON artifacts; rejection deletes only attempt-created files and retains the original owner.
+    - Native preparation stages the declaration and typed target front even for empty endpoint custody. Rejection restores prior custody and deletes only attempt-created files. Fresh launch retains Stopped through log setup and spawn or exec. The child publishes Starting after its socket, PID cache and matching control record.
   - step_id: v3-restart-adopt-exact-artifacts
     from_node: V3LifecycleRestartExecReentered
     to_node: V3Lifecycle05IdentityPublished
@@ -1101,6 +1409,54 @@ chains:
       produces: [v3.lifecycle.instance_declaration]
       side_channel_reads: []
       side_channel_writes: [v3.lifecycle.exec_restart_artifacts, v3.lifecycle.control_channel]
+  - step_id: v3-stop-settle-terminal-plan
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: shutdown_managed_runtime
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: settle_terminal_restart_plan
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/restart_plan.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.restart_plan]
+      produces: []
+      side_channel_reads: [v3.lifecycle.control_channel, v3.lifecycle.pid_cache, v3.lifecycle.instance_declaration]
+      side_channel_writes: [v3.lifecycle.restart_plan]
+    semantic_contract:
+    - Settle an abandoned plan against the running generation and target before releasing local control and cache. Failed settlement retains proof for formal recovery and reports incomplete stop.
+  - step_id: v3-forced-stop-verify-custody
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: V3ManagedLifecycle::force_stop_after_graceful_timeout
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: forced_stop_custody
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.instance_declaration]
+      produces: []
+      side_channel_reads: [v3.lifecycle.status_record, v3.lifecycle.pid_cache, v3.lifecycle.control_channel, v3.lifecycle.restart_plan, v3.lifecycle.exec_restart_artifacts, v3.lifecycle.previous_release_restart_transfer]
+      side_channel_writes: []
+    semantic_contract:
+    - A bare call with no signal delivered returns its verified Stopped baseline without writing status. Actual bare delivery permits status publication. Managed disposition requires matching delivery, verified exit and unchanged custody.
+  - step_id: v3-forced-stop-retire-ordinary-plan
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: cleanup_forced_stopped_runtime_state
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: remove_verified_generation_plan
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/restart_plan.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.restart_plan]
+      produces: []
+      side_channel_reads: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel]
+      side_channel_writes: [v3.lifecycle.restart_plan]
+    semantic_contract:
+    - Scoped listener release authorizes managed disposition only with a matching live generation, successful signal dispatch, verified exit and unchanged declaration, cache and control. Publish Stopped before ordinary plan and endpoint retirement. Exact custody retains its proof.
   - step_id: v3-restart-cleanup-previous-owner
     from_node: V3Lifecycle05IdentityPublished
     to_node: V3Lifecycle07GracefullyStopped
@@ -3915,7 +4271,7 @@ chains:
   - step_id: v3-de-24
     from_node: V3Error01SourceRaised
     to_node: V3RuntimeProviderFailureObservation
-    caller_symbol: handle_provider_failure_with_response_code
+    caller_symbol: handle_provider_failure_with_response_code_and_active_keys
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
     callee_symbol: build_v3_runtime_provider_failure_observation_from_policy_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
@@ -6903,7 +7259,7 @@ chains:
     - step_id: v3-provider-action-gate-05
       from_node: V3Error05ExecutionDecision
       to_node: V3Error06ClientProjected
-      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
+      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       callee_symbol: terminal_projection_for
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6941,7 +7297,7 @@ chains:
       to_node: V3Error05ExecutionDecision
       caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: run_v3_direct_provider_failure_policy
+      callee_symbol: run_v3_direct_provider_failure_policy_with_active_keys
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6961,7 +7317,7 @@ chains:
       to_node: V3Error05ExecutionDecision
       caller_symbol: handle_v3_responses_relay_provider_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6979,9 +7335,9 @@ chains:
     - step_id: v3-provider-action-gate-16
       from_node: V3Error01SourceRaised
       to_node: V3Error05ExecutionDecision
-      caller_symbol: handle_provider_failure_with_response_code
+      caller_symbol: handle_provider_failure_with_response_code_and_active_keys
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
-      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source_and_active_keys
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -7039,7 +7395,7 @@ chains:
     - step_id: v3-provider-action-gate-36
       from_node: V3ProviderActionFailureObserved
       to_node: V3ProviderActionFailureRecorded
-      caller_symbol: run_v3_direct_provider_failure_policy
+      caller_symbol: run_v3_direct_provider_failure_policy_inner
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       callee_symbol: record_v3_direct_provider_failure_record
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs

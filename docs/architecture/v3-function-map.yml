@@ -229,6 +229,8 @@ features:
   - v3.config.runtime_limit
   - v3.config.published_manifest
   - v3.server.listener_set
+  - v3.server.active_key_control_endpoint_record
+  - v3.server.active_key_control_exec_handoff
   - v3.lifecycle.instance_declaration
   - v3.lifecycle.pid_cache
   - v3.lifecycle.control_channel
@@ -244,6 +246,9 @@ features:
   - V3ManagedLifecycle::declaration
   - V3ManagedLifecycle::start
   - V3ManagedLifecycle::start_foreground
+  - V3ManagedLifecycle::prepare_fresh_launch
+  - V3ManagedLifecycle::launch_managed_child
+  - exec_foreground_start
   - V3ManagedLifecycle::with_snapshots_enabled
   - V3ManagedLifecycle::with_console_enabled
   - run_cli
@@ -259,6 +264,28 @@ features:
   - release_listener_set_for_start
   - release_foreign_managed_listener_ports_for_start
   - control_release_ports
+  - verify_exec_front_control_handoff
+  - finish_failed_front_control_handoff
+  - recover_exited_front_control_handoff
+  - verify_exited_control_authority
+  - reconcile_predecessor_control
+  - close_verified_restart_transfer
+  - normalize_previous_release_handoff
+  - interrupted_legacy_transfer
+  - exited_restart_handoff_requires_reconciliation
+  - cleanup_forced_stopped_runtime_state
+  - V3ManagedLifecycle::force_stop_after_graceful_timeout
+  - forced_stop_custody
+  - scoped_signal_generation
+  - signal_explicit_pid
+  - verified_forced_stop_front
+  - remove_verified_generation_plan
+  - close_failed_aggregate
+  - fail_published_runtime
+  - publish_failed_outcome
+  - terminal_control_settlement_error
+  - settle_terminal_controls
+  - persist_retained_front_control_handoff
   - guard_explicit_listener_pids_are_scoped_to_target_ports
   - explicit_listener_pids_for_ports
   - occupied_listener_ports
@@ -269,7 +296,9 @@ features:
   - restart_managed_runtime_in_place
   - send_restart_control
   - send_control_without_timeout
+  - run_managed_control_loop
   - control_restart_plan
+  - settle_terminal_restart_plan
   - V3ManagedLifecycle::declaration_with_runtime
   - V3ManagedLifecycle::run_managed_child_with_declaration
   - adopt_exec_restart_declaration_change
@@ -354,6 +383,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/active_key_control.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   resource_bindings:
   - v3.config.authoring_parsed
@@ -363,6 +393,8 @@ features:
   - v3.config.hub_pipeline_declarations
   - v3.config.route_pool_match_declarations
   - v3.server.listener_set
+  - v3.server.active_key_control_endpoint_record
+  - v3.server.active_key_control_exec_handoff
   - v3.server.validated_http_input
   - v3.error.chain
   entry_symbols:
@@ -371,6 +403,17 @@ features:
   - compile_pool_match
   - compile_provider_health
   - spawn_v3_server_aggregate
+  - start_active_key_control_companion
+  - active_keys_control_router
+  - ActiveKeyControlOwner::close_until
+  - V3ServerAggregateHandle::shutdown_listener_ports
+  - V3ServerAggregateHandle::retained_active_key_cleanup_ports
+  - V3ServerAggregateHandle::exact_active_key_custody
+  - V3ServerAggregateHandle::close_active_key_controls
+  - V3ListenerHandle::revoke_active_key_controls
+  - publish_startup_record
+  - V3ActiveKeyControlExecHandoff::capture
+  - spawn_v3_server_aggregate_for_managed_startup
   - read_json_payload
   - project_v3_http_boundary_error_via_sdk
   allowed_paths:
@@ -404,6 +447,9 @@ features:
 - feature_id: v3.config_interpreter_contract
   owner_crate: routecodex-v3-config
   owner_files:
+  - v3/crates/routecodex-v3-config/src/active_key_control_storage.rs
+  - v3/crates/routecodex-v3-config/src/active_key_control_storage/unix.rs
+  - v3/crates/routecodex-v3-config/src/active_key_control_storage/windows.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
@@ -433,7 +479,12 @@ features:
   - v3-cfg-compact-02
   - v3-cfg-compact-03
   - v3-cfg-compact-04
+  - v3-active-control-storage-publish
+  - v3-active-control-storage-remove
+  - v3-active-control-storage-read
   entry_symbols:
+  - V3ActiveKeyControlPaths::read_until
+  - V3ActiveKeyControlPaths::with_write_until
   - V3ConfigStore::read_authoring
   - V3ConfigStore::load_snapshot
   - parse_v3_config_02_authoring
@@ -645,6 +696,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-debug/src/lib.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/active_keys.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-runtime/src/foundation.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -723,6 +775,10 @@ features:
   entry_symbols:
   - execute_v3_foundation_pending_runtime
   - is_v3_recoverable_response_processing_source
+  - classify_v3_active_key_failure
+  - normalize_v3_active_key_failure_source
+  - active_key_selection_is_dispatchable
+  - plan_v3_active_key_recovery
   - V3ResponsesDirectRuntimeSharedState::defer_debug_node_publication_to_server
   - prepend_refill_observations
   - V3ResponsesDirectServerOutcome::prepend_observations
@@ -1064,6 +1120,14 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-target/src/sticky.rs
+  - v3/crates/routecodex-v3-target/src/active_keys.rs
+  - v3/crates/routecodex-v3-target/tests/active_key_store.rs
+  - v3/crates/routecodex-v3-target/tests/active_pool_declarations.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_selection_public.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_selection_public/review_regressions.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_selection_public/business_recovery.rs
+  - v3/crates/routecodex-v3-server/tests/active_key_control_address.rs
+  - v3/crates/routecodex-v3-runtime/tests/active_key_retry_witness.rs
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/src/provider_priority_schedule.rs
   - v3/crates/routecodex-v3-config/src/user_config.rs
@@ -1087,6 +1151,9 @@ features:
   - v3.route.opaque_target
   - v3.target.candidate_set
   - v3.target.concrete_provider
+  - v3.target.active_candidate_set
+  - v3.target.active_key_state
+  - v3.target.active_key_attempt
   - v3.provider.availability_projection
   - v3.error.action_plan
   mainline_bindings:
@@ -1107,9 +1174,21 @@ features:
   - build_v3_router_request_facts_for_entry
   - V3TargetInterpreter::classify_kind
   - V3TargetInterpreter::expand_candidates
+  - V3TargetInterpreter::candidate_within_turn_limit
   - V3TargetInterpreter::select_available
   - select_available_with_health_sticky
   - V3StickySelectionState::select
+  - V3ActiveKeySelectionState::configure
+  - V3ActiveKeySelectionState::choose
+  - V3ActiveKeySelectionState::accepted_success
+  - V3ActiveKeySelectionState::record_delivery_failure
+  - V3ActiveKeySelectionState::close_failure
+  - V3ActiveKeySelectionState::release
+  - V3TargetInterpreter::select_available_with_health_active
+  - V3TargetInterpreter::active_key_pool_declarations
+  - selected_target_has_current_witness
+  - begin_v3_active_dispatch
+  - V3TargetInterpreter::observe_eligible_occurrences
   - V3StickySelectionScope::new
   - V3TargetInterpreter::route_tier_index
   - V3TargetInterpreter::provider_priority_schedule_priority
@@ -1157,6 +1236,8 @@ features:
   - restart
   required_gates:
   - npm run test:v3-p5-router-target
+  - npm run test:v3-active-key-selection
+  - npm run verify:webui-smoke
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates
     -- --nocapture
   - npm run test:v3-p5-server-blackbox
@@ -5954,7 +6035,9 @@ features:
   - v3.admin.provider_candidate
   - v3.admin.provider_probe_result
   - v3.admin.provider_patrol_plan
+  - v3.server.active_key_control_endpoint_record
   entry_symbols:
+  - forward_selection_control
   - require_admin
   - AdminToken::load_or_create
   - admin_session

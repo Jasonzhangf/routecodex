@@ -75,6 +75,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
         let mut cache = V3ManagedPidCache {
+            retained_control: None,
             schema_version: 1,
             instance_id: declaration.instance_id.clone(),
             pid: std::process::id(),
