@@ -803,6 +803,22 @@ fn openai_chat_wire_rejects_invalid_reasoning_context_policy() {
 }
 
 #[test]
+fn issue4a0b3aa_chat_custom_output_keeps_generated_responses_id() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model":"gpt-test",
+        "messages":[{
+            "role":"tool","tool_call_id":"call_custom","content":"ok",
+            "routecodex_chat_extension":{"responses_tool_output_type":"custom_tool_call_output"}
+        }]
+    }))
+    .unwrap();
+    let output = &request["input"][0];
+    assert_eq!(output["type"], "custom_tool_call_output");
+    assert_eq!(output["call_id"], "call_custom");
+    assert!(output["id"].is_string());
+}
+
+#[test]
 fn openai_chat_wire_consumes_routecodex_chat_extension_before_provider_send() {
     let payload = json!({
         "model": "gpt-test",
