@@ -149,6 +149,20 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     has_web_search_capability: bool,
     preserve_responses_custom_tools: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+        payload,
+        has_web_search_capability,
+        preserve_responses_custom_tools,
+        None,
+    )
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+    payload: &Value,
+    has_web_search_capability: bool,
+    preserve_responses_custom_tools: bool,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
@@ -156,9 +170,10 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
         );
     }
     let (mut projected, drops) =
-        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance(
             payload,
             preserve_responses_custom_tools,
+            provenance,
         )?;
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
@@ -179,12 +194,15 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
 fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
     payload: &Value,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(payload, false)
+    build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance(
+        payload, false, None,
+    )
 }
 
-fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance(
     payload: &Value,
     preserve_responses_custom_tools: bool,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
@@ -201,18 +219,24 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
         return build_v3_openai_responses_request_from_projected_chat_canonical(
             projected_source,
             drops,
+            provenance,
         );
     }
     let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
-    build_v3_openai_responses_request_from_projected_chat_canonical(projected_source, drops)
+    build_v3_openai_responses_request_from_projected_chat_canonical(
+        projected_source,
+        drops,
+        provenance,
+    )
 }
 
 fn build_v3_openai_responses_request_from_projected_chat_canonical(
     projected_source: Value,
     drops: Vec<V3ProjectionDropRecord>,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let messages = projected_source
         .get("messages")
@@ -224,7 +248,7 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     }
     responses_payload.insert(
         "input".to_string(),
-        build_responses_input_from_chat_messages(messages)?,
+        build_responses_input_from_chat_messages_with_provenance(messages, provenance)?,
     );
     for key in [
         "tools",
@@ -1192,12 +1216,23 @@ fn collect_unmapped_outbound_field_paths(
 pub(crate) fn build_responses_input_from_chat_messages(
     messages: &[Value],
 ) -> Result<Value, String> {
+    build_responses_input_from_chat_messages_with_provenance(messages, None)
+}
+
+pub(crate) fn build_responses_input_from_chat_messages_with_provenance(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<Value, String> {
     let mut output = Vec::new();
-    let source_order = |item: &Value| {
-        item.pointer("/routecodex_chat_extension/responses_tool_input_order")
-            .and_then(Value::as_u64)
+    let message_order = |msg_idx: usize, item: &Value| {
+        if let Some(provenance) = provenance {
+            provenance.message_order(msg_idx)
+        } else {
+            item.pointer("/routecodex_chat_extension/responses_tool_input_order")
+                .and_then(Value::as_u64)
+        }
     };
-    for message in messages {
+    for (msg_idx, message) in messages.iter().enumerate() {
         let Some(row) = message.as_object() else {
             continue;
         };
@@ -1212,7 +1247,7 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 .is_some()
         {
             if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
-                output.push((source_order(message), item));
+                output.push((message_order(msg_idx, message), item));
             }
             continue;
         }
@@ -1224,18 +1259,22 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 };
                 let raw_orders: Vec<Option<u64>> = (0..reasoning_items.len())
                     .map(|index| {
-                        message
-                            .pointer("/routecodex_chat_extension/responses_reasoning_items")
-                            .and_then(|items| items.get(index))
-                            .and_then(|entry| entry.get("source_input_order"))
-                            .and_then(Value::as_u64)
+                        if let Some(provenance) = provenance {
+                            provenance.reasoning_item_order(msg_idx, index)
+                        } else {
+                            message
+                                .pointer("/routecodex_chat_extension/responses_reasoning_items")
+                                .and_then(|items| items.get(index))
+                                .and_then(|entry| entry.get("source_input_order"))
+                                .and_then(Value::as_u64)
+                        }
                     })
                     .collect();
                 for (index, item) in reasoning_items.into_iter().enumerate() {
                     let order = raw_orders[index]
                         .or_else(|| raw_orders[index + 1..].iter().flatten().copied().next())
                         .or_else(|| raw_orders[..index].iter().rev().flatten().copied().next())
-                        .or_else(|| source_order(message));
+                        .or_else(|| message_order(msg_idx, message));
                     output.push((order, item));
                 }
             }
@@ -1244,74 +1283,87 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 .and_then(Value::as_array)
                 .is_some_and(|calls| !calls.is_empty());
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                for call in tool_calls {
+                for (call_idx, call) in tool_calls.iter().enumerate() {
                     if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
-                        output.push((source_order(call), item));
+                        let call_order = if let Some(provenance) = provenance {
+                            provenance.tool_call_order(msg_idx, call_idx)
+                        } else {
+                            call.pointer("/routecodex_chat_extension/responses_tool_input_order")
+                                .and_then(Value::as_u64)
+                        };
+                        output.push((call_order, item));
                     }
                 }
             }
-            if let Some(assistant_items) = row
-                .get("routecodex_chat_extension")
-                .and_then(|extension| extension.get(RESPONSES_ASSISTANT_ITEMS_EXTENSION))
-                .and_then(Value::as_array)
-                .filter(|items| !items.is_empty())
-            {
-                let mut entry_contents = Vec::with_capacity(assistant_items.len());
-                let mut valid = true;
-                for entry in assistant_items {
-                    let Some(chat_content) =
-                        entry.as_object().and_then(|obj| obj.get("chat_content"))
-                    else {
-                        valid = false;
-                        break;
-                    };
-                    entry_contents.push(chat_content.clone());
-                }
-                let expected_content = valid
-                    .then(|| fold_v3_openai_chat_message_contents(&entry_contents))
-                    .flatten();
-                let matches_canonical = expected_content.as_ref().is_some_and(|expected| {
-                    let actual = row.get("content").unwrap_or(&Value::Null);
-                    super::req_inbound_02_normalized::comparable_chat_content(actual)
-                        == super::req_inbound_02_normalized::comparable_chat_content(expected)
-                });
-                if matches_canonical {
-                    let mut emitted = false;
+            let allow_assistant_items = provenance.is_none_or(|p| p.has_assistant_items(msg_idx));
+            if allow_assistant_items {
+                if let Some(assistant_items) = row
+                    .get("routecodex_chat_extension")
+                    .and_then(|extension| extension.get(RESPONSES_ASSISTANT_ITEMS_EXTENSION))
+                    .and_then(Value::as_array)
+                    .filter(|items| !items.is_empty())
+                {
+                    let mut entry_contents = Vec::with_capacity(assistant_items.len());
+                    let mut valid = true;
                     for entry in assistant_items {
-                        let chat_content = &entry["chat_content"];
-                        if tool_calls_present && v3_openai_chat_content_is_empty(chat_content) {
+                        let Some(chat_content) =
+                            entry.as_object().and_then(|obj| obj.get("chat_content"))
+                        else {
+                            valid = false;
+                            break;
+                        };
+                        entry_contents.push(chat_content.clone());
+                    }
+                    let expected_content = valid
+                        .then(|| fold_v3_openai_chat_message_contents(&entry_contents))
+                        .flatten();
+                    let matches_canonical = expected_content.as_ref().is_some_and(|expected| {
+                        let actual = row.get("content").unwrap_or(&Value::Null);
+                        super::req_inbound_02_normalized::comparable_chat_content(actual)
+                            == super::req_inbound_02_normalized::comparable_chat_content(expected)
+                    });
+                    if matches_canonical {
+                        let mut emitted = false;
+                        for (entry_idx, entry) in assistant_items.iter().enumerate() {
+                            let chat_content = &entry["chat_content"];
+                            if tool_calls_present && v3_openai_chat_content_is_empty(chat_content) {
+                                continue;
+                            }
+                            let content = chat_content_to_responses_content(chat_content, role)?;
+                            let mut item = Map::from_iter([
+                                ("type".to_string(), Value::String("message".to_string())),
+                                (
+                                    "role".to_string(),
+                                    Value::String(
+                                        if role.is_empty() { "user" } else { role }.to_string(),
+                                    ),
+                                ),
+                                ("content".to_string(), content),
+                            ]);
+                            if let Some(item_id) = entry.get("id").and_then(Value::as_str) {
+                                item.insert("id".to_string(), Value::String(item_id.to_string()));
+                            }
+                            if let Some(status) =
+                                entry.get("status").filter(|value| !value.is_null())
+                            {
+                                item.insert("status".to_string(), status.clone());
+                            }
+                            let entry_order = if let Some(provenance) = provenance {
+                                provenance.assistant_item_order(msg_idx, entry_idx)
+                            } else {
+                                entry.get("source_input_order").and_then(Value::as_u64)
+                            };
+                            output.push((entry_order, Value::Object(item)));
+                            emitted = true;
+                        }
+                        if emitted || tool_calls_present {
                             continue;
                         }
-                        let content = chat_content_to_responses_content(chat_content, role)?;
-                        let mut item = Map::from_iter([
-                            ("type".to_string(), Value::String("message".to_string())),
-                            (
-                                "role".to_string(),
-                                Value::String(
-                                    if role.is_empty() { "user" } else { role }.to_string(),
-                                ),
-                            ),
-                            ("content".to_string(), content),
-                        ]);
-                        if let Some(item_id) = entry.get("id").and_then(Value::as_str) {
-                            item.insert("id".to_string(), Value::String(item_id.to_string()));
-                        }
-                        if let Some(status) = entry.get("status").filter(|value| !value.is_null()) {
-                            item.insert("status".to_string(), status.clone());
-                        }
-                        output.push((
-                            entry.get("source_input_order").and_then(Value::as_u64),
-                            Value::Object(item),
-                        ));
-                        emitted = true;
-                    }
-                    if emitted || tool_calls_present {
-                        continue;
                     }
                 }
             }
             if tool_calls_present
-                && !(source_order(message).is_some()
+                && !(message_order(msg_idx, message).is_some()
                     && row.get("content").is_some_and(|content| match content {
                         Value::String(text) => !text.trim().is_empty(),
                         Value::Array(parts) => !parts.is_empty(),
@@ -1327,7 +1379,7 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .transpose()?
             .unwrap_or_else(|| Value::Array(Vec::new()));
         output.push((
-            source_order(message),
+            message_order(msg_idx, message),
             Value::Object(Map::from_iter([
                 ("type".to_string(), Value::String("message".to_string())),
                 (

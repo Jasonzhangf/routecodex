@@ -559,6 +559,24 @@ fn attach_v3_responses_reasoning_input_order(
     if let Some(text) = item.get("text").filter(|value| !value.is_null()) {
         decoder_entry.insert("text".to_string(), text.clone());
     }
+    if !decoder_entry.contains_key("summary")
+        && !decoder_entry.contains_key("content")
+        && !decoder_entry.contains_key("text")
+        && read_v3_non_empty_str(item.get("id")).is_none()
+    {
+        if let Some(reasoning_text) = message
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            decoder_entry.insert(
+                "summary".to_string(),
+                Value::Array(vec![
+                    json!({"type": "summary_text", "text": reasoning_text}),
+                ]),
+            );
+        }
+    }
     let Some(extension) = message
         .get_mut("routecodex_chat_extension")
         .and_then(Value::as_object_mut)
@@ -582,6 +600,14 @@ fn attach_v3_responses_reasoning_input_order(
     } else if !decoder_entry.is_empty() || ordered.is_empty() {
         decoder_entry.insert("source_input_order".to_string(), json!(input_index));
         ordered.push(Value::Object(decoder_entry));
+    } else {
+        for entry in &mut ordered {
+            if let Some(object) = entry.as_object_mut() {
+                object
+                    .entry("source_input_order".to_string())
+                    .or_insert_with(|| json!(input_index));
+            }
+        }
     }
     extension.insert(
         RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
@@ -593,8 +619,15 @@ pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value])
     let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
         std::collections::HashMap::new();
     for message in messages {
-        if message.get("role").and_then(Value::as_str) == Some("tool") {
-            let call_id = message.get("tool_call_id").and_then(Value::as_str);
+        let is_tool_row = message.get("role").and_then(Value::as_str) == Some("tool");
+        let is_named_output_row = message
+            .pointer("/routecodex_chat_extension/responses_tool_output_name")
+            .is_some()
+            && message.get("tool_call_id").is_none();
+        if is_tool_row || is_named_output_row {
+            let call_id = is_tool_row
+                .then(|| message.get("tool_call_id").and_then(Value::as_str))
+                .flatten();
             let output_order = message
                 .pointer("/routecodex_chat_extension/responses_tool_input_order")
                 .and_then(Value::as_u64);
@@ -614,7 +647,7 @@ pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value])
                     .and_then(Value::as_str)
                     .map(str::to_owned)
                 {
-                    // An orphan has no declared tool media semantics.
+                    // An orphan (call-ID or named output) has no declared tool media semantics.
                     message["content"] = Value::String(raw_output);
                 }
             }
@@ -1073,6 +1106,20 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
     if let Some(extension) = item.get("routecodex_chat_extension") {
         let mut extension = extension.clone();
         if let Some(extension) = extension.as_object_mut() {
+            // Client-supplied order/assistant-item fields on reasoning carriers
+            // must never override decoder-owned history provenance.
+            extension.remove("responses_tool_input_order");
+            extension.remove(RESPONSES_ASSISTANT_ITEMS_EXTENSION);
+            if let Some(entries) = extension
+                .get_mut(RESPONSES_REASONING_ITEMS_EXTENSION)
+                .and_then(Value::as_array_mut)
+            {
+                for entry in entries {
+                    if let Some(object) = entry.as_object_mut() {
+                        object.remove("source_input_order");
+                    }
+                }
+            }
             retain_anthropic_reasoning_block_association(item, &reasoning_content, extension);
         }
         message["routecodex_chat_extension"] = extension;

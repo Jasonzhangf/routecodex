@@ -582,6 +582,7 @@ pub(crate) fn execute_v3_operation_runner_request_project_standard_provider_requ
     transport_intent: crate::hub_v1::V3HubTransportIntent,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     selected_target: routecodex_v3_target::V3TargetCandidate,
+    explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance,
 ) -> Result<crate::hub_v1::V3HubReqOutbound07StandardProjection, OperationRunnerError> {
     let side_output = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut registry = Registry::default();
@@ -590,6 +591,7 @@ pub(crate) fn execute_v3_operation_runner_request_project_standard_provider_requ
         transport_intent,
         provider_protocol,
         selected_target,
+        explicit_history_pairing,
         side_output.clone(),
     ))?;
     let graph = compile_v3_operation_runner_request_project_standard_provider_request(&registry)?;

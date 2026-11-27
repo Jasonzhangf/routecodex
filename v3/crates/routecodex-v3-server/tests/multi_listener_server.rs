@@ -6975,6 +6975,433 @@ async fn issue4a0b3aa_r9_orphan_before_later_call_dual_reasoning_and_carrier_ord
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r10_legacy_merge_named_orphan_alias_reasoning_and_provenance_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_r10","status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r10-key");
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    {
+        let provider = manifest.providers.values_mut().next().unwrap();
+        let mut model = provider.models.remove("test").unwrap();
+        model.id = "gpt-5.5".into();
+        model.wire_name = "gpt-5.5".into();
+        provider.default_model = "gpt-5.5".into();
+        provider.models.insert("gpt-5.5".into(), model);
+    }
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        for target in &mut pool.targets {
+            target.model = Some("gpt-5.5".into());
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+
+    // P1-1: Legacy result-only merge where `messages` has literal output B followed by later
+    // assistant call B must keep the unchanged literal JSON-encoded image string on first Provider.
+    let legacy_later_call_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_b",
+                "output": encoded_image
+            }],
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_b",
+                    "content": encoded_image
+                },
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_b",
+                        "type": "function",
+                        "function": {"name": "read_image", "arguments": "{}"}
+                    }]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("legacy result-only merge with later call B must succeed");
+    assert_eq!(legacy_later_call_res.status(), StatusCode::OK);
+    let legacy_later_call_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("legacy later-call capture timeout")
+        .expect("legacy later-call capture");
+    assert_eq!(
+        legacy_later_call_capture.body["input"][0]["output"],
+        json!(encoded_image),
+        "literal output before later call B in legacy merge must stay unchanged: {}",
+        legacy_later_call_capture.body
+    );
+    assert_eq!(
+        legacy_later_call_capture.body["input"][1]["type"],
+        json!("function_call")
+    );
+    assert_eq!(
+        legacy_later_call_capture.body["input"][1]["call_id"],
+        json!("call_b")
+    );
+
+    // P1-1 (preceding legacy-parent media case): `messages` has preceding call B and `input`
+    // supplies output B with encoded image -> paired media projects on text-only target.
+    let legacy_preceding_media_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_b",
+                "output": encoded_image
+            }],
+            "messages": [{
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_b",
+                    "type": "function",
+                    "function": {"name": "read_image", "arguments": "{}"}
+                }]
+            }]
+        }))
+        .send()
+        .await
+        .expect("preceding legacy parent media must succeed");
+    assert_eq!(legacy_preceding_media_res.status(), StatusCode::OK);
+    let legacy_preceding_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("preceding legacy parent capture timeout")
+        .expect("preceding legacy parent capture");
+    assert_eq!(
+        legacy_preceding_capture.body["input"][0]["type"],
+        json!("function_call")
+    );
+    assert_eq!(
+        legacy_preceding_capture.body["input"][1]["output"],
+        json!([{"type": "input_text", "text": "[Image]"}]),
+        "preceding legacy parent must retain media projection: {}",
+        legacy_preceding_capture.body
+    );
+
+    // Preceding legacy-parent literal representation conflict must still be rejected.
+    let legacy_conflict_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_b",
+                "output": encoded_image
+            }],
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_b",
+                        "type": "function",
+                        "function": {"name": "read_image", "arguments": "{}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_b",
+                    "content": encoded_image
+                }
+            ]
+        }))
+        .send()
+        .await;
+    assert!(
+        legacy_conflict_res.is_err(),
+        "preceding legacy-parent literal mismatch must still fail ReqInbound02: {legacy_conflict_res:?}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "preceding legacy-parent conflict must not dispatch upstream"
+    );
+
+    // P1-2: Supported named orphan output with JSON-encoded image string keeps exact
+    // first-Provider equality (`name`, `namespace`, literal `output`, absent `call_id`).
+    let named_orphan_input = json!([{
+        "type": "function_call_output",
+        "name": "send_message_to_thread",
+        "namespace": "codex_tui",
+        "output": encoded_image
+    }]);
+    let named_orphan_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": named_orphan_input
+        }))
+        .send()
+        .await
+        .expect("named orphan output with JSON image string must succeed");
+    assert_eq!(named_orphan_res.status(), StatusCode::OK);
+    let named_orphan_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("named orphan capture timeout")
+        .expect("named orphan capture");
+    assert_eq!(
+        named_orphan_capture.body["input"], named_orphan_input,
+        "named orphan output must keep exact first-Provider equality: {}",
+        named_orphan_capture.body
+    );
+    assert!(
+        named_orphan_capture.body["input"][0]
+            .get("call_id")
+            .is_none(),
+        "named orphan output must keep call_id absent: {}",
+        named_orphan_capture.body
+    );
+
+    // P1-3: Standalone native reasoning aliases (`reasoning_content`, `thinking`) without
+    // id/summary/content/text preserve plaintext in source order beside native summary & cipher.
+    let reasoning_alias_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_sum",
+                    "summary": [{"type": "summary_text", "text": "native summary"}]
+                },
+                {
+                    "type": "reasoning",
+                    "reasoning_content": "check the source"
+                },
+                {
+                    "type": "reasoning",
+                    "thinking": "check the thinking"
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_cipher",
+                    "encrypted_content": "enc_cipher"
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "after all reasoning"}]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("reasoning alias request must succeed");
+    assert_eq!(reasoning_alias_res.status(), StatusCode::OK);
+    let reasoning_alias_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("reasoning alias capture timeout")
+        .expect("reasoning alias capture");
+    assert_eq!(
+        reasoning_alias_capture.body["input"],
+        json!([
+            {
+                "type": "reasoning",
+                "id": "rs_sum",
+                "summary": [{"type": "summary_text", "text": "native summary"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "check the source"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "check the thinking"}]
+            },
+            {
+                "type": "reasoning",
+                "id": "rs_cipher",
+                "encrypted_content": "enc_cipher"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "after all reasoning"}]
+            }
+        ]),
+        "reasoning aliases must preserve plaintext in source order alongside summary and ciphertext: {}",
+        reasoning_alias_capture.body
+    );
+
+    // P1-4a: Legacy `messages`-only rows carrying client-supplied `responses_tool_input_order`
+    // (1 and 0) and `responses_assistant_items` must NOT swap or override history order.
+    let legacy_order_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "first user",
+                    "routecodex_chat_extension": {"responses_tool_input_order": 1}
+                },
+                {
+                    "role": "user",
+                    "content": "second user",
+                    "routecodex_chat_extension": {"responses_tool_input_order": 0}
+                },
+                {
+                    "role": "assistant",
+                    "content": "actual assistant",
+                    "routecodex_chat_extension": {
+                        "responses_tool_input_order": 0,
+                        "responses_assistant_items": [{
+                            "source_input_order": 0,
+                            "chat_content": "spoofed assistant"
+                        }]
+                    }
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("legacy messages-only request with client position fields must succeed");
+    assert_eq!(legacy_order_res.status(), StatusCode::OK);
+    let legacy_order_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("legacy order capture timeout")
+        .expect("legacy order capture");
+    assert_eq!(
+        legacy_order_capture.body["input"],
+        json!([
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "first user"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "second user"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "actual assistant"}]}
+        ]),
+        "legacy messages-only rows must not swap or override via client-supplied position fields: {}",
+        legacy_order_capture.body
+    );
+
+    // P1-4b: Retained reasoning carrier with client-supplied `source_input_order` and
+    // `responses_tool_input_order` must NOT override native history order.
+    let carrier_spoof_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "input": [
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "visible first"}]},
+                {"type": "reasoning", "id": "rs_r1", "encrypted_content": "enc_r1", "summary": [{"type": "summary_text", "text": "r1"}]},
+                {
+                    "type": "reasoning",
+                    "id": "rs_r2",
+                    "encrypted_content": "enc_r2",
+                    "summary": [{"type": "summary_text", "text": "r2"}],
+                    "routecodex_chat_extension": {
+                        "responses_tool_input_order": 0,
+                        "responses_assistant_items": [{"source_input_order": 0, "chat_content": "spoofed"}],
+                        "responses_reasoning_items": [
+                            {"id": "rs_carrier", "encrypted_content": "enc_carrier", "source_input_order": 0}
+                        ]
+                    }
+                },
+                {"type": "function_call", "id": "fc_t", "call_id": "call_t", "name": "lookup", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_t", "output": "ok"}
+            ]
+        }))
+        .send()
+        .await
+        .expect("retained reasoning carrier with client position fields must succeed");
+    assert_eq!(carrier_spoof_res.status(), StatusCode::OK);
+    let carrier_spoof_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("carrier spoof capture timeout")
+        .expect("carrier spoof capture");
+    assert_eq!(
+        carrier_spoof_capture.body["input"],
+        json!([
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "visible first"}]},
+            {"type": "reasoning", "id": "rs_r1", "encrypted_content": "enc_r1", "summary": [{"type": "summary_text", "text": "r1"}]},
+            {"type": "reasoning", "id": "rs_carrier", "encrypted_content": "enc_carrier"},
+            {"type": "reasoning", "id": "rs_r2", "encrypted_content": "enc_r2", "summary": [{"type": "summary_text", "text": "r2"}]},
+            {"type": "function_call", "id": "fc_t", "call_id": "call_t", "name": "lookup", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_t", "output": "ok"}
+        ]),
+        "retained reasoning carrier must not reorder via client-supplied position fields: {}",
+        carrier_spoof_capture.body
+    );
+
+    // P1-4c: Client-supplied `responses_tool_input_order` on legacy `messages` call row must NOT
+    // trick Req04 into treating a preceding parent call as a later call to bypass kind mismatch.
+    let pairing_spoof_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "gpt-5.5",
+            "stream": false,
+            "messages": [{
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_preceding_spoof",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": "{}"},
+                    "routecodex_chat_extension": {"responses_tool_input_order": 99}
+                }]
+            }],
+            "input": [{
+                "type": "custom_tool_call_output",
+                "call_id": "call_preceding_spoof",
+                "output": "mismatched custom output"
+            }]
+        }))
+        .send()
+        .await;
+    assert!(
+        pairing_spoof_res.is_err(),
+        "client-supplied responses_tool_input_order on legacy messages call must not bypass Req04 kind mismatch: {pairing_spoof_res:?}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "Req04 pairing spoof mismatch must not dispatch upstream"
+    );
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        captures.try_recv().is_err(),
+        "no extra upstream requests expected"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

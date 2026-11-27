@@ -2,9 +2,10 @@ use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
-    compile_v3_tool_thinking_turn_context_at_req04, V3HubEntryProtocol, V3HubInvocationSource,
-    V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
-    V3HubRequestSemanticProtocol, V3HubTransportIntent, V3ToolThinkingTurnContext,
+    compile_v3_tool_thinking_turn_context_at_req04, V3HubEntryProtocol,
+    V3HubExplicitHistoryProvenance, V3HubInvocationSource, V3HubReqChatProcess04Governed,
+    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
+    V3HubTransportIntent, V3ToolThinkingTurnContext,
 };
 use crate::operation_runner::{run_v3_single_node_operator, V3OperationGraph};
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
@@ -159,7 +160,7 @@ struct GovernChatRequestSideOutput {
     tool_thinking_turn_context: V3ToolThinkingTurnContext,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct GovernChatRequestContext {
     entry_protocol: V3HubEntryProtocol,
     invocation_source: V3HubInvocationSource,
@@ -167,6 +168,7 @@ struct GovernChatRequestContext {
     semantic_protocol: V3HubRequestSemanticProtocol,
     canonicalized_from_responses: bool,
     memory_raw_capture_guidance_injected: bool,
+    explicit_history_pairing: V3HubExplicitHistoryProvenance,
 }
 
 impl GovernChatRequestContext {
@@ -178,10 +180,11 @@ impl GovernChatRequestContext {
             semantic_protocol: normalized.semantic_protocol,
             canonicalized_from_responses: normalized.canonicalized_from_responses,
             memory_raw_capture_guidance_injected: normalized.memory_raw_capture_guidance_injected,
+            explicit_history_pairing: normalized.explicit_history_pairing.clone(),
         }
     }
 
-    fn into_normalized(self, payload: Value) -> V3HubReqInbound02Normalized {
+    fn into_normalized(&self, payload: Value) -> V3HubReqInbound02Normalized {
         V3HubReqInbound02Normalized {
             previous: build_v3_hub_req_inbound_01_client_raw(
                 payload,
@@ -192,6 +195,7 @@ impl GovernChatRequestContext {
             semantic_protocol: self.semantic_protocol,
             canonicalized_from_responses: self.canonicalized_from_responses,
             memory_raw_capture_guidance_injected: self.memory_raw_capture_guidance_injected,
+            explicit_history_pairing: self.explicit_history_pairing.clone(),
         }
     }
 }
@@ -296,11 +300,13 @@ fn govern_chat_request_at_req04(
             V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini
         );
     let allow_missing_parent = normalized.entry_protocol() == V3HubEntryProtocol::Responses;
+    let explicit_history_pairing = normalized.explicit_history_pairing.clone();
     let tool_output_count = govern_tool_outputs_at_req04(
         Arc::make_mut(&mut normalized.previous.payload.0),
         govern_chat_messages_tool_outputs,
         allow_missing_parent,
         current_payload_start,
+        &explicit_history_pairing,
     )?;
     events.push(V3HubRelayRequestHookEvent::Req04ToolGoverned);
     events.push(V3HubRelayRequestHookEvent::Req04Exit);
@@ -500,6 +506,7 @@ fn govern_tool_outputs_at_req04(
     govern_chat_messages: bool,
     allow_missing_parent: bool,
     current_payload_start: usize,
+    explicit_history_pairing: &V3HubExplicitHistoryProvenance,
 ) -> Result<usize, V3HubRelayRequestError> {
     if payload.get("input").and_then(Value::as_array).is_none()
         && payload.get("messages").and_then(Value::as_array).is_some()
@@ -509,6 +516,7 @@ fn govern_tool_outputs_at_req04(
             payload,
             allow_missing_parent,
             current_payload_start,
+            explicit_history_pairing,
         );
     }
     let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
@@ -576,6 +584,7 @@ fn govern_chat_tool_outputs_at_req04(
     payload: &mut Value,
     allow_missing_parent: bool,
     current_payload_start: usize,
+    explicit_history_pairing: &V3HubExplicitHistoryProvenance,
 ) -> Result<usize, V3HubRelayRequestError> {
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(0);
@@ -600,13 +609,12 @@ fn govern_chat_tool_outputs_at_req04(
                     expected_outputs.clear();
                 }
                 if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-                    for call in calls {
+                    for (call_idx, call) in calls.iter().enumerate() {
                         if let Some((call_id, expected_kind)) =
                             expected_tool_call_output_from_chat_call(call)
                         {
-                            let call_source_pos = call
-                                .pointer("/routecodex_chat_extension/responses_tool_input_order")
-                                .and_then(Value::as_u64);
+                            let call_source_pos =
+                                explicit_history_pairing.tool_call_order(index, call_idx);
                             expected_outputs
                                 .entry(call_id)
                                 .or_default()
@@ -639,9 +647,7 @@ fn govern_chat_tool_outputs_at_req04(
             }
             return Err(V3HubRelayRequestError::MalformedToolOutput { index });
         };
-        let output_source_pos = message
-            .pointer("/routecodex_chat_extension/responses_tool_input_order")
-            .and_then(Value::as_u64);
+        let output_source_pos = explicit_history_pairing.message_order(index);
         let is_preceding_parent =
             |call_source_pos: Option<u64>| match (call_source_pos, output_source_pos) {
                 (Some(call_pos), Some(output_pos)) => call_pos < output_pos,

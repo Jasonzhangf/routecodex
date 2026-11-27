@@ -5,11 +5,12 @@ use super::request_outbound_format::{
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance,
     classify_v3_provider_compat_error,
     encode_v3_responses_semantic_as_anthropic_request_with_drops, provider_protocol_compat_id,
-    V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubReqTarget06Resolved, V3HubTransportIntent,
-    V3ProviderCompatError, V3ProviderCompatProfileId,
+    V3HubEntryProtocol, V3HubExplicitHistoryProvenance, V3HubProviderWireProtocol,
+    V3HubReqTarget06Resolved, V3HubTransportIntent, V3ProviderCompatError,
+    V3ProviderCompatProfileId,
 };
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use crate::selected_provider_model_binding::{
@@ -53,6 +54,12 @@ pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
                 .transport_intent,
             provider_protocol,
             input.selected_target.clone(),
+            input
+                .previous
+                .previous
+                .previous
+                .explicit_history_pairing
+                .clone(),
         )
         .map_err(|error| {
             classify_v3_provider_compat_error("request_protocol", &profile, error.message)
@@ -111,6 +118,24 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request(
     provider_protocol: V3HubProviderWireProtocol,
     selected: &routecodex_v3_target::V3TargetCandidate,
 ) -> Result<V3HubReqOutbound07StandardProjection, String> {
+    project_v3_operation_runner_standard_provider_request_with_provenance(
+        governed_payload,
+        entry_protocol,
+        transport_intent,
+        provider_protocol,
+        selected,
+        None,
+    )
+}
+
+pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provenance(
+    governed_payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+    transport_intent: V3HubTransportIntent,
+    provider_protocol: V3HubProviderWireProtocol,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    explicit_history_pairing: Option<&V3HubExplicitHistoryProvenance>,
+) -> Result<V3HubReqOutbound07StandardProjection, String> {
     let mut drops = Vec::new();
     let namespace_registry = NamespaceToolIdentityRegistry::from_request(
         governed_payload,
@@ -140,13 +165,14 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request(
                 .as_deref()
                 .is_some_and(|profile| profile.eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE));
             let (payload, responses_drops) =
-                build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options(
+                build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
                     governed_payload,
                     selected
                         .model_capabilities
                         .iter()
                         .any(|capability| capability == "web_search"),
                     preserve_responses_custom_tools,
+                    explicit_history_pairing,
                 )?;
             drops.extend(responses_drops);
             payload

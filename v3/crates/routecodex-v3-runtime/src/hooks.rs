@@ -525,13 +525,16 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         crate::hub_v1::V3HubProviderWireProtocol::Responses
             if request_body.get("messages").is_some() =>
         {
+            let empty_provenance = crate::hub_v1::V3HubExplicitHistoryProvenance::empty();
             let (wire_body, mut projection_drops) =
-                crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+                crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
                     &request_body,
                     candidate
                         .model_capabilities
                         .iter()
                         .any(|capability| capability == "web_search"),
+                    false,
+                    Some(&empty_provenance),
                 )
                 .map_err(|error| {
                     raise_v3_source_via_err01(

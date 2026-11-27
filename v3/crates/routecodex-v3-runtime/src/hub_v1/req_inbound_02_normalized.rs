@@ -13,12 +13,135 @@ const NORMALIZE_REQUEST_LOSSLESSLY_OPERATOR: &str =
 const NORMALIZE_REQUEST_LOSSLESSLY_NODE: &str = "normalize_request_losslessly";
 const NORMALIZE_REQUEST_LOSSLESSLY_OPERATOR_VERSION: &str = "1";
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct V3HubMessageHistoryProvenance {
+    pub(crate) message_input_order: Option<u64>,
+    pub(crate) tool_call_orders: Vec<Option<u64>>,
+    pub(crate) reasoning_item_orders: Vec<Option<u64>>,
+    pub(crate) assistant_item_orders: Option<Vec<Option<u64>>>,
+}
+
+/// Decoder-owned request history provenance (`v3.operation_runner.explicit_history_pairing`).
+///
+/// Populated exclusively from native Responses inbound decoding at `ReqInbound02`.
+/// Un-decoded legacy `messages` rows and non-Responses entries carry empty provenance
+/// so client-supplied extension fields can never control `Req04` pairing or Outbound order.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct V3HubExplicitHistoryProvenance {
+    pub(crate) message_entries: Vec<V3HubMessageHistoryProvenance>,
+}
+
+impl V3HubExplicitHistoryProvenance {
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn from_decoded_responses_payload(payload: &Value) -> Self {
+        let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+            return Self::empty();
+        };
+        let message_entries = messages
+            .iter()
+            .map(|message| {
+                let message_input_order = message
+                    .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                    .and_then(Value::as_u64);
+                let tool_call_orders = message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .map(|calls| {
+                        calls
+                            .iter()
+                            .map(|call| {
+                                call.pointer(
+                                    "/routecodex_chat_extension/responses_tool_input_order",
+                                )
+                                .and_then(Value::as_u64)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let reasoning_item_orders = message
+                    .pointer("/routecodex_chat_extension/responses_reasoning_items")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .map(|entry| entry.get("source_input_order").and_then(Value::as_u64))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let assistant_item_orders = message
+                    .pointer("/routecodex_chat_extension/responses_assistant_items")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .map(|entry| entry.get("source_input_order").and_then(Value::as_u64))
+                            .collect()
+                    });
+                V3HubMessageHistoryProvenance {
+                    message_input_order,
+                    tool_call_orders,
+                    reasoning_item_orders,
+                    assistant_item_orders,
+                }
+            })
+            .collect();
+        Self { message_entries }
+    }
+
+    pub(crate) fn message_order(&self, message_index: usize) -> Option<u64> {
+        self.message_entries
+            .get(message_index)
+            .and_then(|entry| entry.message_input_order)
+    }
+
+    pub(crate) fn tool_call_order(&self, message_index: usize, call_index: usize) -> Option<u64> {
+        self.message_entries
+            .get(message_index)
+            .and_then(|entry| entry.tool_call_orders.get(call_index).copied().flatten())
+    }
+
+    pub(crate) fn reasoning_item_order(
+        &self,
+        message_index: usize,
+        item_index: usize,
+    ) -> Option<u64> {
+        self.message_entries.get(message_index).and_then(|entry| {
+            entry
+                .reasoning_item_orders
+                .get(item_index)
+                .copied()
+                .flatten()
+        })
+    }
+
+    pub(crate) fn has_assistant_items(&self, message_index: usize) -> bool {
+        self.message_entries
+            .get(message_index)
+            .is_some_and(|entry| entry.assistant_item_orders.is_some())
+    }
+
+    pub(crate) fn assistant_item_order(
+        &self,
+        message_index: usize,
+        entry_index: usize,
+    ) -> Option<u64> {
+        self.message_entries
+            .get(message_index)
+            .and_then(|entry| entry.assistant_item_orders.as_ref())
+            .and_then(|orders| orders.get(entry_index).copied().flatten())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubReqInbound02Normalized {
     pub(crate) previous: V3HubReqInbound01ClientRaw,
     pub(crate) semantic_protocol: V3HubRequestSemanticProtocol,
     pub(crate) canonicalized_from_responses: bool,
     pub(crate) memory_raw_capture_guidance_injected: bool,
+    pub(crate) explicit_history_pairing: V3HubExplicitHistoryProvenance,
 }
 
 /// Which request field carries the conversation history this stage will read.
@@ -105,6 +228,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
                 semantic_protocol: metadata.semantic_protocol,
                 canonicalized_from_responses: metadata.canonicalized_from_responses,
                 memory_raw_capture_guidance_injected: metadata.memory_raw_capture_guidance_injected,
+                explicit_history_pairing: metadata.explicit_history_pairing,
             })
         }
         (Ok(_), Some(Err(error))) => Err(error),
@@ -119,6 +243,7 @@ struct NormalizeRequestLosslesslySideOutput {
     semantic_protocol: V3HubRequestSemanticProtocol,
     canonicalized_from_responses: bool,
     memory_raw_capture_guidance_injected: bool,
+    explicit_history_pairing: V3HubExplicitHistoryProvenance,
 }
 
 struct NormalizeRequestLosslesslyOperator {
@@ -161,6 +286,7 @@ impl Operator for NormalizeRequestLosslesslyOperator {
                     canonicalized_from_responses: normalized.canonicalized_from_responses,
                     memory_raw_capture_guidance_injected: normalized
                         .memory_raw_capture_guidance_injected,
+                    explicit_history_pairing: normalized.explicit_history_pairing,
                 };
                 *self.side_output.lock().map_err(|_| {
                     "normalize_request_losslessly side-output holder is poisoned".to_string()
@@ -191,12 +317,15 @@ fn normalize_v3_hub_req_inbound_02_payload(
     {
         let raw = Arc::make_mut(&mut input.payload.0);
         let canonical = responses_merged_chat_canonical(raw)?;
+        let explicit_history_pairing =
+            V3HubExplicitHistoryProvenance::from_decoded_responses_payload(&canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
             canonicalized_from_responses: true,
             memory_raw_capture_guidance_injected: false,
+            explicit_history_pairing,
         });
     }
     if input.entry_protocol == V3HubEntryProtocol::Anthropic {
@@ -253,12 +382,14 @@ fn normalize_v3_hub_req_inbound_02_payload(
                 canonical_object.insert("routecodex_chat_extension".to_string(), value);
             }
         }
+        strip_client_history_provenance_fields(&mut canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
             canonicalized_from_responses: true,
             memory_raw_capture_guidance_injected: false,
+            explicit_history_pairing: V3HubExplicitHistoryProvenance::empty(),
         });
     }
     if input.entry_protocol == V3HubEntryProtocol::Gemini {
@@ -272,49 +403,161 @@ fn normalize_v3_hub_req_inbound_02_payload(
                 &source_payload,
             )
             .map_err(|error| format!("Gemini inbound Chat canonicalization failed: {error}"))?;
+        strip_client_history_provenance_fields(&mut canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
             canonicalized_from_responses: true,
             memory_raw_capture_guidance_injected: false,
+            explicit_history_pairing: V3HubExplicitHistoryProvenance::empty(),
         });
+    }
+    if payload_has_client_history_provenance_fields(&input.payload.0) {
+        strip_client_history_provenance_fields(Arc::make_mut(&mut input.payload.0));
     }
     Ok(V3HubReqInbound02Normalized {
         previous: input,
         semantic_protocol: V3HubRequestSemanticProtocol::Chat,
         canonicalized_from_responses: false,
         memory_raw_capture_guidance_injected: false,
+        explicit_history_pairing: V3HubExplicitHistoryProvenance::empty(),
     })
+}
+
+fn payload_has_client_history_provenance_fields(payload: &Value) -> bool {
+    payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .is_some_and(|messages| {
+            messages.iter().any(|message| {
+                let msg_ext = message
+                    .get("routecodex_chat_extension")
+                    .and_then(Value::as_object);
+                let has_msg_fields = msg_ext.is_some_and(|ext| {
+                    ext.contains_key("responses_tool_input_order")
+                        || ext.contains_key(
+                            super::responses_openai_codec::RESPONSES_ASSISTANT_ITEMS_EXTENSION,
+                        )
+                        || ext
+                            .get(super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION)
+                            .and_then(Value::as_array)
+                            .is_some_and(|items| {
+                                items.iter().any(|entry| {
+                                    entry
+                                        .as_object()
+                                        .is_some_and(|obj| obj.contains_key("source_input_order"))
+                                })
+                            })
+                });
+                let has_call_fields = message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_some_and(|calls| {
+                        calls.iter().any(|call| {
+                            call.pointer("/routecodex_chat_extension/responses_tool_input_order")
+                                .is_some()
+                        })
+                    });
+                has_msg_fields || has_call_fields
+            })
+        })
+}
+
+fn strip_client_history_provenance_fields(payload: &mut Value) {
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            strip_client_history_provenance_fields_from_message(message);
+        }
+    }
+}
+
+fn strip_client_history_provenance_fields_from_message(message: &mut Value) {
+    let Some(row) = message.as_object_mut() else {
+        return;
+    };
+    let remove_empty_ext = if let Some(ext) = row
+        .get_mut("routecodex_chat_extension")
+        .and_then(Value::as_object_mut)
+    {
+        ext.remove("responses_tool_input_order");
+        ext.remove(super::responses_openai_codec::RESPONSES_ASSISTANT_ITEMS_EXTENSION);
+        if let Some(items) = ext
+            .get_mut(super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION)
+            .and_then(Value::as_array_mut)
+        {
+            for entry in items {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("source_input_order");
+                }
+            }
+        }
+        ext.is_empty()
+    } else {
+        false
+    };
+    if remove_empty_ext {
+        row.remove("routecodex_chat_extension");
+    }
+    if let Some(calls) = row.get_mut("tool_calls").and_then(Value::as_array_mut) {
+        for call in calls {
+            let Some(call_obj) = call.as_object_mut() else {
+                continue;
+            };
+            let remove_call_ext = if let Some(ext) = call_obj
+                .get_mut("routecodex_chat_extension")
+                .and_then(Value::as_object_mut)
+            {
+                ext.remove("responses_tool_input_order");
+                ext.is_empty()
+            } else {
+                false
+            };
+            if remove_call_ext {
+                call_obj.remove("routecodex_chat_extension");
+            }
+        }
+    }
 }
 
 fn merge_responses_chat_histories(
     source: &[Value],
     decoded: &[Value],
 ) -> Result<Vec<Value>, String> {
-    if source.len() == decoded.len() {
+    let mut sanitized_source = source.to_vec();
+    for message in &mut sanitized_source {
+        strip_client_history_provenance_fields_from_message(message);
+    }
+    if sanitized_source.len() == decoded.len() {
         let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
             std::collections::HashMap::new();
-        let mut merged = Vec::with_capacity(source.len());
+        let mut merged = Vec::with_capacity(sanitized_source.len());
         let mut all_matched = true;
-        for (src, dec) in source.iter().zip(decoded) {
+        for (src, dec) in sanitized_source.iter().zip(decoded) {
             let output_order = dec
                 .pointer("/routecodex_chat_extension/responses_tool_input_order")
                 .and_then(Value::as_u64);
-            let orphan_tool_in_source = src.get("role").and_then(Value::as_str) == Some("tool")
-                && !src
-                    .get("tool_call_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| {
-                        seen_calls.get(id).is_some_and(|call_orders| {
-                            call_orders
-                                .iter()
-                                .any(|call_order| match (call_order, output_order) {
-                                    (Some(call_pos), Some(output_pos)) => call_pos < &output_pos,
-                                    _ => true,
+            let is_named_output_in_source = src
+                .pointer("/routecodex_chat_extension/responses_tool_output_name")
+                .is_some()
+                && src.get("tool_call_id").is_none();
+            let orphan_tool_in_source = is_named_output_in_source
+                || (src.get("role").and_then(Value::as_str) == Some("tool")
+                    && !src
+                        .get("tool_call_id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| {
+                            seen_calls.get(id).is_some_and(|call_orders| {
+                                call_orders.iter().any(|call_order| {
+                                    match (call_order, output_order) {
+                                        (Some(call_pos), Some(output_pos)) => {
+                                            call_pos < &output_pos
+                                        }
+                                        _ => true,
+                                    }
                                 })
-                        })
-                    });
+                            })
+                        }));
             if let Some(value) = merge_equivalent_chat_value(src, dec, orphan_tool_in_source) {
                 for (call_id, call_order) in
                     super::responses_openai_codec::collect_v3_openai_chat_tool_calls_with_order(
@@ -336,20 +579,21 @@ fn merge_responses_chat_histories(
     // Legacy public hook callers supply preceding Chat calls and current Responses
     // results. Decode the results first; Req04 still owns id/kind pairing.
     if decoded.iter().all(|message| message["role"] == "tool") {
-        let mut merged = source.to_vec();
+        let mut merged = sanitized_source;
         for result in decoded {
-            if let Some(existing) = merged.iter_mut().find(|message| {
+            if let Some(pos) = merged.iter().position(|message| {
                 message["role"] == "tool"
                     && message.get("tool_call_id") == result.get("tool_call_id")
             }) {
-                let call_id = existing.get("tool_call_id").and_then(Value::as_str);
+                let call_id = merged[pos].get("tool_call_id").and_then(Value::as_str);
                 let orphan_tool_in_source = !call_id.is_some_and(|id| {
-                    source.iter().any(|message| {
+                    merged[..pos].iter().any(|message| {
                         super::responses_openai_codec::collect_v3_openai_chat_tool_call_ids(message)
                             .iter()
                             .any(|call| call == id)
                     })
                 });
+                let existing = &mut merged[pos];
                 *existing = merge_equivalent_chat_value(existing, result, orphan_tool_in_source).ok_or_else(|| {
                     "Responses inbound canonicalization failed: conflicting tool output representations".to_string()
                 })?;
