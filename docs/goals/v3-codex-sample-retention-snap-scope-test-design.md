@@ -9,7 +9,7 @@
   - `--snap`: Debug snapshots and Relay sample persistence enabled, Direct sample persistence disabled;
   - `--snapall`: Debug snapshots plus Direct and Relay sample persistence enabled.
 - No-flag startup does not disable unrelated Debug runtime features such as provider-request dry-run.
-- Server is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`.
+- Debug `V3CodexSampleStore` is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`; Server captures and enqueues typed artifacts through the declared queue edge.
 - Authorized sample payloads are enqueued to one Debug-owned worker bounded by a 64-MiB byte budget across queued and in-flight writes; each job charges its serialized payload plus a fixed overhead, so a full-sampling burst is not dropped by a message-count limit while total queued memory stays bounded. A completion barrier waits for all previously accepted writes.
 - Queue overload and oversized payloads are logged and retained as request/file-qualified failures without rejecting a passable business request.
 - A completion barrier reports a snapshot without draining the failure ledger; worker shutdown drains the bounded ledger and returns an omitted-count summary when needed.
@@ -18,7 +18,7 @@
 - Provider request/response snapshots pass through Debug redaction and payload budgets before filesystem IO.
 - Debug checks the final serialized artifact against a hard 64 KiB limit; recursive estimates alone are not sufficient.
 - Relay and Direct SSE samples retain only a Debug-owned bounded prefix, append an explicit truncation marker, and write only at initial capture plus terminal EOF/error.
-- Each endpoint/port retains at most 100 request directories. Server startup enforces the cap even when live capture is disabled, and every later sample write re-enforces it. Eviction affects debug artifacts only.
+- Ordinary success samples retain one global budget of at most 100 request directories across all endpoints and ports. Failed-attempt records use a separate 256-directory reserve and remain for 30 minutes from first successful persistence, expiring oldest-first only after that floor. Debug startup and new-directory writes enforce the budgets even when live capture is disabled; eviction affects debug artifacts only.
 - Live client/provider payloads, routing, continuation, errors, and MetadataCenter remain unchanged.
 
 ## Lifecycle Tests
@@ -35,7 +35,8 @@
    - managed `--snap` runtime status reports Direct snapshots disabled;
    - managed `--snapall` runtime status reports Direct snapshots enabled.
 3. Server white-box:
-   - 101 distinct request directories leave exactly 100;
+   - 101 distinct success request directories leave exactly 100;
+   - a failure remains through later success eviction and is evicted oldest-first at or after the 30-minute persistence floor;
    - oldest directory is removed and newest remains;
    - multiple files for one request still count as one sample;
    - provider snapshot persistence redacts sensitive/base64 content and preserves bounded diagnostic shape.
