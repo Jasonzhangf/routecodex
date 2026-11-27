@@ -6750,6 +6750,231 @@ async fn issue4a0b3aa_r8_reasoning_carrier_retains_both_encrypted_entries_on_fir
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r9_orphan_before_later_call_dual_reasoning_and_carrier_order_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_r9","status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r9-key");
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    {
+        let provider = manifest.providers.values_mut().next().unwrap();
+        let mut model = provider.models.remove("test").unwrap();
+        model.id = "gpt-5.5".into();
+        model.wire_name = "gpt-5.5".into();
+        provider.default_model = "gpt-5.5".into();
+        provider.models.insert("gpt-5.5".into(), model);
+    }
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        for target in &mut pool.targets {
+            target.model = Some("gpt-5.5".into());
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    // P1-1 (kind): [call A, custom output B, call B, output A, output B] must preserve orphan custom output B.
+    let kind_input = json!([
+        {"type":"function_call","id":"fc_a","call_id":"call_a","name":"lookup","arguments":"{}"},
+        {"type":"custom_tool_call_output","call_id":"call_b","output":"orphan custom before call b"},
+        {"type":"function_call","id":"fc_b","call_id":"call_b","name":"lookup","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_a","output":"result a"},
+        {"type":"function_call_output","call_id":"call_b","output":"result b"}
+    ]);
+    let kind_res = client
+        .post(&endpoint)
+        .json(&json!({"model":"gpt-5.5","input":kind_input,"stream":false}))
+        .send()
+        .await
+        .expect("orphan custom output before later call B must succeed");
+    assert_eq!(kind_res.status(), StatusCode::OK);
+    let kind_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("kind capture timeout")
+        .expect("kind capture");
+    assert_eq!(kind_capture.body["input"], kind_input);
+
+    // Real preceding-parent kind mismatch must still be rejected without dispatching upstream.
+    let mismatch_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"gpt-5.5",
+            "stream":false,
+            "input":[
+                {"type":"function_call","id":"fc_b","call_id":"call_b","name":"lookup","arguments":"{}"},
+                {"type":"custom_tool_call_output","call_id":"call_b","output":"mismatched kind after parent"}
+            ]
+        }))
+        .send()
+        .await;
+    assert!(
+        mismatch_res.is_err(),
+        "real preceding-parent kind mismatch must fail Req04 without proxy error body: {mismatch_res:?}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "kind mismatch must not dispatch upstream"
+    );
+
+    // P1-1 (media) + P1-2: same-kind orphan JSON image string before a later call B must stay literal,
+    // while paired output B after call B projects to [Image] on text-only default target.
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    let media_input = json!([
+        {"type":"function_call","id":"fc_a","call_id":"call_a","name":"lookup","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_b","output":encoded_image},
+        {"type":"function_call","id":"fc_b","call_id":"call_b","name":"read_image","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_a","output":"result a"},
+        {"type":"function_call_output","call_id":"call_b","output":encoded_image}
+    ]);
+    let media_res = client
+        .post(&endpoint)
+        .json(&json!({"model":"gpt-5.5","input":media_input,"stream":false}))
+        .send()
+        .await
+        .expect("orphan JSON image before later call B must succeed");
+    assert_eq!(media_res.status(), StatusCode::OK);
+    let media_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("media capture timeout")
+        .expect("media capture");
+    let mut expected_media_input = media_input.clone();
+    expected_media_input[4]["output"] = json!([{"type":"input_text","text":"[Image]"}]);
+    assert_eq!(
+        media_capture.body["input"], expected_media_input,
+        "earlier orphan JSON image string must stay literal while later paired output projects: {}",
+        media_capture.body
+    );
+
+    // P1-3: dual-history (input + equivalent messages twin with responses_reasoning_items without source_input_order).
+    let dual_reasoning_input = json!([
+        {
+            "type": "reasoning",
+            "id": "rs_twin_1",
+            "encrypted_content": "enc_twin_1",
+            "summary": [{"type": "summary_text", "text": "thought one"}]
+        },
+        {
+            "type": "reasoning",
+            "id": "rs_twin_2",
+            "encrypted_content": "enc_twin_2",
+            "summary": [{"type": "summary_text", "text": "thought two"}]
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "after twin reasoning"}]
+        }
+    ]);
+    let dual_reasoning_messages = json!([
+        {
+            "role": "assistant",
+            "content": "after twin reasoning",
+            "reasoning_content": "thought one\nthought two",
+            "routecodex_chat_extension": {
+                "responses_reasoning_items": [
+                    {
+                        "id": "rs_twin_1",
+                        "encrypted_content": "enc_twin_1",
+                        "summary": [{"type": "summary_text", "text": "thought one"}]
+                    },
+                    {
+                        "id": "rs_twin_2",
+                        "encrypted_content": "enc_twin_2",
+                        "summary": [{"type": "summary_text", "text": "thought two"}]
+                    }
+                ]
+            }
+        }
+    ]);
+    let dual_res = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"gpt-5.5",
+            "input":dual_reasoning_input,
+            "messages":dual_reasoning_messages,
+            "stream":false
+        }))
+        .send()
+        .await
+        .expect("equivalent dual-history with responses_reasoning_items must succeed");
+    assert_eq!(dual_res.status(), StatusCode::OK);
+    let dual_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("dual reasoning capture timeout")
+        .expect("dual reasoning capture");
+    assert_eq!(dual_capture.body["input"], dual_reasoning_input);
+
+    // P1-4: [visible assistant message, R1, R2 with valid distinct carrier entry, function_call, function_call_output].
+    let carrier_order_input = json!([
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible before"}]},
+        {"type":"reasoning","id":"rs_r1","encrypted_content":"enc_r1","summary":[{"type":"summary_text","text":"r1"}]},
+        {
+            "type":"reasoning",
+            "id":"rs_r2",
+            "encrypted_content":"enc_r2",
+            "summary":[{"type":"summary_text","text":"r2"}],
+            "routecodex_chat_extension":{
+                "responses_reasoning_items":[
+                    {"id":"rs_carrier","encrypted_content":"enc_carrier"}
+                ]
+            }
+        },
+        {"type":"function_call","id":"fc_tool","call_id":"call_tool","name":"lookup","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_tool","output":"tool ok"}
+    ]);
+    let carrier_res = client
+        .post(&endpoint)
+        .json(&json!({"model":"gpt-5.5","input":carrier_order_input,"stream":false}))
+        .send()
+        .await
+        .expect("visible assistant + R1 + R2 with carrier + tool history must succeed");
+    assert_eq!(carrier_res.status(), StatusCode::OK);
+    let carrier_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("carrier order capture timeout")
+        .expect("carrier order capture");
+    assert_eq!(
+        carrier_capture.body["input"],
+        json!([
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible before"}]},
+            {"type":"reasoning","id":"rs_r1","encrypted_content":"enc_r1","summary":[{"type":"summary_text","text":"r1"}]},
+            {"type":"reasoning","id":"rs_carrier","encrypted_content":"enc_carrier"},
+            {"type":"reasoning","id":"rs_r2","encrypted_content":"enc_r2","summary":[{"type":"summary_text","text":"r2"}]},
+            {"type":"function_call","id":"fc_tool","call_id":"call_tool","name":"lookup","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_tool","output":"tool ok"}
+        ])
+    );
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        captures.try_recv().is_err(),
+        "no extra upstream requests expected"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

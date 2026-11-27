@@ -590,11 +590,24 @@ fn attach_v3_responses_reasoning_input_order(
 }
 
 pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value]) {
-    let mut seen_call_ids = std::collections::HashSet::new();
+    let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
+        std::collections::HashMap::new();
     for message in messages {
         if message.get("role").and_then(Value::as_str) == Some("tool") {
             let call_id = message.get("tool_call_id").and_then(Value::as_str);
-            let paired = call_id.is_some_and(|id| seen_call_ids.contains(id));
+            let output_order = message
+                .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                .and_then(Value::as_u64);
+            let paired = call_id.is_some_and(|id| {
+                seen_calls.get(id).is_some_and(|call_orders| {
+                    call_orders
+                        .iter()
+                        .any(|call_order| match (call_order, output_order) {
+                            (Some(call_pos), Some(output_pos)) => call_pos < &output_pos,
+                            _ => true,
+                        })
+                })
+            });
             if !paired {
                 if let Some(raw_output) = message
                     .pointer("/routecodex_chat_extension/responses_tool_output_content")
@@ -606,7 +619,9 @@ pub(super) fn resolve_orphan_responses_tool_output_media(messages: &mut [Value])
                 }
             }
         }
-        seen_call_ids.extend(collect_v3_openai_chat_tool_call_ids(message));
+        for (call_id, call_order) in collect_v3_openai_chat_tool_calls_with_order(message) {
+            seen_calls.entry(call_id).or_default().push(call_order);
+        }
     }
 }
 
@@ -892,6 +907,15 @@ fn v3_openai_chat_message_has_visible_payload(message: &Value) -> bool {
 }
 
 pub(super) fn collect_v3_openai_chat_tool_call_ids(message: &Value) -> Vec<String> {
+    collect_v3_openai_chat_tool_calls_with_order(message)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect()
+}
+
+pub(super) fn collect_v3_openai_chat_tool_calls_with_order(
+    message: &Value,
+) -> Vec<(String, Option<u64>)> {
     message
         .get("tool_calls")
         .and_then(Value::as_array)
@@ -899,13 +923,18 @@ pub(super) fn collect_v3_openai_chat_tool_call_ids(message: &Value) -> Vec<Strin
             tool_calls
                 .iter()
                 .filter_map(|call| {
-                    call.get("id")
+                    let call_id = call
+                        .get("id")
                         .or_else(|| call.get("call_id"))
                         .or_else(|| call.get("tool_call_id"))
                         .and_then(Value::as_str)
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
-                        .map(str::to_string)
+                        .map(str::to_string)?;
+                    let order = call
+                        .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                        .and_then(Value::as_u64);
+                    Some((call_id, order))
                 })
                 .collect::<Vec<_>>()
         })

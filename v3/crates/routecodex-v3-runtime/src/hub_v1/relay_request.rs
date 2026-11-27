@@ -580,9 +580,12 @@ fn govern_chat_tool_outputs_at_req04(
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
-    let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
+    let mut expected_outputs: BTreeMap<
+        String,
+        Vec<(V3HubRelayExpectedToolOutputKind, Option<u64>)>,
+    > = BTreeMap::new();
+    let mut prior_outputs: BTreeMap<String, Vec<(V3HubRelayExpectedToolOutputKind, Option<u64>)>> =
         BTreeMap::new();
-    let mut prior_outputs = BTreeMap::new();
     let mut output_count = 0usize;
     for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
         match message.get("role").and_then(Value::as_str) {
@@ -590,7 +593,9 @@ fn govern_chat_tool_outputs_at_req04(
                 // A Responses continuation may contain further receipts for
                 // earlier calls after an intervening assistant group.
                 if allow_missing_parent {
-                    prior_outputs.append(&mut expected_outputs);
+                    for (call_id, entries) in std::mem::take(&mut expected_outputs) {
+                        prior_outputs.entry(call_id).or_default().extend(entries);
+                    }
                 } else {
                     expected_outputs.clear();
                 }
@@ -599,10 +604,13 @@ fn govern_chat_tool_outputs_at_req04(
                         if let Some((call_id, expected_kind)) =
                             expected_tool_call_output_from_chat_call(call)
                         {
+                            let call_source_pos = call
+                                .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                                .and_then(Value::as_u64);
                             expected_outputs
                                 .entry(call_id)
                                 .or_default()
-                                .push(expected_kind);
+                                .push((expected_kind, call_source_pos));
                         }
                     }
                 }
@@ -631,10 +639,37 @@ fn govern_chat_tool_outputs_at_req04(
             }
             return Err(V3HubRelayRequestError::MalformedToolOutput { index });
         };
-        let Some(expected_kinds) = expected_outputs
+        let output_source_pos = message
+            .pointer("/routecodex_chat_extension/responses_tool_input_order")
+            .and_then(Value::as_u64);
+        let is_preceding_parent =
+            |call_source_pos: Option<u64>| match (call_source_pos, output_source_pos) {
+                (Some(call_pos), Some(output_pos)) => call_pos < output_pos,
+                _ => true,
+            };
+        let expected_kinds = expected_outputs
             .get(&call_id)
-            .or_else(|| prior_outputs.get(&call_id))
-        else {
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|(_, call_pos)| is_preceding_parent(*call_pos))
+                    .map(|(kind, _)| *kind)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|kinds| !kinds.is_empty())
+            .or_else(|| {
+                prior_outputs
+                    .get(&call_id)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter(|(_, call_pos)| is_preceding_parent(*call_pos))
+                            .map(|(kind, _)| *kind)
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|kinds| !kinds.is_empty())
+            });
+        let Some(expected_kinds) = expected_kinds else {
             if allow_missing_parent {
                 continue;
             }

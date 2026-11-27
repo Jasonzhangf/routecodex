@@ -293,20 +293,37 @@ fn merge_responses_chat_histories(
     decoded: &[Value],
 ) -> Result<Vec<Value>, String> {
     if source.len() == decoded.len() {
-        let mut seen_call_ids = std::collections::HashSet::new();
+        let mut seen_calls: std::collections::HashMap<String, Vec<Option<u64>>> =
+            std::collections::HashMap::new();
         let mut merged = Vec::with_capacity(source.len());
         let mut all_matched = true;
         for (src, dec) in source.iter().zip(decoded) {
+            let output_order = dec
+                .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                .and_then(Value::as_u64);
             let orphan_tool_in_source = src.get("role").and_then(Value::as_str) == Some("tool")
                 && !src
                     .get("tool_call_id")
                     .and_then(Value::as_str)
-                    .is_some_and(|id| seen_call_ids.contains(id));
+                    .is_some_and(|id| {
+                        seen_calls.get(id).is_some_and(|call_orders| {
+                            call_orders
+                                .iter()
+                                .any(|call_order| match (call_order, output_order) {
+                                    (Some(call_pos), Some(output_pos)) => call_pos < &output_pos,
+                                    _ => true,
+                                })
+                        })
+                    });
             if let Some(value) = merge_equivalent_chat_value(src, dec, orphan_tool_in_source) {
+                for (call_id, call_order) in
+                    super::responses_openai_codec::collect_v3_openai_chat_tool_calls_with_order(
+                        &value,
+                    )
+                {
+                    seen_calls.entry(call_id).or_default().push(call_order);
+                }
                 merged.push(value);
-                seen_call_ids.extend(
-                    super::responses_openai_codec::collect_v3_openai_chat_tool_call_ids(src),
-                );
             } else {
                 all_matched = false;
                 break;
@@ -387,7 +404,14 @@ fn merge_equivalent_chat_value(
                     };
                     for (field, value) in value.as_object()? {
                         if let Some(existing) = fields.get(field) {
-                            if existing != value {
+                            if field
+                                == super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION
+                            {
+                                fields.insert(
+                                    field.clone(),
+                                    merge_equivalent_responses_reasoning_items(existing, value)?,
+                                );
+                            } else if existing != value {
                                 return None;
                             }
                         } else {
@@ -431,6 +455,43 @@ fn merge_equivalent_chat_value(
         _ if source == decoded => Some(source.clone()),
         _ => None,
     }
+}
+
+fn merge_equivalent_responses_reasoning_items(existing: &Value, decoded: &Value) -> Option<Value> {
+    let (Some(existing_items), Some(decoded_items)) = (existing.as_array(), decoded.as_array())
+    else {
+        return None;
+    };
+    if existing_items.len() != decoded_items.len() {
+        return None;
+    }
+    let mut merged = Vec::with_capacity(existing_items.len());
+    for (existing_entry, decoded_entry) in existing_items.iter().zip(decoded_items) {
+        let (Some(existing_obj), Some(decoded_obj)) =
+            (existing_entry.as_object(), decoded_entry.as_object())
+        else {
+            return None;
+        };
+        let keys_match = existing_obj
+            .iter()
+            .filter(|(key, _)| key.as_str() != "source_input_order")
+            .all(|(key, value)| decoded_obj.get(key) == Some(value))
+            && decoded_obj
+                .iter()
+                .filter(|(key, _)| key.as_str() != "source_input_order")
+                .all(|(key, value)| existing_obj.get(key) == Some(value));
+        if !keys_match {
+            return None;
+        }
+        let mut entry = existing_obj.clone();
+        if let Some(order) = decoded_obj.get("source_input_order") {
+            entry.insert("source_input_order".to_string(), order.clone());
+        } else {
+            entry.remove("source_input_order");
+        }
+        merged.push(Value::Object(entry));
+    }
+    Some(Value::Array(merged))
 }
 
 pub(super) fn comparable_chat_content(content: &Value) -> &Value {

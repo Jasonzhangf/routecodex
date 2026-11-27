@@ -28,28 +28,26 @@ pub(super) fn project_default_text_attempt_images_with_policy(
     let Some(messages) = payload.get_mut(messages).and_then(Value::as_array_mut) else {
         return;
     };
-    let tool_call_ids: std::collections::HashSet<String> = if preserve_orphan_responses_json_strings
-        && protocol == V3HubProviderWireProtocol::Responses
-    {
-        messages
-            .iter()
-            .filter(|item| {
-                matches!(
-                    item["type"].as_str(),
-                    Some("function_call" | "custom_tool_call")
-                )
-            })
-            .filter_map(|item| item["call_id"].as_str().map(str::to_owned))
-            .collect()
-    } else {
-        std::collections::HashSet::new()
-    };
+    let mut seen_tool_call_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for message in messages {
         let text_type = match protocol {
             V3HubProviderWireProtocol::Responses if message["role"] == "assistant" => "output_text",
             V3HubProviderWireProtocol::Responses => "input_text",
             _ => "text",
         };
+        if preserve_orphan_responses_json_strings
+            && protocol == V3HubProviderWireProtocol::Responses
+            && matches!(
+                message["type"].as_str(),
+                Some("function_call" | "custom_tool_call")
+            )
+        {
+            if let Some(call_id) = message["call_id"].as_str() {
+                seen_tool_call_ids.insert(call_id.to_owned());
+            }
+            continue;
+        }
         if matches!(
             message["type"].as_str(),
             Some("function_call_output" | "custom_tool_call_output")
@@ -61,7 +59,7 @@ pub(super) fn project_default_text_attempt_images_with_policy(
             let project_string_parts = !preserve_orphan_responses_json_strings
                 || message["call_id"]
                     .as_str()
-                    .is_some_and(|id| tool_call_ids.contains(id));
+                    .is_some_and(|id| seen_tool_call_ids.contains(id));
             if let Some(output) = message.get_mut("output") {
                 project_tool_output(output, text_type, project_string_parts);
             }
@@ -288,6 +286,28 @@ mod provider_req_compat_06_image_placeholder_tests {
                 {"type":"input_text","text":"[Image]"},
                 {"type":"input_file","file_id":"file-123"}
             ])
+        );
+
+        let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+        let mut same_id_later_call = json!({"input":[
+            {"type":"function_call_output","call_id":"call_b","output":encoded_image},
+            {"type":"function_call","call_id":"call_b","name":"read_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_b","output":encoded_image}
+        ]});
+        project_default_text_attempt_images_with_policy(
+            &mut same_id_later_call,
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        assert_eq!(
+            same_id_later_call["input"][0]["output"],
+            json!(encoded_image),
+            "later call_id in Relay wire must not rewrite earlier orphan JSON image string"
+        );
+        assert_eq!(
+            same_id_later_call["input"][2]["output"],
+            json!([{"type":"input_text","text":"[Image]"}]).to_string(),
+            "paired output after matching call must project to [Image]"
         );
     }
 }

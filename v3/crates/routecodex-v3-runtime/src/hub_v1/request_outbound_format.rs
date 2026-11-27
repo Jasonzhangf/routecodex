@@ -1222,12 +1222,20 @@ pub(crate) fn build_responses_input_from_chat_messages(
                     Value::Array(items) => items,
                     item => vec![item],
                 };
+                let raw_orders: Vec<Option<u64>> = (0..reasoning_items.len())
+                    .map(|index| {
+                        message
+                            .pointer("/routecodex_chat_extension/responses_reasoning_items")
+                            .and_then(|items| items.get(index))
+                            .and_then(|entry| entry.get("source_input_order"))
+                            .and_then(Value::as_u64)
+                    })
+                    .collect();
                 for (index, item) in reasoning_items.into_iter().enumerate() {
-                    let order = message
-                        .pointer("/routecodex_chat_extension/responses_reasoning_items")
-                        .and_then(|items| items.get(index))
-                        .and_then(|entry| entry.get("source_input_order"))
-                        .and_then(Value::as_u64);
+                    let order = raw_orders[index]
+                        .or_else(|| raw_orders[index + 1..].iter().flatten().copied().next())
+                        .or_else(|| raw_orders[..index].iter().rev().flatten().copied().next())
+                        .or_else(|| source_order(message));
                     output.push((order, item));
                 }
             }
