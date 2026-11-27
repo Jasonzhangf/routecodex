@@ -465,6 +465,61 @@ async fn anthropic_responses_field_parity_request_matrix() {
 }
 
 #[tokio::test]
+async fn anthropic_tool_result_keeps_responses_provider_output_item_id() {
+    let scope = "anthropic_tool_result_responses_id";
+    let transport = MatrixJsonTransport {
+        captured: Mutex::new(None),
+        response: json!({
+            "id":"resp_anthropic_tool_result_id",
+            "status":"completed",
+            "output":[{"type":"output_text","text":"ok"}]
+        }),
+    };
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest(scope),
+        V3AnthropicRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-anthropic-tool-result-responses-id".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "messages":[
+                    {"role":"assistant","content":[{"type":"tool_use","id":"call_anthropic_tool","name":"lookup","input":{"q":"alpha"}}]},
+                    {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_anthropic_tool","content":"done"}]}
+                ],
+                "max_tokens":64,
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("Anthropic tool result must reach the selected Responses provider");
+
+    assert_eq!(output.status, 200, "{output:?}");
+    let body = transport.captured.lock().unwrap().clone().unwrap();
+    let tool_result = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("tool output must reach the Responses provider");
+    assert_eq!(tool_result["call_id"], "call_anthropic_tool");
+    let item_id = tool_result["id"]
+        .as_str()
+        .expect("Anthropic source keeps the generated Responses item id");
+    assert!(
+        item_id.starts_with("fc_"),
+        "generated Responses item id keeps its existing prefix: {tool_result}"
+    );
+}
+
+#[tokio::test]
 async fn anthropic_structured_system_extension_preserves_blocks_for_responses() {
     let scope = "anthropic_structured_system_preserved";
     let transport = MatrixJsonTransport {

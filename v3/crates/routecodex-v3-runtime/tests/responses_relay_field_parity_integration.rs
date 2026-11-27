@@ -220,6 +220,50 @@ async fn responses_openai_chat_field_parity_legacy_tool_output_normalizes_before
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_orphan_text_content_array_keeps_responses_shape_without_id() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"resp-orphan-array",
+            "object":"response",
+            "status":"completed",
+            "output":[{"type":"output_text","text":"ok"}]
+        }),
+    };
+    let input = serde_json::json!([{
+        "type":"function_call_output",
+        "call_id":"call_orphan_array",
+        "output":[{"type":"input_text","text":"done"}]
+    }]);
+
+    let outcome = execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input(
+            "req-orphan-array-shape",
+            serde_json::json!({"input":input,"stream":false}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("parseable orphan output must reach the Responses provider");
+
+    assert_eq!(outcome.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let provider_input = provider_projection_body(&captures[0])["input"]
+        .as_array()
+        .expect("Responses input array");
+    assert_eq!(provider_input.len(), 1);
+    assert_eq!(provider_input[0]["type"], "function_call_output");
+    assert_eq!(provider_input[0]["call_id"], "call_orphan_array");
+    assert_eq!(
+        provider_input[0]["output"],
+        serde_json::json!([{"type":"input_text","text":"done"}])
+    );
+    assert!(provider_input[0].get("id").is_none());
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_normalization_preserves_failure_boundaries() {
     // Non-array `tools` is deliberately NOT in this failure-boundary list. It is an
     // openai_chat field that cannot be represented compatibly, so stage-3 output

@@ -6182,6 +6182,71 @@ async fn issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_responses_relay_forwards_orphan_text_content_array_to_first_provider() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let provider_body = json!({
+        "id":"resp_issue4a0b3aa_orphan_array",
+        "status":"completed",
+        "output":[{
+            "type":"message",
+            "role":"assistant",
+            "content":[{"type":"output_text","text":"array preserved"}]
+        }]
+    });
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&provider_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-array-fixture");
+    let manifest = responses_relay_manifest(free_port(), free_port(), &provider_url);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let input = json!([{
+        "type":"function_call_output",
+        "call_id":"call_4a0b3aa_orphan_array",
+        "output":[{"type":"input_text","text":"done"}]
+    }]);
+
+    let response = reqwest::Client::new()
+        .post(&endpoint)
+        .json(&json!({"model":"client-test", "input":input, "stream":false}))
+        .send()
+        .await;
+    let capture = timeout(Duration::from_secs(2), captures.recv()).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let capture = capture
+        .expect("orphan content array must reach the first Provider")
+        .expect("Provider capture must remain available");
+
+    assert_eq!(capture.request_path.as_deref(), Some("/v1/responses"));
+    assert_eq!(capture.body["input"], input);
+    assert_eq!(capture.body["input"][0]["type"], "function_call_output");
+    assert_eq!(
+        capture.body["input"][0]["call_id"],
+        "call_4a0b3aa_orphan_array"
+    );
+    assert_eq!(
+        capture.body["input"][0]["output"],
+        json!([{"type":"input_text","text":"done"}])
+    );
+    assert!(capture.body["input"][0].get("id").is_none());
+    assert!(
+        captures.try_recv().is_err(),
+        "sole Provider receives one attempt"
+    );
+    let response = response.expect("first Provider result must reach the client");
+    assert_eq!(response.status(), StatusCode::OK);
+    let client_body = response.json::<Value>().await.unwrap();
+    assert_eq!(client_body["id"], provider_body["id"]);
+    assert_eq!(client_body["status"], provider_body["status"]);
+    assert_eq!(client_body["output"], provider_body["output"]);
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
