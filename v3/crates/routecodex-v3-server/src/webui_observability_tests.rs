@@ -1096,10 +1096,12 @@ fn post_commit_terminal_keeps_completed_success_provider_status() {
     let post_commit = V3ObsRequestMeta {
         request_id: "req-completed-then-failed".to_string(),
         endpoint: "/v1/responses".to_string(),
-        provider_status: None,
+        provider_status: Some(503),
         terminal_typed_status_cleared: true,
         response_status: Some("error".to_string()),
-        error_category: Some("provider_http_502".to_string()),
+        finish_reason: Some("error".to_string()),
+        error_category: Some("provider_http_503".to_string()),
+        error_detail: Some("later real HTTP 503".to_string()),
         observed_error: Some(V3ObsErrorTruth {
             source: "error01_provider_terminal".to_string(),
             ..Default::default()
@@ -1130,10 +1132,114 @@ fn post_commit_terminal_keeps_completed_success_provider_status() {
         Some(200),
         "the delivered provider status must survive a post-commit failure"
     );
+    assert_eq!(row.event_type, "request.completed");
+    assert_eq!(row.meta.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(row.meta.response_status.as_deref(), Some("completed"));
+    assert_eq!(row.meta.error_category.as_deref(), Some("provider_http_503"));
+    assert_eq!(row.meta.error_detail.as_deref(), Some("later real HTTP 503"));
+    assert_eq!(row.attempts, 0);
+    assert_eq!(row.failed_attempts, 0);
+    assert_eq!(row.switches, 0);
     assert!(
         row.meta.observed_error.is_some(),
         "the post-commit failure must still be recorded"
     );
+}
+
+#[test]
+fn sparse_completed_replay_retains_typed_failure_after_established_success() {
+    let observability = V3WebuiObservability::new();
+    let request_id = "req-success-failure-sparse-replay";
+    let key = build_v3_obs_request_key(6002, request_id);
+    let completed = V3ObsRequestMeta {
+        request_id: request_id.to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_status: Some(200),
+        response_status: Some("completed".to_string()),
+        finish_reason: Some("stop".to_string()),
+        ..Default::default()
+    };
+    record(
+        &observability,
+        V3ObsEventType::Completed,
+        &key,
+        scope(6002),
+        completed,
+    )
+    .unwrap();
+
+    let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_http_503",
+        "provider returned HTTP 503",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(503),
+            code: Some("overloaded".to_string()),
+            provider_id: Some("primary".to_string()),
+            upstream_request_id: Some("upstream-503".to_string()),
+            message: Some("provider overloaded".to_string()),
+        },
+    );
+    let disposition = routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+        routecodex_v3_error::V3ExternalHttpWitness::new(503, vec![], b"overloaded".to_vec()),
+    );
+    record_v3_webui_error_projection(
+        &observability,
+        6002,
+        request_id,
+        "/v1/responses",
+        "responses",
+        None,
+        Some("s1"),
+        502,
+        None,
+        V3ObsErrorProjection {
+            exposed: true,
+            error_class: Some("provider_failure"),
+            error_chain: &[
+                "V3Error01SourceRaised",
+                "V3Error02Classified",
+                "V3Error06ClientProjected",
+            ],
+            diagnostic_source: Some(&source),
+            terminal_disposition: Some(&disposition),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    record(
+        &observability,
+        V3ObsEventType::Completed,
+        &key,
+        scope(6002),
+        V3ObsRequestMeta {
+            request_id: request_id.to_string(),
+            endpoint: "/v1/responses".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let row = observability
+        .rows()
+        .unwrap()
+        .get(&key)
+        .cloned()
+        .expect("the success row");
+    assert_eq!(row.result.as_deref(), Some("success"));
+    assert_eq!(row.meta.provider_status, Some(200));
+    assert_eq!(row.meta.response_status.as_deref(), Some("completed"));
+    assert_eq!(row.meta.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(row.meta.error_category.as_deref(), Some("http_503"));
+    assert_eq!(row.meta.error_detail.as_deref(), Some("HTTP status 503"));
+    let observed = row.meta.observed_error.expect("typed failure truth");
+    assert_eq!(observed.source, "error06_projection");
+    assert_eq!(observed.external_error_status, Some(503));
+    assert_eq!(observed.external_error_code.as_deref(), Some("overloaded"));
+    assert_eq!(observed.upstream_request_id.as_deref(), Some("upstream-503"));
 }
 
 /// The non-terminal provider-attempt snapshot is diagnostic and never outranks a

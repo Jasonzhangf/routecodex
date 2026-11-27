@@ -83,6 +83,7 @@
     "responses-to-responses-json-explicit-reason",
     "responses-to-responses-sse",
     "responses-to-responses-sse-completed-tool-no-reason",
+    "responses-to-responses-sse-dsml-harvest-no-reason",
     "responses-to-responses-sse-explicit-reason",
     "same-protocol-relay-chat-to-chat-json",
     "terminal-content-filter",

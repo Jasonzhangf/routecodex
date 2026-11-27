@@ -556,6 +556,26 @@ impl V3RuntimeStreamObservation {
     }
 
     pub fn record_provider_event_json(&self, event: &Value) -> Result<(), String> {
+        self.record_provider_event_json_with_options(event, false)
+    }
+
+    /// Direct Responses SSE pre-hook variant. It records the same typed facts
+    /// (usage, explicit provider reasons, response status, incomplete details,
+    /// semantic terminal) but keeps the generic `requires_action` ->
+    /// `finish_reason` inference off: only the governed sealed Direct result
+    /// may infer a missing Direct reason.
+    pub(crate) fn record_provider_event_json_without_generic_requires_action(
+        &self,
+        event: &Value,
+    ) -> Result<(), String> {
+        self.record_provider_event_json_with_options(event, true)
+    }
+
+    fn record_provider_event_json_with_options(
+        &self,
+        event: &Value,
+        suppress_generic_requires_action: bool,
+    ) -> Result<(), String> {
         let event_type = event.get("type").and_then(Value::as_str).map(str::trim);
         let semantic = event.get("response").unwrap_or(event);
         let response_status = semantic
@@ -576,10 +596,14 @@ impl V3RuntimeStreamObservation {
         let finish_reason = read_v3_runtime_finish_reason(semantic)
             .or_else(|| read_v3_runtime_finish_reason(event))
             .or_else(|| {
-                infer_v3_runtime_finish_reason_from_provider_event_json(
-                    event_type,
-                    response_status.as_deref(),
-                )
+                if suppress_generic_requires_action {
+                    None
+                } else {
+                    infer_v3_runtime_finish_reason_from_provider_event_json(
+                        event_type,
+                        response_status.as_deref(),
+                    )
+                }
             })
             .or_else(|| infer_v3_runtime_incomplete_finish_reason(event, event_type));
         // chat/gemini 等非 Responses 客户端 wire 没有 `status` 字段：语义

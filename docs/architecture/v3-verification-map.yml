@@ -2945,7 +2945,7 @@ features:
   required_negative:
   - Final observability does not reprint route/provider events already emitted by realtime sinks.
   - Console sinks do not mutate request/response payload, provider wire, Virtual Router selection, or provider error policy.
-  - Direct JSON and SSE closeout consume the same Direct classification; the Direct feature gate npm run test:v3-159361f-finish-reason-public runs the five fixed Direct Responses public fixtures (sse, sse-completed-tool-no-reason, sse-explicit-reason, json-completed-tool-no-reason, json-explicit-reason) against a baseline binary from the same base and the candidate binary, compares complete client request/entity-body, provider wire bytes and captured provider turn, and joins the closeout reason to the actual captured request_id from execution-mode evidence on both sides; provide the baseline binary with --baseline-binary or RCC_BASELINE_BINARY.
+  - Direct JSON and SSE closeout consume the same Direct classification; the Direct feature gate npm run test:v3-159361f-finish-reason-public runs the five fixed one-completion Direct Responses public fixtures (sse, sse-completed-tool-no-reason, sse-explicit-reason, json-completed-tool-no-reason, json-explicit-reason) plus the separate two-turn responses-to-responses-sse-dsml-harvest-no-reason fixture against a baseline binary from the same base and the candidate binary. It joins exactly one completion and reason per turn to the actual captured request_id from execution-mode evidence on both sides: candidate tool_calls then stop, baseline unreported then unreported. It compares complete client request/entity-body, provider wire bytes and captured provider turn, verifies the harvested call ID pairs with the follow-up function call and result within each run, and records only the process-generated (call|fc|msg)_dsml_<process>_<ordinal> ID normalization while every non-process byte matches. Provide the baseline binary with --baseline-binary or RCC_BASELINE_BINARY.
   integration:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_reselects_without_router_reentry --lib -- --nocapture
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server realtime_provider_failure_sink_prints_before_final_and_final_dedupes --lib -- --nocapture
@@ -2963,6 +2963,7 @@ features:
   - v3-console-realtime-04
   - v3-console-realtime-05
   - v3-console-realtime-06
+  - v3-console-realtime-07
   completion_rule:
     source: Focused Runtime and Server tests prove realtime sink emission and final dedupe.
     runtime: Installed V3 aggregate live replay proves realtime route/provider-error/provider-switch order before terminal.

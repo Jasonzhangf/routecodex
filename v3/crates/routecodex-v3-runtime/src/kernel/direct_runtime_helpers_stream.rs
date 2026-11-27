@@ -872,8 +872,12 @@ pub(crate) struct V3DirectSseGovernedFacts {
 /// provider observation is a bounded diagnostic (2 MiB) that also predates
 /// governance, so a harvested tool call never appears there and a long stream
 /// loses its terminal. The sealed frames are the governed client projection.
-pub(crate) fn inspect_direct_sse_governed_frames(frames: &[Vec<u8>]) -> V3DirectSseGovernedFacts {
+pub(crate) fn inspect_direct_sse_governed_frames(
+    frames: &[Vec<u8>],
+    observation: Option<&V3RuntimeStreamObservation>,
+) -> V3DirectSseGovernedFacts {
     let mut facts = V3DirectSseGovernedFacts::default();
+    let mut completed_terminal = None;
     for segment in split_direct_sse_committed_chunks(frames) {
         let Some(value) = segment.value.as_ref() else {
             continue;
@@ -899,9 +903,26 @@ pub(crate) fn inspect_direct_sse_governed_frames(frames: &[Vec<u8>]) -> V3Direct
             "response.done" => matches!(status, Some("completed") | Some("done")),
             _ => false,
         };
+        if facts.response_completed {
+            completed_terminal = Some(value.clone());
+        }
         if let Some(response) = value.get("response") {
             facts.tool_calls = crate::hub_v1::collect_v3_governed_response_tool_calls(response);
             facts.finalized_response = Some(response.clone());
+        }
+    }
+    if let Some(observation) = observation {
+        let inferred = completed_terminal
+            .as_ref()
+            .and_then(crate::hub_v1::v3_direct_responses_inferred_finish_reason);
+        if let Err(error) = observation.record_direct_responses_finish_reason(
+            None,
+            inferred,
+            facts.response_completed,
+        ) {
+            let _ = observation.record_observation_error(&format!(
+                "governed Direct finish reason observation failed: {error}"
+            ));
         }
     }
     facts

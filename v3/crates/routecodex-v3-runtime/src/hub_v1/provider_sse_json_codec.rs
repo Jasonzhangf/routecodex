@@ -884,7 +884,16 @@ pub(crate) fn record_v3_provider_sse_json_frame_for_protocol(
         return Ok(());
     };
     if provider_protocol == V3HubProviderWireProtocol::Responses {
-        stream_observation.record_direct_responses_payload_observation(&event)
+        // This observer runs before the registered Direct complete hooks. It
+        // owns explicit provider reasons and generic typed terminal facts only;
+        // a missing Direct reason is inferred later from the governed sealed
+        // result that actually reaches client/attempt settlement.
+        stream_observation.record_provider_event_json_without_generic_requires_action(&event)?;
+        stream_observation.record_direct_responses_finish_reason(
+            read_direct_responses_explicit_reason(&event),
+            None,
+            direct_responses_completion_is_terminal(&event),
+        )
     } else {
         stream_observation.record_provider_event_json(&event)
     }
@@ -934,6 +943,10 @@ pub fn v3_direct_responses_finish_reason(payload: &Value) -> Option<String> {
     if let Some(explicit) = read_direct_responses_explicit_reason(payload) {
         return Some(explicit);
     }
+    v3_direct_responses_inferred_finish_reason(payload)
+}
+
+pub(crate) fn v3_direct_responses_inferred_finish_reason(payload: &Value) -> Option<String> {
     let event_type = payload.get("type").and_then(Value::as_str).map(str::trim);
     let completed_event = event_type == Some("response.completed");
     if event_type.is_some() && !completed_event {
@@ -1736,6 +1749,21 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
+    fn direct_responses_sse_observer_defers_missing_reason_until_governed_result() {
+        for data in [
+            r#"{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"echo","arguments":"{}"}]}}"#,
+        ] {
+            let observation = observe_direct_responses_frame(data);
+            assert_eq!(
+                observation.snapshot().unwrap().finish_reason,
+                None,
+                "{data}"
+            );
+        }
+    }
+
+    #[test]
     fn direct_responses_conflicting_status_keeps_typed_terminal_failure() {
         let observation = observe_direct_responses_frame(
             r#"{"type":"response.completed","response":{"status":"incomplete","output":[]}}"#,
@@ -1767,20 +1795,24 @@ mod provider_sse_json_codec_tests {
             let observation = observe_direct_responses_frame(&event.to_string());
             assert_eq!(
                 observation.snapshot().unwrap().finish_reason.as_deref(),
-                Some("tool_calls")
+                None,
+                "pre-hook observation must not infer a missing reason"
             );
         }
     }
 
     #[test]
-    fn direct_responses_hosted_completion_clears_nonterminal_tool_reason() {
+    fn direct_responses_status_only_requires_action_keeps_reason_absent() {
         let observation = observe_direct_responses_frame(
             r#"{"type":"response.requires_action","response":{"status":"requires_action","output":[{"type":"function_call","call_id":"call_pending","name":"lookup","arguments":"{}"}]}}"#,
         );
+        let snapshot = observation.snapshot().unwrap();
+        assert_eq!(snapshot.response_status.as_deref(), Some("requires_action"));
         assert_eq!(
-            observation.snapshot().unwrap().finish_reason.as_deref(),
-            Some("tool_calls")
+            observation.semantic_terminal().unwrap(),
+            Some(crate::hub_v1::V3RuntimeSemanticTerminal::Success)
         );
+        assert_eq!(snapshot.finish_reason, None);
         record_v3_provider_sse_json_frame(
             &[SseField::Named {
                 name: "data".to_owned(),
@@ -1847,13 +1879,13 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn direct_responses_completed_text_without_finish_reason_records_stop() {
+    fn direct_responses_completed_text_without_finish_reason_defers_stop() {
         let observation = observe_direct_responses_frame(
             r#"{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}"#,
         );
         let snapshot = observation.snapshot().expect("observation snapshot");
         assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
-        assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(snapshot.finish_reason, None);
     }
 
     #[test]
@@ -1898,7 +1930,7 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn direct_responses_completed_tool_call_without_finish_reason_records_tool_calls() {
+    fn direct_responses_completed_tool_call_without_finish_reason_defers_tool_calls() {
         for item in [
             r#"{"type":"function_call","call_id":"call_function","name":"lookup","arguments":"{}"}"#,
             r#"{"type":"custom_tool_call","call_id":"call_custom","name":"patch","input":"diff"}"#,
@@ -1908,11 +1940,7 @@ mod provider_sse_json_codec_tests {
             );
             let observation = observe_direct_responses_frame(&data);
             let snapshot = observation.snapshot().expect("observation snapshot");
-            assert_eq!(
-                snapshot.finish_reason.as_deref(),
-                Some("tool_calls"),
-                "{item}"
-            );
+            assert_eq!(snapshot.finish_reason, None, "{item}");
         }
     }
 
@@ -2004,10 +2032,7 @@ mod provider_sse_json_codec_tests {
         )
         .expect("SSE observation");
         assert_eq!(sse_data, sse_before);
-        assert_eq!(
-            observation.snapshot().unwrap().finish_reason.as_deref(),
-            Some("stop")
-        );
+        assert_eq!(observation.snapshot().unwrap().finish_reason, None);
     }
 
     #[test]
@@ -2027,7 +2052,15 @@ mod provider_sse_json_codec_tests {
             ));
             let snapshot = observation.snapshot().expect("observation snapshot");
             assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
-            assert_eq!(snapshot.finish_reason.as_deref(), Some(expected));
+            assert_eq!(snapshot.finish_reason, None);
+            let terminal = serde_json::json!({
+                "type":"response.completed",
+                "response":{"output":[serde_json::from_str::<serde_json::Value>(output).unwrap()]}
+            });
+            assert_eq!(
+                v3_direct_responses_finish_reason(&terminal).as_deref(),
+                Some(expected)
+            );
         }
     }
 

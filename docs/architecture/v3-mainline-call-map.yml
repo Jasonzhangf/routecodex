@@ -6335,7 +6335,7 @@ chains:
     status: anchored
 - chain_id: v3.console_human_readable_layering.mainline
   owner_feature_id: v3.console_human_readable_layering
-  summary: Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; Direct Responses finish reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.
+  summary: Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; the Direct Responses SSE observer records explicit provider reasons and typed terminal facts before governance, and a missing reason is inferred only from the governed sealed result that reaches attempt settlement. Direct JSON reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.
   manifest: docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml
   edges:
   - step_id: v3-console-realtime-01
@@ -6446,6 +6446,24 @@ chains:
       - v3.runtime.responses_observability
       side_channel_writes:
       - v3.console.terminal_output
+  - step_id: v3-console-realtime-07
+    from_node: V3DirectGovernedSseResult
+    to_node: V3RuntimeStreamObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    callee_symbol: record_direct_responses_finish_reason
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    resource_flow:
+      consumes:
+      - v3.response.client_payload
+      - v3.runtime.responses_observability
+      produces: []
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.runtime.responses_observability
 - chain_id: v3.runtime_timing_observability.mainline
   owner_feature_id: v3.runtime_timing_observability
   summary: Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at successful whole-attempt closeout, and exposes a read-only Server projection. Direct SSE frame terminals close external time without finalizing the runtime before collector admission and sealing.

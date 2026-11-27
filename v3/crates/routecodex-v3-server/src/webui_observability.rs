@@ -283,7 +283,9 @@ fn merge_v3_obs_request_meta(
     // delivered its real provider status: a later post-commit failure may add
     // error truth but must not erase that status.
     let provider_status =
-        if incoming.terminal_typed_status_cleared && !established_result_is_success {
+        if established_result_is_success && !incoming_establishes_completed_terminal {
+            previous.provider_status
+        } else if incoming.terminal_typed_status_cleared && !established_result_is_success {
             None
         } else {
             incoming.provider_status.or(previous.provider_status)
@@ -295,6 +297,13 @@ fn merge_v3_obs_request_meta(
                 incoming.error_category,
                 incoming.error_detail,
                 incoming.observed_error,
+            )
+        } else if established_result_is_success {
+            (
+                previous.finish_reason,
+                incoming.error_category.or(previous.error_category),
+                incoming.error_detail.or(previous.error_detail),
+                merge_v3_obs_error_truth(previous.observed_error, incoming.observed_error),
             )
         } else {
             (
@@ -329,7 +338,13 @@ fn merge_v3_obs_request_meta(
         execution_mode: incoming.execution_mode.or(previous.execution_mode),
         transport: incoming.transport.or(previous.transport),
         provider_status,
-        response_status: incoming.response_status.or(previous.response_status),
+        response_status: if established_result_is_success
+            && !incoming_establishes_completed_terminal
+        {
+            previous.response_status
+        } else {
+            incoming.response_status.or(previous.response_status)
+        },
         finish_reason,
         error_category,
         error_detail,

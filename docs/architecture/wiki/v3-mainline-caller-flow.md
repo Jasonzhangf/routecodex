@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 94 functional paths, 552 caller edges.
+Generated view: 94 functional paths, 553 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -74,7 +74,7 @@ flowchart TD
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|22 edges / 8 paths| module_v3_provider_responses
   module_v3_runtime -->|60 edges / 21 paths| module_v3_runtime
-  module_v3_runtime -->|44 edges / 13 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|45 edges / 14 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|6 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -132,7 +132,7 @@ flowchart TD
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 22 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 60 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
-| v3-runtime | v3-runtime::hub_v1 | 44 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime::hub_v1 | 45 | `v3.console_human_readable_layering.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 6 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
@@ -2482,7 +2482,7 @@ flowchart TD
 
 ## v3.console_human_readable_layering.mainline
 
-Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; Direct Responses finish reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.
+Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; the Direct Responses SSE observer records explicit provider reasons and typed terminal facts before governance, and a missing reason is inferred only from the governed sealed result that reaches attempt settlement. Direct JSON reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.
 
 Owner feature: `v3.console_human_readable_layering`
 Manifest: `docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml`
@@ -2494,12 +2494,14 @@ flowchart TD
     c_59_v3_console_human_readable_layering_mainline_5["v3-runtime<br/>V3RuntimeProviderFailureEventSink<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_59_v3_console_human_readable_layering_mainline_6["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_59_v3_console_human_readable_layering_mainline_7["v3-runtime<br/>V3RuntimeRouteSelectionEventSink<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_59_v3_console_human_readable_layering_mainline_12["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_with_refill<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small>"]
   end
   subgraph c_59_v3_console_human_readable_layering_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_59_v3_console_human_readable_layering_mainline_0["v3-runtime::hub_v1<br/>handle_v3_responses_relay_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
     c_59_v3_console_human_readable_layering_mainline_1["v3-runtime::hub_v1<br/>V3RuntimeProviderFailureEventSink<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
     c_59_v3_console_human_readable_layering_mainline_2["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
     c_59_v3_console_human_readable_layering_mainline_3["v3-runtime::hub_v1<br/>V3RuntimeRouteSelectionEventSink<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
+    c_59_v3_console_human_readable_layering_mainline_13["v3-runtime::hub_v1<br/>record_direct_responses_finish_reason<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
   end
   subgraph c_59_v3_console_human_readable_layering_mainline_m_v3_server["v3-server"]
     c_59_v3_console_human_readable_layering_mainline_8["v3-server<br/>build_v3_route_selection_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
@@ -2513,6 +2515,7 @@ flowchart TD
   c_59_v3_console_human_readable_layering_mainline_6 -->|v3-console-realtime-04<br/>V3RuntimeRouteSelectionObservation → V3RuntimeRouteSelectionEventSink| c_59_v3_console_human_readable_layering_mainline_7
   c_59_v3_console_human_readable_layering_mainline_8 -->|v3-console-realtime-05<br/>V3RuntimeRouteSelectionEventSink → V3ConsoleReq02HumanBlock| c_59_v3_console_human_readable_layering_mainline_9
   c_59_v3_console_human_readable_layering_mainline_10 -->|v3-console-realtime-06<br/>V3RuntimeProviderFailureEventSink → V3ConsoleProvider04ExceptionalBlock| c_59_v3_console_human_readable_layering_mainline_11
+  c_59_v3_console_human_readable_layering_mainline_12 -->|v3-console-realtime-07<br/>V3DirectGovernedSseResult → V3RuntimeStreamObservation| c_59_v3_console_human_readable_layering_mainline_13
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2523,6 +2526,7 @@ flowchart TD
 | `v3-console-realtime-04` | `V3RuntimeRouteSelectionObservation` → `V3RuntimeRouteSelectionEventSink` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3RuntimeRouteSelectionEventSink<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | `v3.console_human_readable_layering` |
 | `v3-console-realtime-05` | `V3RuntimeRouteSelectionEventSink` → `V3ConsoleReq02HumanBlock` | anchored | build_v3_route_selection_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | emit_v3_request_route_hit_console_line_for_observability<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_human_readable_layering` |
 | `v3-console-realtime-06` | `V3RuntimeProviderFailureEventSink` → `V3ConsoleProvider04ExceptionalBlock` | anchored | build_v3_provider_failure_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | emit_v3_provider_failure_console_event<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_human_readable_layering` |
+| `v3-console-realtime-07` | `V3DirectGovernedSseResult` → `V3RuntimeStreamObservation` | anchored | execute_v3_responses_direct_runtime_kernel_with_refill<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small> | record_direct_responses_finish_reason<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.console_human_readable_layering` |
 
 ## v3.runtime_timing_observability.mainline
 

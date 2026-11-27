@@ -275,7 +275,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>94 functional paths</span>
-        <span>552 caller edges</span>
+        <span>553 caller edges</span>
       </div>
     </header>
 
@@ -468,7 +468,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>15</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>447</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>448</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -687,9 +687,9 @@ flowchart TD
           </a>
 <a class="branch-card" href="#chain-v3_console_human_readable_layering_mainline">
             <span class="chain-id">v 3.console_human_readable_layering.mainline</span>
-            <span>V3RuntimeProviderFailureObservation → V3ConsoleProvider04ExceptionalBlock</span>
+            <span>V3RuntimeProviderFailureObservation → V3RuntimeStreamObservation</span>
             <span><code>v3.console_human_readable_layering.mainline</code></span>
-            <span>6 edges · 2 resources · v3-runtime, v3-runtime::hub_v1, v3-server</span>
+            <span>7 edges · 3 resources · v3-runtime, v3-runtime::hub_v1, v3-server</span>
           </a>
 <a class="branch-card" href="#chain-v3_runtime_timing_observability_mainline">
             <span class="chain-id">v 3.runtime_timing_observability.mainline</span>
@@ -4102,15 +4102,15 @@ flowchart TD
     <details class="branch-detail" id="chain-v3_console_human_readable_layering_mainline" >
       <summary>
         <span class="summary-main">v 3.console_human_readable_layering.mainline</span>
-        <span class="summary-sub">V3RuntimeProviderFailureObservation → V3ConsoleProvider04ExceptionalBlock</span>
-        <span class="summary-sub">6 edges · <code>v3.console_human_readable_layering.mainline</code> · V3RuntimeProviderFailureObservation → V3ConsoleProvider04ExceptionalBlock</span>
+        <span class="summary-sub">V3RuntimeProviderFailureObservation → V3RuntimeStreamObservation</span>
+        <span class="summary-sub">7 edges · <code>v3.console_human_readable_layering.mainline</code> · V3RuntimeProviderFailureObservation → V3RuntimeStreamObservation</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; Direct Responses finish reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.</p>
+        <p class="chain-summary">Runtime-created route/provider failure observations flow through diagnostic side-channel sinks to Server-owned realtime human console projection; the Direct Responses SSE observer records explicit provider reasons and typed terminal facts before governance, and a missing reason is inferred only from the governed sealed result that reaches attempt settlement. Direct JSON reasons come from record_direct_responses_payload_observation selected by provider protocol and v3_direct_responses_finish_reason selected by entry protocol, consumed by merge_v3_runtime_stream_observation and enrich_v3_direct_observability_from_frame without client-byte mutation. Other Direct protocols retain generic observation and normalized rendering.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.console_human_readable_layering</code></span>
           <span>modules: <code>v3-runtime · v3-runtime::hub_v1 · v3-server</code></span>
-          <span>resources: <code>2</code></span>
+          <span>resources: <code>3</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml</code></span>
 
         </div>
@@ -4123,15 +4123,18 @@ flowchart TD
   n_v3_console_human_readable_layering_mainline_3[&quot;&lt;b&gt;Runtime Route Selection Event Sink&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3RuntimeRouteSelectionEventSink&lt;/small&gt;&quot;]
   n_v3_console_human_readable_layering_mainline_4[&quot;&lt;b&gt;Console Req 02 Human Block&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ConsoleReq02HumanBlock&lt;/small&gt;&quot;]
   n_v3_console_human_readable_layering_mainline_5[&quot;&lt;b&gt;Console Provider 04 Exceptional Block&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ConsoleProvider04ExceptionalBlock&lt;/small&gt;&quot;]
+  n_v3_console_human_readable_layering_mainline_6[&quot;&lt;b&gt;Direct Governed Sse Result&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectGovernedSseResult&lt;/small&gt;&quot;]
+  n_v3_console_human_readable_layering_mainline_7[&quot;&lt;b&gt;Runtime Stream Observation&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3RuntimeStreamObservation&lt;/small&gt;&quot;]
   n_v3_console_human_readable_layering_mainline_0 --&gt;|v3-console-realtime-01&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_console_human_readable_layering_mainline_1
   n_v3_console_human_readable_layering_mainline_2 --&gt;|v3-console-realtime-02&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_console_human_readable_layering_mainline_3
   n_v3_console_human_readable_layering_mainline_0 --&gt;|v3-console-realtime-03&lt;br/&gt;v3-runtime → v3-runtime| n_v3_console_human_readable_layering_mainline_1
   n_v3_console_human_readable_layering_mainline_2 --&gt;|v3-console-realtime-04&lt;br/&gt;v3-runtime → v3-runtime| n_v3_console_human_readable_layering_mainline_3
   n_v3_console_human_readable_layering_mainline_3 --&gt;|v3-console-realtime-05&lt;br/&gt;v3-server → v3-server| n_v3_console_human_readable_layering_mainline_4
   n_v3_console_human_readable_layering_mainline_1 --&gt;|v3-console-realtime-06&lt;br/&gt;v3-server → v3-server| n_v3_console_human_readable_layering_mainline_5
+  n_v3_console_human_readable_layering_mainline_6 --&gt;|v3-console-realtime-07&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_console_human_readable_layering_mainline_7
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_console_human_readable_layering_mainline_0,n_v3_console_human_readable_layering_mainline_1,n_v3_console_human_readable_layering_mainline_2,n_v3_console_human_readable_layering_mainline_3,n_v3_console_human_readable_layering_mainline_4,n_v3_console_human_readable_layering_mainline_5 node;</pre>
+  class n_v3_console_human_readable_layering_mainline_0,n_v3_console_human_readable_layering_mainline_1,n_v3_console_human_readable_layering_mainline_2,n_v3_console_human_readable_layering_mainline_3,n_v3_console_human_readable_layering_mainline_4,n_v3_console_human_readable_layering_mainline_5,n_v3_console_human_readable_layering_mainline_6,n_v3_console_human_readable_layering_mainline_7 node;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
@@ -4142,6 +4145,7 @@ flowchart TD
 <tr><td><code>v3-console-realtime-04</code></td><td><code>V3RuntimeRouteSelectionObservation</code><br/>→ <code>V3RuntimeRouteSelectionEventSink</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.console.terminal_output</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.console.terminal_output</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel_core</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>V3RuntimeRouteSelectionEventSink</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
 <tr><td><code>v3-console-realtime-05</code></td><td><code>V3RuntimeRouteSelectionEventSink</code><br/>→ <code>V3ConsoleReq02HumanBlock</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.console.terminal_output</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.console.terminal_output</code></div></td><td><code>build_v3_route_selection_event_sink</code><br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small></td><td><code>emit_v3_request_route_hit_console_line_for_observability</code><br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small></td></tr>
 <tr><td><code>v3-console-realtime-06</code></td><td><code>V3RuntimeProviderFailureEventSink</code><br/>→ <code>V3ConsoleProvider04ExceptionalBlock</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.console.terminal_output</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.console.terminal_output</code></div></td><td><code>build_v3_provider_failure_event_sink</code><br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small></td><td><code>emit_v3_provider_failure_console_event</code><br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small></td></tr>
+<tr><td><code>v3-console-realtime-07</code></td><td><code>V3DirectGovernedSseResult</code><br/>→ <code>V3RuntimeStreamObservation</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.runtime.responses_observability</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel_with_refill</code><br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small></td><td><code>record_direct_responses_finish_reason</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small></td></tr>
 </tbody>
 </table>
       </div>

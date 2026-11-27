@@ -211,6 +211,7 @@ async function handleRequest(request, response, options, state) {
     headers,
     content_type: headers['content-type'] ?? null,
     raw_body: bodyText,
+    raw_body_base64: rawBody.toString('base64'),
     body,
     body_parsed: bodyParsed,
     captured_at_epoch_ms: Date.now(),

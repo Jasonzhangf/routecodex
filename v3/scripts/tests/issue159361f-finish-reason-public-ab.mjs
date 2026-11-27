@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// Issue 159361f public A/B: run the five Responses fixtures against distinct
-// baseline and candidate binaries through the existing live-mock harness, then
-// compare complete client/provider bytes and the request-correlated closeout.
+// Issue 159361f public A/B: run the five one-completion Responses fixtures and
+// the separate two-turn DSML harvest fixture against distinct baseline and
+// candidate binaries, then compare client/provider bytes and each turn's
+// request-correlated closeout.
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main } from './v3-protocol-live-mock-matrix.mjs';
-import { cases, compare } from './issue159361f-finish-reason-blackbox.mjs';
+import { cases, compare, twoTurnCases } from './issue159361f-finish-reason-blackbox.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +24,8 @@ function optionArgs(argv) {
 }
 
 async function runSide(role, binary, root) {
-  for (const [caseId] of cases) {
+  const caseIds = [...cases.map(([caseId]) => caseId), ...twoTurnCases.map(({ id }) => id)];
+  for (const caseId of caseIds) {
     const exit = await main(['--case', caseId, '--binary', binary, '--binary-kind', 'candidate', '--evidence', join(root, role, caseId)]);
     if (exit !== 0) throw new Error(role + ' public case failed: ' + caseId + ' (exit ' + exit + ')');
   }

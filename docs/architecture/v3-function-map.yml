@@ -3813,7 +3813,9 @@ features:
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
   - v3/crates/provider-compat-core/src/lib.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
@@ -4166,9 +4168,12 @@ features:
   - v3-console-realtime-04
   - v3-console-realtime-05
   - v3-console-realtime-06
+  - v3-console-realtime-07
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/console/impl_display.rs
