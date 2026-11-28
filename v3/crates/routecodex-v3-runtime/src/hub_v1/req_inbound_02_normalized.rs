@@ -628,6 +628,8 @@ fn merge_responses_chat_histories(
         let mut merged_entries: Vec<V3HubMessageHistoryProvenance> = merged
             .iter()
             .map(|row| V3HubMessageHistoryProvenance {
+                omit_tool_output_id: (row["role"] == "tool" || tool_output_name(row).is_some())
+                    && tool_output_item_id(row).is_none(),
                 preserve_native_tool_output_id: row["role"] == "tool"
                     || tool_output_name(row).is_some(),
                 ..Default::default()

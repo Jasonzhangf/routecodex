@@ -1302,7 +1302,8 @@ fn build_responses_input_from_chat_messages_with_provenance_and_drops_and_litera
                 .is_some()
         {
             let msg_provenance = provenance.and_then(|p| p.message_entry(msg_idx));
-            let omit_tool_output_id = msg_provenance.is_some_and(|p| p.omit_tool_output_id);
+            let omit_tool_output_id = preserve_responses_entry_tool_output_id
+                || msg_provenance.is_some_and(|p| p.omit_tool_output_id);
             let preserve_native_tool_output_id = preserve_responses_entry_tool_output_id
                 || msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
             let restore_responses_hosted_web_search =

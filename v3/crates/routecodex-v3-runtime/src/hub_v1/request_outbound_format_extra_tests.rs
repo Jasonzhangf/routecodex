@@ -265,6 +265,57 @@ fn responses_entry_preserves_explicit_fco_item_ids_verbatim_without_fc_collision
 }
 
 #[test]
+fn responses_entry_omits_id_for_idless_legacy_receipt_alongside_native_fc_callid() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "tool",
+                "tool_call_id": "receipt42",
+                "content": "second-output"
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "receipt42",
+                "content": "first-output",
+                "routecodex_chat_extension": {"responses_item_id": "fc_receipt42"}
+            }
+        ]
+    });
+    let provenance = super::super::V3HubExplicitHistoryProvenance {
+        message_entries: vec![
+            super::super::V3HubMessageHistoryProvenance {
+                omit_tool_output_id: true,
+                preserve_native_tool_output_id: true,
+                ..Default::default()
+            },
+            super::super::V3HubMessageHistoryProvenance {
+                preserve_native_tool_output_id: true,
+                ..Default::default()
+            },
+        ],
+    };
+    let (wire, _, _) =
+        super::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+            &payload,
+            false,
+            false,
+            Some(&provenance),
+            true,
+        )
+        .expect("Responses entry must keep ID-less legacy receipt ID-less beside fc_<call_id>");
+    let input = wire["input"].as_array().expect("Responses input array");
+    assert_eq!(input.len(), 2, "{wire}");
+    assert!(
+        input[0].get("id").is_none(),
+        "ID-less legacy receipt must not synthesize fc_receipt42 on Responses entry: {wire}"
+    );
+    assert_eq!(input[0]["call_id"], "receipt42");
+    assert_eq!(input[1]["id"], "fc_receipt42");
+    assert_eq!(input[1]["call_id"], "receipt42");
+}
+
+#[test]
 fn responses_wire_preserves_custom_tool_item_ids() {
     let payload = json!({
         "model": "gpt-test",
