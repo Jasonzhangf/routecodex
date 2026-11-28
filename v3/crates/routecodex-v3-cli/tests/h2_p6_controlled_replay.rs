@@ -324,8 +324,8 @@ async fn assert_final_provider_http_error(
     client: &reqwest::Client,
     port: u16,
     stream: bool,
-    expected_status: u16,
-    expected_body: &str,
+    _expected_status: u16,
+    _expected_body: &str,
 ) {
     let response = client
         .post(format!("http://127.0.0.1:{port}/v1/responses"))
@@ -335,46 +335,59 @@ async fn assert_final_provider_http_error(
             "stream": stream,
         }))
         .send()
-        .await
-        .expect("the final provider HTTP error must reach the HTTP client");
-    let status = response.status();
-    let is_sse = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("text/event-stream"));
-    let body = response
-        .text()
-        .await
-        .expect("the final provider error body must be readable");
-    if stream && status == ReqwestStatusCode::OK {
-        assert!(
-            is_sse,
-            "a committed Responses SSE head must retain its native content type"
-        );
-        assert_eq!(body.matches("event: error\n").count(), 1, "{body}");
-        let event = sse_data_payload(&body, "error");
-        let expected: Value = serde_json::from_str(expected_body).unwrap();
-        assert_eq!(event["type"], "error");
-        assert_eq!(event["message"], expected["error"]["message"]);
-        assert_eq!(event["code"], expected["error"]["code"]);
-        assert!(
-            !body.contains("response.completed")
-                && !body.contains("response.failed")
-                && !body.contains("data: [DONE]"),
-            "a committed Provider error must not become a normal Responses terminal: {body}"
-        );
-        return;
+        .await;
+    match response {
+        Ok(mut reply) if stream && reply.status() == ReqwestStatusCode::OK => {
+            let is_sse = reply
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("text/event-stream"));
+            assert!(
+                is_sse,
+                "a committed Responses SSE head must retain its native content type"
+            );
+            let mut wire = Vec::new();
+            let stream_err = loop {
+                match reply.chunk().await {
+                    Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                    Ok(None) => panic!("exhausted final provider error on committed Responses SSE stream must terminate transport cleanly without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                    Err(error) => break error,
+                }
+            };
+            assert!(
+                !stream_err.is_timeout()
+                    && !stream_err.is_connect()
+                    && (stream_err.is_body() || stream_err.is_decode() || stream_err.is_request()),
+                "unexpected SSE transport termination error: {stream_err:?}"
+            );
+            let wire_text = String::from_utf8_lossy(&wire);
+            assert!(
+                !wire_text.contains("data:")
+                    && !wire_text.contains("event:")
+                    && !wire_text.contains("\"error\"")
+                    && !wire_text.contains("response.completed")
+                    && !wire_text.contains("[DONE]")
+                    && wire_text
+                        .lines()
+                        .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                "exhausted SSE stream must contain only transport keepalives before termination: {wire_text}"
+            );
+        }
+        Ok(reply) => {
+            let status = reply.status();
+            let body = reply.text().await;
+            panic!("exhausted final provider error must terminate transport without HTTP error projection, got status={status} body={body:?}");
+        }
+        Err(error) => {
+            assert!(
+                !error.is_timeout()
+                    && !error.is_connect()
+                    && (error.is_request() || error.is_body() || error.is_decode()),
+                "expected clean transport break, got {error:?}"
+            );
+        }
     }
-    assert_eq!(
-        status,
-        ReqwestStatusCode::from_u16(expected_status).unwrap(),
-        "the final provider status must be preserved, body={body}"
-    );
-    assert_eq!(
-        body, expected_body,
-        "the final provider body must be preserved without proxy rewriting"
-    );
 }
 
 /// A streaming client must observe an aborted transfer instead of a normal end of

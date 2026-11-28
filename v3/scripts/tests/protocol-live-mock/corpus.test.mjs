@@ -537,9 +537,28 @@ test('a complete non-2xx expectation requires the scripted final Provider respon
     assert.match(findingsOf(root), /complete non-2xx status must match the scripted final Provider response/);
   });
 
-  const valid = loadFixtures(realFixtureRoot)
+  const validNon2xx = baseCase({
+    upstream_response: {
+      protocol: 'openai_chat',
+      mode: 'json',
+      status: 429,
+      content_type: 'application/json',
+      body: { error: { type: 'rate_limit_error', message: 'controlled rate limit' } },
+    },
+    expected_client: {
+      transport: 'complete',
+      status: 429,
+      body_must: { 'error.type': 'rate_limit_error', 'error.message': 'controlled rate limit' },
+      semantic_terminal_required: false,
+    },
+  });
+  withFixture({ 'valid-case': validNon2xx }, validManifest(['valid-case']), (root) => {
+    assert.deepEqual(inspectCorpus(root).findings, []);
+  });
+
+  const closedExhaustion = loadFixtures(realFixtureRoot)
     .find(({ value }) => value.case_id === 'provider-error-exhaustion').value;
-  withFixture({ [valid.case_id]: valid }, validManifest([valid.case_id]), (root) => {
+  withFixture({ [closedExhaustion.case_id]: closedExhaustion }, validManifest([closedExhaustion.case_id]), (root) => {
     assert.deepEqual(inspectCorpus(root).findings, []);
   });
 });

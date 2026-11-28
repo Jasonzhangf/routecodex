@@ -190,20 +190,8 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
         1,
         "the sole candidate must be attempted exactly once"
     );
-    let response = response.expect("the final real Provider HTTP 400 must reach the client");
-    let client_status = response.status();
-    let client_body = response
-        .bytes()
-        .await
-        .expect("the final Provider HTTP 400 body must be readable");
-    assert_eq!(
-        client_status,
-        reqwest::StatusCode::BAD_REQUEST,
-        "the final real Provider HTTP 400 must keep its client status"
-    );
-    assert!(
-        client_body.is_empty(),
-        "the final Provider fixture body is empty and must remain empty: {client_body:?}"
+    response.expect_err(
+        "the final real Provider HTTP 400 must break transport without projecting an error",
     );
 
     let records_path = request_records_path(&home, server_port);
@@ -259,7 +247,7 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
         "the terminal row must preserve the final Provider HTTP status"
     );
     assert_eq!(
-        terminal_row["meta"]["error_category"], "provider_http_400",
+        terminal_row["meta"]["error_category"], "http_400",
         "the terminal row must preserve final Provider provenance"
     );
     assert_eq!(
@@ -278,7 +266,7 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
     );
 
     eprintln!(
-        "[issue6a2766a] client_status={client_status:?} body={client_body:?} rows={} terminal_rows={}",
+        "[issue6a2766a] rows={} terminal_rows={}",
         rows.len(),
         terminal_rows.len()
     );

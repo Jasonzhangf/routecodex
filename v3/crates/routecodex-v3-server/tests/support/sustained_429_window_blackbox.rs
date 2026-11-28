@@ -275,18 +275,26 @@ async fn assert_consecutive_errors(direct: bool) {
     assert!(quota_entries(&client, &base).await.is_empty());
     assert_eq!(business.load(SeqCst), 12);
     business_status.store(429, SeqCst);
-    assert!(quota_business(&client, &base, "controlled exhausted quota")
-        .await
-        .contains("quota-window-fallback"));
+    for step in 0..5 {
+        assert!(quota_business(&client, &base, "controlled exhausted quota")
+            .await
+            .contains("quota-window-fallback"));
+        if step < 4 {
+            assert!(
+                quota_entries(&client, &base).await.is_empty(),
+                "exhausted quota starts 1h cooldown on the 5th consecutive failure"
+            );
+        }
+    }
     let entries = quota_entries(&client, &base).await;
     assert_eq!(
         entries.len(),
         1,
-        "confirmed quota exhaustion must cool on its first HTTP 429"
+        "confirmed quota exhaustion must cool on its 5th consecutive HTTP 429"
     );
     assert_eq!(entries[0]["provider_id"], identity["provider_id"]);
     assert_eq!(entries[0]["until_ms"], minimum_end + 3_600_000);
-    assert_eq!(business.load(SeqCst), 13);
+    assert_eq!(business.load(SeqCst), 17);
 
     let burst_start = minimum_end + 3_600_000;
     clock.0.store(burst_start, SeqCst);
@@ -297,7 +305,7 @@ async fn assert_consecutive_errors(direct: bool) {
             .contains("quota-window-primary")
     );
     assert!(quota_entries(&client, &base).await.is_empty());
-    assert_eq!(business.load(SeqCst), 14);
+    assert_eq!(business.load(SeqCst), 18);
     business_status.store(429, SeqCst);
     for index in 0..10 {
         if index == 9 {
@@ -308,7 +316,7 @@ async fn assert_consecutive_errors(direct: bool) {
                 .await
                 .contains("quota-window-fallback")
         );
-        assert_eq!(business.load(SeqCst), 15 + index);
+        assert_eq!(business.load(SeqCst), 19 + index);
         if index < 9 {
             assert!(quota_entries(&client, &base).await.is_empty());
         }
@@ -321,17 +329,17 @@ async fn assert_consecutive_errors(direct: bool) {
     assert!(quota_business(&client, &base, "before-short-expiry")
         .await
         .contains("quota-window-fallback"));
-    assert_eq!(business.load(SeqCst), 24);
+    assert_eq!(business.load(SeqCst), 28);
     clock.0.store(short_end, SeqCst);
     assert!(quota_business(&client, &base, "first-after-short-expiry")
         .await
         .contains("quota-window-fallback"));
-    assert_eq!(business.load(SeqCst), 25);
-    let hour = quota_entries(&client, &base).await;
-    assert_eq!(hour.len(), 1);
-    assert_eq!(hour[0]["until_ms"], short_end + 3_600_000);
+    assert_eq!(business.load(SeqCst), 29);
+    let capped = quota_entries(&client, &base).await;
+    assert_eq!(capped.len(), 1);
+    assert_eq!(capped[0]["until_ms"], short_end + 60_000);
 
-    let slow_start = short_end + 3_600_000;
+    let slow_start = short_end + 60_000;
     clock.0.store(slow_start, SeqCst);
     business_status.store(200, SeqCst);
     assert!(
@@ -340,7 +348,7 @@ async fn assert_consecutive_errors(direct: bool) {
             .contains("quota-window-primary")
     );
     assert!(quota_entries(&client, &base).await.is_empty());
-    assert_eq!(business.load(SeqCst), 26);
+    assert_eq!(business.load(SeqCst), 30);
     business_status.store(429, SeqCst);
     for index in 0..11 {
         if index >= 9 {
@@ -349,14 +357,14 @@ async fn assert_consecutive_errors(direct: bool) {
         assert!(quota_business(&client, &base, &format!("slow-429-{index}"))
             .await
             .contains("quota-window-fallback"));
-        assert_eq!(business.load(SeqCst), 27 + index);
+        assert_eq!(business.load(SeqCst), 31 + index);
         if index < 10 {
             assert!(quota_entries(&client, &base).await.is_empty());
         }
     }
     let entries = quota_entries(&client, &base).await;
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0]["until_ms"], slow_start + 3_720_001);
+    assert_eq!(entries[0]["until_ms"], slow_start + 180_001);
     assert_eq!(
         probes.load(SeqCst),
         0,

@@ -474,21 +474,21 @@ async fn public_recovery_witness_with_generation(
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["choices"][0]["message"]["content"], "step5 complete");
     if let Some(earlier_business) = earlier_business {
-        // The final real business 403 is projected after required client-protocol
-        // conversion. Probe A remains authenticated and held.
+        // Final real provider HTTP error passthrough is retired: the failed
+        // request closes transport cleanly while probe A remains authenticated and held.
         peer.business_release.add_permits(1);
         let bytes = timeout(Duration::from_secs(2), earlier_business)
             .await
             .unwrap()
             .unwrap();
-        let projected_403 = String::from_utf8_lossy(&bytes);
+        let projected = String::from_utf8_lossy(&bytes);
         assert!(
-            projected_403.starts_with("HTTP/1.1 403 ")
-                && projected_403.contains("owned earlier business forbidden"),
-            "final real provider 403 must preserve status and body: {projected_403}"
+            !projected.contains("owned earlier business forbidden")
+                && !projected.starts_with("HTTP/1.1 403 "),
+            "final real provider 403 must not project onto client wire: {projected}"
         );
         assert_eq!(peer.probe_release.available_permits(), 0);
-        eprintln!("same-identity earlier business403 processed after held probe capture; healthy content already complete");
+        eprintln!("same-identity earlier business403 settled without client projection; healthy content already complete");
     }
     let mut retained = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     let before_exit = timeout(
@@ -595,35 +595,18 @@ async fn public_recovery_witness_with_generation(
             .send().await
     });
     let exhausted_result = timeout(Duration::from_millis(500), &mut exhausted).await;
-    let projected_business_error = match exhausted_result {
-        Ok(Ok(Err(error))) => {
-            eprintln!(
-                "public all-cooled witness: failed probe already captured, transport error={error}"
-            );
-            false
-        }
+    let settled_promptly = match exhausted_result {
+        Ok(Ok(Err(_error))) => true,
         Ok(Ok(Ok(response))) => {
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|error| format!("<body read failed: {error}>"));
-            eprintln!("public all-cooled witness: client response status={status} body={body:?}");
-            status == StatusCode::SERVICE_UNAVAILABLE
-                && body == r#"{"error":{"message":"owned exhausted business request"}}"#
-        }
-        Ok(Err(error)) => {
-            eprintln!(
-                "public all-cooled witness: failed probe already captured, request task failed={error}"
+            panic!(
+                "exhausted request must terminate transport without HTTP response: {}",
+                response.status()
             );
-            false
         }
+        Ok(Err(_error)) => true,
         Err(_) => {
             exhausted.abort();
             let _ = exhausted.await;
-            eprintln!(
-                "public all-cooled witness: failed probe already captured, request remained pending past 500ms"
-            );
             false
         }
     };
@@ -636,21 +619,24 @@ async fn public_recovery_witness_with_generation(
         sibling_body["choices"][0]["message"]["content"],
         "step5 complete"
     );
-    if projected_business_error {
+    if settled_promptly {
         let all_cooled_raw = raw_chat(port, "cooled.step-5-preview", "all cooled raw", false).await;
         eprintln!("all-cooled nonstream client bytes={}", all_cooled_raw.len());
-        let raw = String::from_utf8(all_cooled_raw).unwrap();
-        assert!(raw.starts_with("HTTP/1.1 503 "), "{raw}");
-        assert!(raw.contains("owned exhausted business request"), "{raw}");
-        assert!(!raw.contains("owned failed probe"), "{raw}");
+        let raw = String::from_utf8_lossy(&all_cooled_raw);
+        assert!(
+            !raw.contains("503 ")
+                && !raw.contains("owned exhausted business request")
+                && !raw.contains("owned failed probe"),
+            "{raw}"
+        );
         let stream_raw = raw_chat(port, "cooled.step-5-preview", "all cooled stream", true).await;
         let stream_text = String::from_utf8_lossy(&stream_raw);
         eprintln!("all-cooled stream wire={stream_text:?}");
         assert!(
-            stream_text.contains("owned exhausted business request")
+            !stream_text.contains("owned exhausted business request")
                 && !stream_text.contains("owned failed probe")
                 && !stream_text.contains("[DONE]"),
-            "the client must receive the business error only: {stream_text}"
+            "the client must not receive error frames or [DONE]: {stream_text}"
         );
         let captures = peer.captures.lock().await;
         for marker in ["all cooled marker", "all cooled raw", "all cooled stream"] {
@@ -676,9 +662,9 @@ async fn public_recovery_witness_with_generation(
         eprintln!("actual upstream403 client bytes={}", forbidden_raw.len());
         let projected_403 = String::from_utf8_lossy(&forbidden_raw);
         assert!(
-            projected_403.starts_with("HTTP/1.1 403 ")
-                && projected_403.contains("owned upstream forbidden"),
-            "final real provider 403 must preserve status and body: {projected_403}"
+            !projected_403.contains("403 ")
+                && !projected_403.contains("owned upstream forbidden"),
+            "final real provider 403 must terminate transport without client projection: {projected_403}"
         );
         assert!(
             peer.captures.lock().await.iter().any(|call| {
@@ -718,8 +704,8 @@ async fn public_recovery_witness_with_generation(
     upstream.abort();
     let _ = upstream.await;
     assert!(
-        projected_business_error,
-        "the request must settle promptly with its own real error after the failed probe"
+        settled_promptly,
+        "the request must settle promptly via transport break after the failed probe"
     );
     if require_pending_healthy_progress {
         assert!(attempted_before_release, "healthy Step5 was blocked by the owned pending rescue probe; releasing that probe restored the same request");

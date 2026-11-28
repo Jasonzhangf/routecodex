@@ -379,10 +379,18 @@ async fn shared_sample_retention_floor_preserves_exact_failure_ids_beyond_succes
     let mut server = start(root.path(), 0, &upstream);
     healthy(&client, &mut server).await;
 
-    let response = retention_request(&client, server.port, "retention-provider-400").await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let response = retention_request(&client, server.port, "retention-provider-502").await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    client
+        .post(format!("http://127.0.0.1:{}/v1/responses", server.port))
+        .json(&json!({"model":"peer.test","stream":false,"input":"retention-provider-400"}))
+        .send()
+        .await
+        .expect_err("provider 400 exhaustion must break transport without client HTTP 400");
+    client
+        .post(format!("http://127.0.0.1:{}/v1/responses", server.port))
+        .json(&json!({"model":"peer.test","stream":false,"input":"retention-provider-502"}))
+        .send()
+        .await
+        .expect_err("provider 502 exhaustion must break transport without client HTTP 502");
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let failures = loop {
@@ -500,8 +508,12 @@ async fn shared_sample_retention_saturated_failure_reserve_skips_only_diagnostic
         write_floor_failure(&port_root.join(format!("reserve-floor-{index:03}")));
     }
 
-    let response = retention_request(&client, server.port, "retention-provider-502").await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    client
+        .post(format!("http://127.0.0.1:{}/v1/responses", server.port))
+        .json(&json!({"model":"peer.test","stream":false,"input":"retention-provider-502"}))
+        .send()
+        .await
+        .expect_err("provider 502 exhaustion must break transport without client HTTP 502");
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let overflow_request = loop {

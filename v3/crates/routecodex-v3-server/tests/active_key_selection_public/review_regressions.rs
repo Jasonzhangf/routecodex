@@ -272,13 +272,15 @@ targets = [{kind="provider_model",provider="controlled",model="wire",key="B",pri
         let calls = entry.calls();
         entry.stop().await;
         for response in setup {
-            let response = response.expect("actual complete setup rejection");
-            assert_eq!(response.0, StatusCode::BAD_REQUEST, "{}", response.1);
+            response.expect_err(
+                "exhausted setup rejection must terminate transport without HTTP error projection",
+            );
         }
         assert_eq!(pool(&held, "default")["held"][0]["auth_alias"], "B");
-        let final_error = final_error.expect("actual final HTTP rejection");
+        final_error.expect_err(
+            "exhausted final 401 must terminate transport without HTTP error projection",
+        );
         let healthy_again = healthy_again.expect("health-neutral next request");
-        assert_eq!(final_error.0, StatusCode::UNAUTHORIZED, "{}", final_error.1);
         assert_eq!(healthy_again.0, StatusCode::OK, "{}", healthy_again.1);
         assert_eq!(text(&healthy_again.1), "A");
         assert_eq!(
@@ -342,8 +344,7 @@ targets=[{{kind="provider_model",provider="controlled",model="wire",key="A",prio
             let calls = entry.calls();
             entry.stop().await;
             for (index, (response, sends)) in setup.into_iter().enumerate() {
-                let response = response.expect("actual overlap rejection");
-                assert_eq!(response.0, StatusCode::BAD_REQUEST, "{}", response.1);
+                response.expect_err("exhausted overlap rejection must terminate transport without HTTP error projection");
                 assert_eq!(
                     sends,
                     index + 1,

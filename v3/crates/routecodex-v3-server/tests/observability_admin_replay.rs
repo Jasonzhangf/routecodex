@@ -304,16 +304,9 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
                 "stream": false
             }))
             .send()
-            .await
-            .expect("the final actual provider HTTP error must be delivered");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            response.headers()["openai-request-id"],
-            "upstream-obs-replay-1"
-        );
-        assert_eq!(
-            response.text().await.unwrap(),
-            r#"{"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}}"#
+            .await;
+        response.expect_err(
+            "the final actual provider HTTP error must break transport without client projection",
         );
         assert_eq!(
             upstream_calls.load(Ordering::SeqCst),
@@ -372,7 +365,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     // on the projected Error06 node, while the provider 503 remains visible on
     // both the attempt rows and the terminal evidence asserted below.
     assert_eq!(list_row["meta"]["provider_status"], 503);
-    assert_eq!(list_row["meta"]["error_category"], "provider_http_503");
+    assert_eq!(list_row["meta"]["error_category"], "http_503");
 
     let (detail_status, detail) = get_json(
         &client,
@@ -644,11 +637,8 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         }))
         .send()
         .await;
-    let response = response.expect("the eligible fallback must return its real final error");
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        response.text().await.unwrap(),
-        r#"{"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}}"#
+    response.expect_err(
+        "exhausted fallback 503 must terminate transport without client HTTP projection",
     );
     assert_eq!(
         upstream_calls.load(Ordering::SeqCst),
