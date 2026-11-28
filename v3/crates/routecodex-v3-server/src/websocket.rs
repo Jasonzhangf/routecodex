@@ -1,7 +1,7 @@
 use crate::*;
 use axum::body::Body;
-use axum::extract::{Extension, Request, State, WebSocketUpgrade};
-use axum::http::{HeaderMap, Response, StatusCode};
+use axum::extract::{Extension, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, Response};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::Arc;

@@ -1,8 +1,6 @@
 //! Public retained-listener witness for reversible aggregate probe ownership.
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_server::{
-    spawn_v3_server_aggregate, spawn_v3_server_aggregate_with_health_observation_clock,
-};
+use routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock;
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::sync::{

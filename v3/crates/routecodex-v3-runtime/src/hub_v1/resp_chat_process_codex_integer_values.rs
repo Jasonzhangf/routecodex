@@ -6,7 +6,7 @@ fn safe_unsigned_integer(value: &Value) -> Option<u64> {
         return Some(integer);
     }
     let float = number.as_f64().filter(|_| number.is_f64())?;
-    (float.is_finite() && float >= 0.0 && float <= 9_007_199_254_740_991.0 && float.fract() == 0.0)
+    (float.is_finite() && (0.0..=9_007_199_254_740_991.0).contains(&float) && float.fract() == 0.0)
         .then_some(float as u64)
 }
 

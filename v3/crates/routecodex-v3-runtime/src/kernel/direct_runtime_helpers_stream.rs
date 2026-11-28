@@ -271,7 +271,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
         })?;
     let mut terminal_seen = false;
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let mut has_business_content;
+    let has_business_content;
     while let Some(frame) = stream.next().await {
         // The attempt is complete at the protocol terminal.  A provider
         // transport error or an unterminated tail after the terminal is
@@ -297,7 +297,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
             ));
         }
         let frame = frame.bytes;
-        has_business_content = direct_sse_chunk_has_business_content(
+        direct_sse_chunk_has_business_content(
             provider_protocol,
             &frame,
             &mut business_decoder,
@@ -1143,7 +1143,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     dsml_context: &crate::direct_response_hooks::V3DirectDsmlContext,
     namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
     hook_registry: &V3HookRegistry,
-    failure_session_scope: &V3ProviderFailureSessionScope,
+    _failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
@@ -1599,8 +1599,8 @@ pub(crate) fn operator_fault_output_with_observability_and_snapshots(
     V3ResponsesDirectRuntimeOutput {
         observability,
         terminal_disposition: Some(V3ProviderTerminalDisposition::NoResponse),
-        diagnostic_source: Some(fault.policy_failure),
-        diagnostic_cause: fault.original_source,
+        diagnostic_source: Some(*fault.policy_failure),
+        diagnostic_cause: fault.original_source.map(|s| *s),
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1707,8 +1707,8 @@ pub(crate) fn policy_failure_output_with_observability(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
     sdk_runtime_fault_output_with_observability_and_snapshots(
-        failure.original_source,
-        failure.policy_failure,
+        *failure.original_source,
+        *failure.policy_failure,
         last_external_http,
         node_trace,
         observability,
@@ -1997,6 +1997,7 @@ fn sdk_runtime_fault_output_with_observability_and_snapshots(
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
+    use routecodex_v3_error::{V3Error05RecoveryAdmissionWitness, V3ErrorHandlingCenterInput};
 
     #[test]
     fn seeded_direct_source_fault_retains_prior_http_witness_and_original_cause() {
@@ -2020,8 +2021,8 @@ mod target_exhaustion_disposition_tests {
         let output = source_failure_output(
             Err(
                 crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-                    policy_failure: policy_failure.clone(),
-                    original_source: Some(original.clone()),
+                    policy_failure: Box::new(policy_failure.clone()),
+                    original_source: Some(Box::new(original.clone())),
                 },
             ),
             Some(witness.clone()),
@@ -2102,8 +2103,8 @@ mod target_exhaustion_disposition_tests {
             "Error01 operator failed",
         );
         let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-            policy_failure: policy_failure.clone(),
-            original_source: Some(original.clone()),
+            policy_failure: Box::new(policy_failure.clone()),
+            original_source: Some(Box::new(original.clone())),
         };
         let witness = V3ExternalHttpWitness::new(
             429,

@@ -17,15 +17,9 @@ impl V3RuntimeAuthoringConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RuntimeManifest {
     pub fd_limit: Option<u64>,
-}
-
-impl Default for V3RuntimeManifest {
-    fn default() -> Self {
-        Self { fd_limit: None }
-    }
 }
 
 pub(crate) fn compile_runtime(

@@ -357,19 +357,19 @@ impl V3CodexSampleStore {
         };
         let starts_failure_record =
             force && !matches!(existing_kind, V3CodexSampleRetentionKind::Failure { .. });
-        if starts_failure_record {
-            if matches!(
+        if starts_failure_record
+            && matches!(
                 admit_v3_codex_sample_failure(&samples_root, None, admission_at)?,
                 V3CodexSampleRetentionAdmission::FailureReserveFull
-            ) {
-                self.record_persist_failure(
-                    request_id.to_string(),
-                    file_name.to_string(),
-                    "diagnostic overflow: 256-directory failure reserve full; persistence skipped"
-                        .to_string(),
-                );
-                return Ok(());
-            }
+            )
+        {
+            self.record_persist_failure(
+                request_id.to_string(),
+                file_name.to_string(),
+                "diagnostic overflow: 256-directory failure reserve full; persistence skipped"
+                    .to_string(),
+            );
+            return Ok(());
         }
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。

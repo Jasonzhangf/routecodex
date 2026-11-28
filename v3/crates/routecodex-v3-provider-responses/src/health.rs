@@ -18,6 +18,7 @@ use crate::provider_cooldown_probe::{
     V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
+use crate::provider_identity::{V3ProviderIdentityRef, V3ProviderKeyRef};
 use persistence::{
     legacy_provider_cooldown_state_path_for_listener,
     legacy_provider_cooldown_state_path_for_manifest, listener_scoped_state_suffix,
@@ -858,10 +859,8 @@ impl V3ProviderHealthStore {
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
         self.record_provider_transient_bypass_in_session_for_interface(
             failure_session_scope,
-            provider_id,
+            V3ProviderIdentityRef::new(provider_id, auth_alias, model_id),
             "default",
-            auth_alias,
-            model_id,
             reason,
             now_ms,
         )
@@ -870,13 +869,16 @@ impl V3ProviderHealthStore {
     pub fn record_provider_transient_bypass_in_session_for_interface(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
+        identity: V3ProviderIdentityRef<'_>,
         interface_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
         reason: Option<&str>,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
+        let V3ProviderIdentityRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = identity;
         let provider_key = provider_key_label(provider_id, interface_id, auth_alias, model_id);
         let key = provider_failure_session_key_for_interface(
             failure_session_scope,
@@ -1103,10 +1105,8 @@ impl V3ProviderHealthStore {
         cooldown_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
         self.record_provider_cooldown_failure_for_interface(
-            provider_id,
+            V3ProviderIdentityRef::new(provider_id, auth_alias, model_id),
             "default",
-            auth_alias,
-            model_id,
             reason,
             now_ms,
             cooldown_ms,
@@ -1115,14 +1115,17 @@ impl V3ProviderHealthStore {
 
     pub fn record_provider_cooldown_failure_for_interface(
         &self,
-        provider_id: &str,
+        identity: V3ProviderIdentityRef<'_>,
         interface_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
         reason: &str,
         now_ms: u64,
         cooldown_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
+        let V3ProviderIdentityRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = identity;
         let blocked_until_ms = now_ms.saturating_add(cooldown_ms.max(1));
         let mut state = self
             .state
@@ -1580,10 +1583,8 @@ impl V3ProviderHealthStore {
         now_ms: u64,
     ) -> Result<V3ProviderKeyHealthProjection, String> {
         self.record_provider_failure_action_impl(
-            provider_id,
+            V3ProviderKeyRef::new(provider_id, auth_alias, model_id),
             interface_id,
-            auth_alias,
-            model_id,
             action,
             now_ms,
             false,
@@ -1603,10 +1604,8 @@ impl V3ProviderHealthStore {
         now_ms: u64,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
         self.record_provider_failure_action_impl(
-            provider_id,
+            V3ProviderKeyRef::new(provider_id, auth_alias, model_id),
             interface_id,
-            auth_alias,
-            model_id,
             action,
             now_ms,
             true,
@@ -1615,14 +1614,17 @@ impl V3ProviderHealthStore {
 
     fn record_provider_failure_action_impl(
         &self,
-        provider_id: &str,
+        key_ref: V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         action: &V3ProviderFailureAction,
         now_ms: u64,
         only_if_cooled: bool,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
+        let V3ProviderKeyRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = key_ref;
         let key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,
@@ -1962,10 +1964,8 @@ impl V3ProviderHealthStore {
         _now_ms: u64,
     ) -> Result<V3ProviderSchedulingProjection, String> {
         self.scheduling_projection_for_key_with_interface(
-            provider_id,
+            V3ProviderKeyRef::new(provider_id, auth_alias, model_id),
             "default",
-            auth_alias,
-            model_id,
             priority,
             base_weight,
             _now_ms,
@@ -1974,14 +1974,17 @@ impl V3ProviderHealthStore {
 
     pub fn scheduling_projection_for_key_with_interface(
         &self,
-        provider_id: &str,
+        key_ref: V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         _now_ms: u64,
     ) -> Result<V3ProviderSchedulingProjection, String> {
+        let V3ProviderKeyRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = key_ref;
         let key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,

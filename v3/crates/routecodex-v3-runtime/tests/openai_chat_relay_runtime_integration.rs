@@ -39,7 +39,7 @@ fn ensure_openai_chat_relay_test_state_dir() {
         std::env::set_var("ROUTECODEX_V3_STATE_DIR", &state_dir);
         std::env::set_var(
             "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
-            &state_dir.join("provider-cooldowns.json"),
+            state_dir.join("provider-cooldowns.json"),
         );
     });
 }
@@ -2657,15 +2657,16 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         secondary_availability.available && secondary_availability.blocked_scopes.is_empty(),
         "the final eligible failure must not mutate sibling health: {secondary_availability:?}"
     );
-    let first_captures = transport.captures.lock().unwrap();
-    assert_eq!(first_captures.len(), 1);
-    assert_eq!(first_captures[0].0, secondary);
-    assert_eq!(
-        first_captures[0].1,
-        "http://secondary.invalid/v1/chat/completions"
-    );
-    assert_eq!(first_captures[0].2["model"], "chat-wire-model");
-    drop(first_captures);
+    {
+        let first_captures = transport.captures.lock().unwrap();
+        assert_eq!(first_captures.len(), 1);
+        assert_eq!(first_captures[0].0, secondary);
+        assert_eq!(
+            first_captures[0].1,
+            "http://secondary.invalid/v1/chat/completions"
+        );
+        assert_eq!(first_captures[0].2["model"], "chat-wire-model");
+    }
 
     let deadline = provider_health
         .store()
@@ -3201,7 +3202,7 @@ async fn sse_transport_error_after_done_is_failure() {
     .expect("pool exhaustion must project one typed Error06 response");
     assert!(output.error_chain.is_some());
     assert!(
-        transport.provider_ids.lock().unwrap().len() >= 1,
+        !transport.provider_ids.lock().unwrap().is_empty(),
         "post-terminal transport failure must reach the provider before projecting Error06"
     );
     let error_body = match output.client_body {

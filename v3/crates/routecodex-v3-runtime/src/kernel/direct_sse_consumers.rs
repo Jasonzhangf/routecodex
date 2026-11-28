@@ -10,7 +10,7 @@ use crate::sse_object_pipeline::{
     SseObjectConsumer, SseObjectConsumerAction, SseObjectError, SseObjectFrame,
 };
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3Error01SourceRaised, V3ErrorSourceKind,
 };
 use routecodex_v3_sse::{SseTransportError, SseTransportErrorExport};
 

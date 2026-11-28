@@ -465,13 +465,13 @@ mod provider_model_availability_tests {
         availability.timezone = "Mars/Olympus".into();
         assert!(availability.validate("provider p model m").is_err());
 
-        let mut availability = night_window(721);
+        let availability = night_window(721);
         assert!(availability.validate("provider p model m").is_err());
 
         // 720 is the largest value that still passes the range check but can
         // never leave a usable window, so it is rejected as well. 719 stays
         // reachable with the longest representable period.
-        let mut availability = night_window(720);
+        let availability = night_window(720);
         assert!(availability.validate("provider p model m").is_err());
         let mut availability = night_window(719);
         availability.periods[0].start = "00:00".into();

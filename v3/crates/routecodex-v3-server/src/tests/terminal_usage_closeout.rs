@@ -1,8 +1,7 @@
 //! Public HTTP closeout checks for the aggregate-owned Provider usage writer.
 use super::*;
 
-#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
-mod fixture;
+use super::hub_v1_fixture as fixture;
 
 const TERMINAL_USAGE_KEY_ENV: &str = "TERMINAL_USAGE_CLOSEOUT_KEY";
 
@@ -115,7 +114,7 @@ fn file_lengths(paths: &[std::path::PathBuf]) -> Vec<Option<u64>> {
 }
 
 async fn run_terminal_usage_closeout(use_prepare_for_exec: bool) {
-    let _home_lock = super::TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = super::TEST_HOME_LOCK.lock().await;
     let home = isolated_home(if use_prepare_for_exec {
         "prepare-for-exec"
     } else {

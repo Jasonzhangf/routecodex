@@ -627,6 +627,7 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
         &mut projected,
         target_protocol,
         preserve_responses_custom_tools,
+        &mut drops,
     )?;
     Ok((projected, drops))
 }
@@ -677,6 +678,7 @@ fn apply_outbound_projection_transforms(
     projected: &mut Value,
     target_protocol: V3OutboundTargetProtocol,
     preserve_responses_custom_tools: bool,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
@@ -689,7 +691,7 @@ fn apply_outbound_projection_transforms(
         }
         V3OutboundTargetProtocol::OpenAiChat => {
             project_responses_request_chat_extension_to_openai_chat(projected)?;
-            project_openai_client_metadata_to_metadata(projected, "openai_chat")?;
+            project_openai_client_metadata_to_metadata(projected, "openai_chat", drops)?;
             validate_openai_metadata(projected, "openai_chat")?;
             project_openai_chat_reasoning_summary_policy(projected)?;
             project_openai_chat_reasoning_context_policy(projected)?;
@@ -1144,7 +1146,7 @@ fn project_openai_responses_reasoning_extensions_to_reasoning(
     Ok(())
 }
 
-fn json_path_child(parent: &str, key: &str) -> String {
+pub(super) fn json_path_child(parent: &str, key: &str) -> String {
     // An empty key must take the quoted branch: the bare form would render as
     // `$.`, which the path reader rejects, so the drop would be recorded
     // without ever being removed from the wire.

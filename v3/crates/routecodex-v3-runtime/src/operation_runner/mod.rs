@@ -240,13 +240,13 @@ fn request_capture_graph_slice_from_sources(
     })?;
     let registry = project_arc_schema_registry(field_profiles_source)?;
     let canonical_graph_id = required_string(&graph, "id", "request graph")?.to_string();
-    if canonical_graph_id != CANONICAL_REQUEST_GRAPH_ID.to_string() {
+    if canonical_graph_id != CANONICAL_REQUEST_GRAPH_ID {
         return Err(OperationRunnerError::new(format!(
             "request graph ID must be `{CANONICAL_REQUEST_GRAPH_ID}`, got `{canonical_graph_id}`"
         )));
     }
     let graph_version = required_string(&graph, "version", "request graph")?.to_string();
-    if graph_version != CANONICAL_REQUEST_GRAPH_VERSION.to_string() {
+    if graph_version != CANONICAL_REQUEST_GRAPH_VERSION {
         return Err(OperationRunnerError::new(format!(
             "request graph version must be `{CANONICAL_REQUEST_GRAPH_VERSION}`, got `{graph_version}`"
         )));

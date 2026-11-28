@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }

@@ -255,7 +255,7 @@ pub fn split_v3_json_path(json_path: &str) -> Option<Vec<V3JsonPathSegment>> {
         }
         if let Some(stripped) = rest.strip_prefix('.') {
             let end = stripped
-                .find(|ch: char| ch == '.' || ch == '[')
+                .find(['.', '['])
                 .unwrap_or(stripped.len());
             let key = &stripped[..end];
             if key.is_empty() {
