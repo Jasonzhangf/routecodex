@@ -13,7 +13,7 @@ const OPERATOR_NAME: &str = "routecodex.v3.error.err04_target_exhaustion";
 const OPERATOR_VERSION: &str = "1";
 const NODE_ID: &str = "error_err04_target_exhaustion";
 
-struct V3Error04TargetExhaustionOperator {
+pub(crate) struct V3Error04TargetExhaustionOperator {
     local_action: V3Error03TargetLocalAction,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
@@ -23,7 +23,7 @@ struct V3Error04TargetExhaustionOperator {
 }
 
 impl V3Error04TargetExhaustionOperator {
-    fn new(
+    pub(crate) fn new(
         local_action: V3Error03TargetLocalAction,
         route_pool_remaining_after_exclusion: usize,
         default_pool_available: bool,

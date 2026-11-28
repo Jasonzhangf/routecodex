@@ -13,10 +13,24 @@ const OPERATOR_NAME: &str = "routecodex.v3.error.err05_execution_decision";
 const OPERATOR_VERSION: &str = "1";
 const NODE_ID: &str = "error_err05_execution_decision";
 
-struct Err05ExecutionDecisionOperator {
+pub(crate) struct Err05ExecutionDecisionOperator {
     exhaustion: Mutex<Option<V3Error04TargetExhaustionDecision>>,
     recovery: Mutex<Option<V3Error05RecoveryAdmissionWitness>>,
     output: Arc<Mutex<Option<V3Error05ExecutionDecision>>>,
+}
+
+impl Err05ExecutionDecisionOperator {
+    pub(crate) fn new(
+        exhaustion: V3Error04TargetExhaustionDecision,
+        recovery: Option<V3Error05RecoveryAdmissionWitness>,
+        output: Arc<Mutex<Option<V3Error05ExecutionDecision>>>,
+    ) -> Self {
+        Self {
+            exhaustion: Mutex::new(Some(exhaustion)),
+            recovery: Mutex::new(recovery),
+            output,
+        }
+    }
 }
 
 impl Operator for Err05ExecutionDecisionOperator {
@@ -69,11 +83,7 @@ pub(crate) fn execute_v3_operation_runner_error_err05_execution_decision(
         V3OperationGraph::Error,
         NODE_ID,
         input,
-        Err05ExecutionDecisionOperator {
-            exhaustion: Mutex::new(Some(exhaustion)),
-            recovery: Mutex::new(recovery),
-            output: Arc::clone(&output),
-        },
+        Err05ExecutionDecisionOperator::new(exhaustion, recovery, Arc::clone(&output)),
     );
     let typed_output = output
         .lock()
