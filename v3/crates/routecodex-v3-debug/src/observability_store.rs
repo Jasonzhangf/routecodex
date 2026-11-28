@@ -1220,10 +1220,10 @@ fn prune_orphaned_observability_temp_files(dir: &Path) {
         {
             continue;
         }
-        let Ok(metadata) = entry.metadata() else {
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
             continue;
         };
-        if !metadata.is_file() {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
             continue;
         }
         let Ok(modified) = metadata.modified() else {

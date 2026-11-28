@@ -390,6 +390,22 @@ fn prune_stale_provider_cooldown_scope_files(
         return;
     };
     let now = std::time::SystemTime::now();
+    let current_tmp_prefix = current
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.tmp."));
+    let legacy_tmp_prefix = legacy
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.tmp."));
+    let current_lock_name = current
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.lock"));
+    let legacy_lock_name = legacy
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.lock"));
     let mut superseded = Vec::new();
     for entry in entries.flatten() {
         let candidate = entry.path();
@@ -405,28 +421,41 @@ fn prune_stale_provider_cooldown_scope_files(
         if !name.starts_with("provider-cooldowns") {
             continue;
         }
-        let Ok(metadata) = entry.metadata() else {
+        let Ok(metadata) = fs::symlink_metadata(&candidate) else {
             continue;
         };
-        if !metadata.is_file() {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
             continue;
         }
         let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
         let age = now.duration_since(modified).ok();
         if name.contains(".tmp.") {
-            if age.is_some_and(|elapsed| elapsed >= std::time::Duration::from_secs(3600)) {
+            let owned_tmp = current_tmp_prefix
+                .as_deref()
+                .is_some_and(|prefix| name.starts_with(prefix))
+                || legacy_tmp_prefix
+                    .as_deref()
+                    .is_some_and(|prefix| name.starts_with(prefix));
+            if owned_tmp
+                && age.is_some_and(|elapsed| elapsed >= std::time::Duration::from_secs(3600))
+            {
                 let _ = fs::remove_file(&candidate);
             }
             continue;
         }
         if name.ends_with(".json.lock") {
+            let companion_name = name.trim_end_matches(".lock");
+            let owned_lock = current_lock_name.as_deref() == Some(name)
+                || legacy_lock_name.as_deref() == Some(name)
+                || scope_suffix.is_some_and(|suffix| companion_name.ends_with(suffix));
             let companion_json = PathBuf::from(
                 candidate
                     .to_string_lossy()
                     .trim_end_matches(".lock")
                     .to_string(),
             );
-            if !companion_json.exists()
+            if owned_lock
+                && !companion_json.exists()
                 && age.is_some_and(|elapsed| elapsed >= PRUNABLE_GENERATION_AGE)
             {
                 let _ = fs::remove_file(&candidate);
@@ -1313,9 +1342,17 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         fs::write(&old_lock, b"").expect("write companion lock");
         backdate(&old_lock);
 
-        let orphan_tmp = root.path().join("provider-cooldowns.json.tmp.99999.1");
-        fs::write(&orphan_tmp, b"{}").expect("write orphan tmp");
+        let orphan_tmp = root
+            .path()
+            .join("provider-cooldowns-current.json.tmp.99999.1");
+        fs::write(&orphan_tmp, b"{}").expect("write owned orphan tmp");
         backdate(&orphan_tmp);
+
+        let unrelated_tmp = root
+            .path()
+            .join("provider-cooldowns-other-manifest.json.tmp.99999.1");
+        fs::write(&unrelated_tmp, b"{}").expect("write unrelated manifest tmp");
+        backdate(&unrelated_tmp);
 
         prune_stale_provider_cooldown_scope_files(&current, Some(&legacy), &[], None);
 
@@ -1325,7 +1362,11 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         );
         assert!(
             !orphan_tmp.exists(),
-            "orphaned tmp file older than 1 hour must be removed"
+            "owned orphaned tmp file older than 1 hour must be removed"
+        );
+        assert!(
+            unrelated_tmp.exists(),
+            "unrelated single-listener manifest tmp file must not be removed"
         );
 
         assert!(
