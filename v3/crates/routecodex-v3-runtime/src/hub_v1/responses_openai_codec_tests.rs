@@ -1094,3 +1094,136 @@ fn responses_system_message_between_pending_tool_call_and_result_defers_to_prese
         json!([{"type": "text", "text": "system after pending tool call"}])
     );
 }
+
+#[test]
+fn responses_non_string_encrypted_content_remains_explicit() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "summary": [],
+                "encrypted_content": {"opaque": true},
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {"type": "redacted_thinking"}
+                }
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            }
+        ]
+    }))
+    .expect("malformed registered ciphertext must reach the owner that reports it");
+
+    let error = crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+        canonical,
+    )
+    .expect_err("non-string ciphertext must remain an explicit malformed-field error");
+    assert!(
+        error
+            .to_string()
+            .contains("anthropic_reasoning_blocks.encrypted_content"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn responses_anthropic_reasoning_extension_ignores_injected_signature_and_data() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "visible reasoning"}],
+                "encrypted_content": null,
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "redacted_thinking",
+                        "signature": "",
+                        "data": "stale-data",
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                }
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            }
+        ]
+    }))
+    .expect("representable reasoning with null ciphertext must normalize cleanly");
+
+    let encoded =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("anthropic request encoding must succeed");
+    let block = encoded["messages"][0]["content"][0]
+        .as_object()
+        .expect("projected thinking block");
+    assert_eq!(block.get("type").and_then(Value::as_str), Some("thinking"));
+    assert_eq!(
+        block.get("thinking").and_then(Value::as_str),
+        Some("visible reasoning")
+    );
+    assert_eq!(
+        block.get("cache_control"),
+        Some(&json!({"type": "ephemeral"}))
+    );
+    assert!(!block.contains_key("signature"));
+    assert!(!block.contains_key("data"));
+}
+
+#[test]
+fn responses_anthropic_same_type_reasoning_extension_preserves_opaque_fields() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "visible reasoning"}],
+                "encrypted_content": "native-signature",
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "thinking",
+                        "signature": "stale-extension-signature",
+                        "data": {"trace": "opaque-provider-extension"},
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                }
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            }
+        ]
+    }))
+    .expect("same-type reasoning extensions must normalize cleanly");
+
+    let encoded =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("anthropic request encoding must succeed");
+    let block = encoded["messages"][0]["content"][0]
+        .as_object()
+        .expect("projected thinking block");
+    assert_eq!(
+        block.get("signature").and_then(Value::as_str),
+        Some("native-signature"),
+        "the canonical ciphertext must remain the signature source"
+    );
+    assert_eq!(
+        block.get("data"),
+        Some(&json!({"trace": "opaque-provider-extension"})),
+        "same-type opaque extensions must survive"
+    );
+    assert_eq!(
+        block.get("cache_control"),
+        Some(&json!({"type": "ephemeral"}))
+    );
+}

@@ -708,7 +708,10 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
                     );
                     assert!(primary.try_recv().is_ok());
                 } else {
-                    assert!(next.is_err(), "invalid compact result cleared the block: relay={relay} stream={stream} purpose={marker}");
+                    assert!(
+                        next.is_err(),
+                        "invalid compact result cleared the block: relay={relay} stream={stream} purpose={marker}"
+                    );
                     assert!(primary.try_recv().is_err());
                 }
             }
@@ -2446,7 +2449,9 @@ async fn assert_snapall_protocol_json_and_sse(
     );
     let json_provider_response = read_snapall_json(&json_dir, "provider-response.json");
     assert!(
-        json_provider_response.to_string().contains(provider_json_marker),
+        json_provider_response
+            .to_string()
+            .contains(provider_json_marker),
         "provider-response.json must preserve the genuine provider JSON body: {json_provider_response}"
     );
     assert!(
@@ -2484,7 +2489,9 @@ async fn assert_snapall_protocol_json_and_sse(
         "an SSE provider response must stay genuine SSE: {sse_provider_response}"
     );
     assert!(
-        sse_provider_response.to_string().contains(provider_sse_marker),
+        sse_provider_response
+            .to_string()
+            .contains(provider_sse_marker),
         "provider-response.json must preserve the genuine provider SSE wire: {sse_provider_response}"
     );
     let sse_response_sample = read_snapall_json(&sse_dir, "response.json");
@@ -4304,9 +4311,12 @@ async fn controlled_terminal_upstream(
     state.captures.send(capture).unwrap();
     if let Some(reply) = compact_reply {
         let (content_type, body) = if compact_stream {
-            ("text/event-stream", format!(
-                "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{reply}}}\n\ndata: [DONE]\n\n"
-            ))
+            (
+                "text/event-stream",
+                format!(
+                    "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{reply}}}\n\ndata: [DONE]\n\n"
+                ),
+            )
         } else {
             ("application/json", reply.to_owned())
         };
@@ -5251,8 +5261,7 @@ async fn assert_truncated_provider_body_status(status: StatusCode) {
     );
     if status == StatusCode::OK {
         assert_eq!(
-            terminal_row["meta"]["error_category"],
-            "network_error",
+            terminal_row["meta"]["error_category"], "network_error",
             "the public terminal row must preserve the internal response-processing category: {terminal_row}"
         );
     } else {
@@ -6458,9 +6467,14 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
         "apply_patch verification failed: Failed to find expected lines in /tmp/rcc-apply-patch-probe/multi.txt:\r\nalpha\r\nbeta",
         "Success. Updated /tmp/rcc-apply-patch-probe/multi.txt\r\n",
     ] {
-        let first = client.post(&endpoint).json(&json!({
-            "model":"client-test", "input":"edit example.txt", "tools":tools, "stream":false
-        })).send().await.unwrap();
+        let first = client
+            .post(&endpoint)
+            .json(&json!({
+                "model":"client-test", "input":"edit example.txt", "tools":tools, "stream":false
+            }))
+            .send()
+            .await
+            .unwrap();
         assert_eq!(first.status(), StatusCode::OK);
         let first_body: Value = first.json().await.unwrap();
         let call = &first_body["output"][0];
@@ -6472,9 +6486,13 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
             .await
             .unwrap()
             .unwrap();
-        assert!(first_capture.body["tools"].as_array().is_some_and(|items| items.iter().any(|item| {
-            item["name"] == "apply_patch"
-        })), "provider tool declaration changed: {:?}", first_capture.body);
+        assert!(
+            first_capture.body["tools"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| { item["name"] == "apply_patch" })),
+            "provider tool declaration changed: {:?}",
+            first_capture.body
+        );
 
         let second = client.post(&endpoint).json(&json!({
             "model":"client-test", "input":[
@@ -6490,9 +6508,15 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
             .await
             .unwrap()
             .unwrap();
-        assert!(second_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|item| {
-            item["call_id"] == "call_apply_patch_parity" && item["output"] == output
-        })), "provider-bound output changed: {:?}", second_capture.body);
+        assert!(
+            second_capture.body["input"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| {
+                    item["call_id"] == "call_apply_patch_parity" && item["output"] == output
+                })),
+            "provider-bound output changed: {:?}",
+            second_capture.body
+        );
     }
 
     handle.shutdown().await;
@@ -6501,18 +6525,18 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
 }
 
 const DSML_ANTHROPIC_SSE: &str = concat!(
-        "event: message_start\n",
-        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_dsml\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"wire-test\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n",
-        "event: content_block_start\n",
-        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
-        "event: content_block_delta\n",
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
-        "event: content_block_stop\n",
-        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
-        "event: message_delta\n",
-        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n",
-        "event: message_stop\n",
-        "data: {\"type\":\"message_stop\"}\n\n"
+    "event: message_start\n",
+    "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_dsml\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"wire-test\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n",
+    "event: content_block_start\n",
+    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+    "event: content_block_delta\n",
+    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
+    "event: content_block_stop\n",
+    "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+    "event: message_delta\n",
+    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n",
+    "event: message_stop\n",
+    "data: {\"type\":\"message_stop\"}\n\n"
 );
 
 fn anthropic_sse_text_fixture(text: &str, native_tool: bool) -> Vec<u8> {
@@ -6652,6 +6676,8 @@ async fn responses_client_anthropic_cache_usage_projects_openai_details_shape() 
 #[derive(Clone)]
 struct ControlledAnthropicReasoningState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
+    request_count: Arc<std::sync::atomic::AtomicUsize>,
+    strict_reasoning_lookup_followup: bool,
 }
 
 fn anthropic_sse_bytes(events: Vec<Value>) -> Vec<u8> {
@@ -6735,6 +6761,534 @@ fn anthropic_sse_final_fixture() -> Vec<u8> {
     ])
 }
 
+const REASONING_LOOKUP_CONTROL: &str = "null-empty-ciphertext-reasoning-control";
+const REASONING_LOOKUP_ASSISTANT_TEXT: &str = "Let me check the lookup.";
+const REASONING_LOOKUP_TOOL: &str = "mcp__codex_apps__codex_security_cloud__lookup";
+const REASONING_LOOKUP_CALL_ID: &str = "toolu_p0_reasoning";
+
+fn execute_reasoning_lookup_tool(call: &Value) -> String {
+    assert_eq!(call["name"], REASONING_LOOKUP_TOOL);
+    let input: Value = serde_json::from_str(call["arguments"].as_str().expect("arguments"))
+        .expect("decoded tool arguments");
+    assert_eq!(input, json!({"query":"p0 reasoning","limit":3}));
+    let limit = input["limit"].as_u64().expect("limit");
+    (limit * 14).to_string()
+}
+
+fn reasoning_lookup_hosted_web_search_declaration() -> Value {
+    json!({
+        "type": "web_search_20250305",
+        "name": "web_search"
+    })
+}
+
+fn reasoning_lookup_tool_declaration() -> Value {
+    json!({
+        "name":REASONING_LOOKUP_TOOL,
+        "input_schema":{
+            "type":"object",
+            "properties":{
+                "query":{"type":"string"},
+                "limit":{"type":"integer"}
+            },
+            "required":["query"]
+        }
+    })
+}
+
+fn reasoning_lookup_expected_tools() -> Vec<Value> {
+    vec![
+        reasoning_lookup_hosted_web_search_declaration(),
+        reasoning_lookup_tool_declaration(),
+    ]
+}
+
+fn validate_reasoning_lookup_tool_declaration(body: &Value) -> Result<(), String> {
+    let tools = body["tools"]
+        .as_array()
+        .ok_or_else(|| format!("missing provider tool declarations: {body}"))?;
+    let expected_tools = reasoning_lookup_expected_tools();
+    if tools != expected_tools.as_slice() {
+        return Err(format!(
+            "reasoning lookup tool declarations changed (expected exact hosted web_search + lookup): {body}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_reasoning_lookup_opening_message(body: &Value) -> Result<(), String> {
+    let messages = body["messages"]
+        .as_array()
+        .ok_or_else(|| format!("missing provider messages: {body}"))?;
+    let opening_message = messages
+        .first()
+        .ok_or_else(|| format!("missing opening user message: {body}"))?;
+    let opening_content = opening_message["content"]
+        .as_array()
+        .ok_or_else(|| format!("missing opening message content: {body}"))?;
+    if opening_message["role"] != "user"
+        || opening_content.len() != 1
+        || opening_content[0] != json!({"type":"text","text":REASONING_LOOKUP_CONTROL})
+    {
+        return Err(format!(
+            "opening message must contain exactly one reasoning lookup control text block: {body}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
+    validate_reasoning_lookup_opening_message(body)?;
+    validate_reasoning_lookup_tool_declaration(body)?;
+    let messages = body["messages"].as_array().unwrap();
+    let mut tool_use_at = None;
+    let mut tool_result_at = None;
+    let mut thinking_blocks = Vec::new();
+    for (message_index, message) in messages.iter().enumerate() {
+        let role = message["role"].as_str().unwrap_or_default();
+        for (block_index, block) in message["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            match block["type"].as_str() {
+                Some("tool_use") if tool_use_at.is_none() => {
+                    tool_use_at = Some((message_index, block_index, role, block));
+                }
+                Some("tool_use") => {
+                    return Err(format!("unexpected duplicate tool_use: {body}"));
+                }
+                Some("tool_result") if tool_result_at.is_none() => {
+                    tool_result_at = Some((message_index, block_index, role, block));
+                }
+                Some("tool_result") => {
+                    return Err(format!("unexpected duplicate tool_result: {body}"));
+                }
+                Some("thinking") => {
+                    if block["thinking"]
+                        .as_str()
+                        .is_none_or(|text| text.trim().is_empty())
+                    {
+                        return Err(format!("thinking block missing text: {body}"));
+                    }
+                    if block.get("signature").is_some_and(|sig| !sig.is_string()) {
+                        return Err(format!(
+                            "thinking block signature must be a string when present: {body}"
+                        ));
+                    }
+                    thinking_blocks.push((message_index, block_index, block));
+                }
+                Some("redacted_thinking")
+                    if block["data"].as_str().is_none_or(|data| data.is_empty()) =>
+                {
+                    return Err(format!(
+                        "redacted_thinking block must carry non-empty data: {body}"
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    let (tool_use_message, tool_use_block, tool_use_role, tool_use) =
+        tool_use_at.ok_or_else(|| format!("missing paired tool_use: {body}"))?;
+    if tool_use_role != "assistant" {
+        return Err(format!("tool_use must be in an assistant message: {body}"));
+    }
+    if tool_use["id"] != REASONING_LOOKUP_CALL_ID
+        || tool_use["name"] != REASONING_LOOKUP_TOOL
+        || tool_use["input"] != json!({"query":"p0 reasoning","limit":3})
+    {
+        return Err(format!("tool_use identity or input changed: {body}"));
+    }
+    if thinking_blocks.len() > 1 {
+        return Err(format!(
+            "reasoning replay must contain at most one thinking block: {body}"
+        ));
+    }
+    if thinking_blocks
+        .iter()
+        .any(|(message_index, block_index, _)| {
+            *message_index != tool_use_message || *block_index >= tool_use_block
+        })
+    {
+        return Err(format!(
+            "thinking must precede tool_use in the same assistant message: {body}"
+        ));
+    }
+    let assistant_content = messages[tool_use_message]["content"]
+        .as_array()
+        .ok_or_else(|| format!("missing assistant content: {body}"))?;
+    let assistant_text_positions = assistant_content
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| {
+            block["type"] == "text" && block["text"] == REASONING_LOOKUP_ASSISTANT_TEXT
+        })
+        .map(|(block_index, _)| block_index)
+        .collect::<Vec<_>>();
+    if assistant_text_positions.len() != 1 {
+        return Err(format!(
+            "assistant text must appear exactly once in the tool-use message: {body}"
+        ));
+    }
+    if assistant_text_positions[0] >= tool_use_block {
+        return Err(format!(
+            "assistant text must precede the paired tool_use: {body}"
+        ));
+    }
+
+    let (tool_result_message, tool_result_block, tool_result_role, tool_result) =
+        tool_result_at.ok_or_else(|| format!("missing paired tool_result: {body}"))?;
+    if tool_result_role != "user" {
+        return Err(format!("tool_result must be in a user message: {body}"));
+    }
+    if tool_result_message != tool_use_message + 1 {
+        return Err(format!(
+            "tool_result must immediately follow its tool_use: {body}"
+        ));
+    }
+    if tool_result_block != 0 {
+        return Err(format!(
+            "tool_result must start its user message content: {body}"
+        ));
+    }
+    if tool_result["tool_use_id"] != REASONING_LOOKUP_CALL_ID
+        || tool_result["content"] != "42"
+        || tool_result
+            .get("is_error")
+            .is_some_and(|value| value != &Value::Bool(false))
+    {
+        return Err(format!(
+            "tool_result identity, content, or success status changed: {body}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
+    let tool_use = json!({"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}});
+    let tool_result =
+        json!({"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"});
+    let valid = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
+        {"role":"user","content":[tool_result.clone()]}
+    ],"tools":reasoning_lookup_expected_tools()});
+    assert!(validate_reasoning_lookup_followup(&valid).is_ok());
+
+    let reversed = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"user","content":[tool_result.clone()]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]}
+    ],"tools":reasoning_lookup_expected_tools()});
+    assert!(validate_reasoning_lookup_followup(&reversed)
+        .unwrap_err()
+        .contains("must immediately follow"));
+
+    let wrong_roles = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"user","content":[tool_use.clone()]},
+        {"role":"assistant","content":[tool_result.clone()]}
+    ],"tools":reasoning_lookup_expected_tools()});
+    assert!(validate_reasoning_lookup_followup(&wrong_roles)
+        .unwrap_err()
+        .contains("assistant message"));
+
+    let intervening_message = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
+        {"role":"user","content":[{"type":"text","text":"intervening"}]},
+        {"role":"user","content":[tool_result.clone()]}
+    ],"tools":reasoning_lookup_expected_tools()});
+    assert!(validate_reasoning_lookup_followup(&intervening_message)
+        .unwrap_err()
+        .contains("must immediately follow"));
+
+    let text_before_result = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
+        {"role":"user","content":[{"type":"text","text":"before result"},tool_result.clone()]}
+    ],"tools":reasoning_lookup_expected_tools()});
+    assert!(validate_reasoning_lookup_followup(&text_before_result)
+        .unwrap_err()
+        .contains("must start its user message content"));
+
+    let missing_declaration = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"user","content":[tool_result.clone()]}
+    ]});
+    assert!(validate_reasoning_lookup_followup(&missing_declaration)
+        .unwrap_err()
+        .contains("tool declarations"));
+
+    let malformed_hosted_envelope = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use]},
+        {"role":"user","content":[tool_result]}
+    ],"tools":[
+        {"type":"web_search_20250305","name":"web_search","input_schema":{}},
+        reasoning_lookup_tool_declaration()
+    ]});
+    assert!(
+        validate_reasoning_lookup_followup(&malformed_hosted_envelope)
+            .unwrap_err()
+            .contains("hosted web_search + lookup")
+    );
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let first = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(
+            &json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+                {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"messages":[
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":REASONING_LOOKUP_CALL_ID,
+                "name":REASONING_LOOKUP_TOOL,
+                "input":{"query":"p0 reasoning","limit":3}
+            }]},
+            {"role":"user","content":[
+                {"type":"text","text":"misplaced result"},
+                {"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"}
+            ]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let missing_declaration = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":REASONING_LOOKUP_CALL_ID,
+                "name":REASONING_LOOKUP_TOOL,
+                "input":{"query":"p0 reasoning","limit":3}
+            }]},
+            {"role":"user","content":[{
+                "type":"tool_result",
+                "tool_use_id":REASONING_LOOKUP_CALL_ID,
+                "content":"42"
+            }]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_declaration.status(), StatusCode::BAD_REQUEST);
+
+    let misplaced_thinking = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":REASONING_LOOKUP_CALL_ID,
+                "name":REASONING_LOOKUP_TOOL,
+                "input":{"query":"p0 reasoning","limit":3}
+            }]},
+            {"role":"user","content":[
+                {"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"},
+                {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}}
+            ]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(misplaced_thinking.status(), StatusCode::BAD_REQUEST);
+
+    let extra_thinking = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[
+                {"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},
+                {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}},
+                {"type":"thinking","thinking":""},
+                {"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}}
+            ]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(extra_thinking.status(), StatusCode::BAD_REQUEST);
+
+    let missing_assistant_text = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}},
+                {"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}}
+            ]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_assistant_text.status(), StatusCode::BAD_REQUEST);
+
+    let failed_tool_result = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[
+                {"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},
+                {"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}}
+            ]},
+            {"role":"user","content":[{
+                "type":"tool_result",
+                "tool_use_id":REASONING_LOOKUP_CALL_ID,
+                "content":"42",
+                "is_error":true
+            }]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(failed_tool_result.status(), StatusCode::BAD_REQUEST);
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_declaration() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[{
+            "name":REASONING_LOOKUP_TOOL,
+            "input_schema":{
+                "type":"object",
+                "properties":{
+                    "query":{"type":"string"},
+                    "limit":{"type":"string"}
+                },
+                "required":["query"]
+            }
+        }],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    let invalid_body = invalid.text().await.unwrap();
+    assert!(
+        invalid_body.contains("hosted web_search + lookup"),
+        "expected declaration rejection at request_index=0: {invalid_body}"
+    );
+    shutdown.send(()).unwrap();
+
+    let (fresh_url, _fresh_captures, fresh_shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let malformed_hosted = client
+        .post(format!("{fresh_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[
+            {"type":"web_search_20250305","name":"web_search","input_schema":{}},
+            reasoning_lookup_tool_declaration()
+        ],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(malformed_hosted.status(), StatusCode::BAD_REQUEST);
+    let malformed_hosted_body = malformed_hosted.text().await.unwrap();
+    assert!(
+        malformed_hosted_body.contains("hosted web_search + lookup"),
+        "expected hosted declaration rejection at request_index=0: {malformed_hosted_body}"
+    );
+    fresh_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_missing_opening_message() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_block_type() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(
+            &json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+                {"role":"user","content":[{"type":"image","text":REASONING_LOOKUP_CONTROL}]}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    let invalid_body = invalid.text().await.unwrap();
+    assert!(
+        invalid_body.contains("opening message must contain exactly one"),
+        "expected opening block shape rejection at request_index=0: {invalid_body}"
+    );
+    shutdown.send(()).unwrap();
+}
+
 // Controlled provider fixture: a reasoning block that omits its native
 // `thinking` payload. This is a real malformed business response, not a
 // provider HTTP error, so the proxy must keep it in the internal typed Error
@@ -6784,6 +7338,9 @@ async fn controlled_anthropic_reasoning_upstream(
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    let request_index = state
+        .request_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let provider_stream = body["stream"].as_bool().unwrap_or(false);
     assert_eq!(
         header_text(&headers, "x-api-key").as_deref(),
@@ -6812,7 +7369,34 @@ async fn controlled_anthropic_reasoning_upstream(
     let redacted_reasoning_association = control("redacted-reasoning-association");
     let mixed_reasoning_order = control("mixed-reasoning-order");
     let empty_signed_reasoning = control("empty-signed-reasoning-control");
-    let bytes = if empty_signed_reasoning && provider_stream {
+    let null_empty_ciphertext_reasoning = control(REASONING_LOOKUP_CONTROL);
+    let bytes = if state.strict_reasoning_lookup_followup {
+        if request_index == 0 {
+            if let Err(error) = validate_reasoning_lookup_opening_message(&body) {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(error))
+                    .unwrap();
+            }
+            if let Err(error) = validate_reasoning_lookup_tool_declaration(&body) {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(error))
+                    .unwrap();
+            }
+            anthropic_sse_reasoning_tool_call_fixture()
+        } else {
+            if let Err(error) = validate_reasoning_lookup_followup(&body) {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(error))
+                    .unwrap();
+            }
+            anthropic_sse_final_fixture()
+        }
+    } else if null_empty_ciphertext_reasoning {
+        anthropic_sse_reasoning_tool_call_fixture()
+    } else if empty_signed_reasoning && provider_stream {
         anthropic_sse_empty_signed_reasoning_fixture()
     } else if empty_signed_reasoning {
         anthropic_json_empty_signed_reasoning_fixture()
@@ -6841,7 +7425,9 @@ async fn controlled_anthropic_reasoning_upstream(
         .unwrap()
 }
 
-async fn start_controlled_anthropic_reasoning_upstream() -> (
+async fn start_controlled_anthropic_reasoning_upstream_with_mode(
+    strict_reasoning_lookup_followup: bool,
+) -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
     oneshot::Sender<()>,
@@ -6857,6 +7443,8 @@ async fn start_controlled_anthropic_reasoning_upstream() -> (
         )
         .with_state(Arc::new(ControlledAnthropicReasoningState {
             captures: captures_tx,
+            request_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            strict_reasoning_lookup_followup,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -6867,6 +7455,22 @@ async fn start_controlled_anthropic_reasoning_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_controlled_anthropic_reasoning_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    start_controlled_anthropic_reasoning_upstream_with_mode(false).await
+}
+
+async fn start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    start_controlled_anthropic_reasoning_upstream_with_mode(true).await
 }
 
 fn reasoning_client_completed_response(body: &str) -> Value {
@@ -6904,7 +7508,7 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
     // and a native tool call.
     let first = client
         .post(format!("{base}/v1/responses"))
-        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .json(&json!({"model":"client-test","input":REASONING_LOOKUP_CONTROL,"stream":true,"tools":tools}))
         .send()
         .await
         .unwrap();
@@ -7076,18 +7680,28 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
 }
 
 #[tokio::test]
-async fn responses_client_anthropic_null_encrypted_content_reasoning_history_completes_two_turns() {
+async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_representable_reasoning_extensions(
+) {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
-        start_controlled_anthropic_reasoning_upstream().await;
-    let manifest = responses_relay_provider_protocol_manifest(
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
         free_port(),
         free_port(),
         provider_base_url.trim_end_matches("/v1"),
         "anthropic",
         None,
     );
+    manifest
+        .providers
+        .get_mut("test")
+        .unwrap()
+        .models
+        .get_mut("test")
+        .unwrap()
+        .capabilities
+        .push("web_search".to_string());
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder()
@@ -7095,17 +7709,38 @@ async fn responses_client_anthropic_null_encrypted_content_reasoning_history_com
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+    let tools = json!([
+        {"type":"web_search"},
+        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
+    ]);
 
     let first = client
         .post(format!("{base}/v1/responses"))
-        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .json(&json!({"model":"client-test","input":REASONING_LOOKUP_CONTROL,"stream":true,"tools":tools}))
         .send()
         .await
         .unwrap();
     assert_eq!(first.status(), StatusCode::OK);
     let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
     let output = first_body["output"].as_array().expect("output array");
+    let emitted_types: Vec<&str> = output
+        .iter()
+        .filter_map(|item| item["type"].as_str())
+        .collect();
+    assert_eq!(
+        emitted_types,
+        vec!["message", "reasoning", "function_call"],
+        "Turn-1 Responses output must keep text -> reasoning -> tool_call order: {first_body}"
+    );
+    let turn1_reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .expect("turn 1 reasoning item")
+        .clone();
+    assert!(
+        turn1_reasoning.get("encrypted_content").is_none(),
+        "provider-emitted unsigned thinking omits encrypted_content on Responses output: {turn1_reasoning}"
+    );
     let assistant_text = output
         .iter()
         .find(|item| item["type"] == "message")
@@ -7116,28 +7751,115 @@ async fn responses_client_anthropic_null_encrypted_content_reasoning_history_com
         .find(|item| item["type"] == "function_call")
         .expect("function_call")
         .clone();
+    assert_eq!(call["name"], declared_tool, "{first_body}");
     let call_id = call["call_id"].as_str().expect("call_id").to_string();
-    let _first_capture = timeout(Duration::from_secs(5), captures.recv())
+    assert_eq!(call_id, REASONING_LOOKUP_CALL_ID);
+    let tool_output = execute_reasoning_lookup_tool(&call);
+    assert_eq!(tool_output, "42");
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(
+        first_capture.body["tools"],
+        json!(reasoning_lookup_expected_tools()),
+        "both exact hosted web_search and declared lookup tool must reach the first provider attempt: {}",
+        first_capture.body
+    );
 
-    for (label, reasoning) in [
+    // Replay the exact Turn-1 provider-emitted items in their returned order.
+    let mut emitted_replay_input = vec![json!({"role":"user","content":REASONING_LOOKUP_CONTROL})];
+    emitted_replay_input.extend(output.iter().cloned());
+    emitted_replay_input
+        .push(json!({"type":"function_call_output","call_id":call_id,"output":tool_output}));
+    let emitted_replay = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"client-test","stream":true,"tools":tools,"input":emitted_replay_input}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(emitted_replay.status(), StatusCode::OK);
+    let emitted_replay_body =
+        reasoning_client_completed_response(&emitted_replay.text().await.unwrap());
+    assert_eq!(emitted_replay_body["status"], "completed");
+    let emitted_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        emitted_capture.body["tools"],
+        json!(reasoning_lookup_expected_tools()),
+        "emitted-turn1-replay: exact hosted web_search + lookup tools must survive: {}",
+        emitted_capture.body
+    );
+    let emitted_assistant_content = emitted_capture.body["messages"][1]["content"]
+        .as_array()
+        .expect("emitted-turn1-replay: assistant message content");
+    let emitted_thinking = emitted_assistant_content
+        .iter()
+        .find(|block| block["type"] == "thinking" && block["thinking"] == "plan the lookup")
+        .expect("emitted-turn1-replay: provider-emitted reasoning must survive on wire");
+    assert_eq!(
+        emitted_thinking["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+    assert!(emitted_thinking.get("signature").is_none());
+    assert!(captures.try_recv().is_err());
+
+    let mut reasoning_variants = vec![
         (
-            "key-null",
+            "plain-key-null".to_string(),
             json!({"type":"reasoning","summary":[],"encrypted_content":null}),
+            false,
         ),
-        ("key-absent", json!({"type":"reasoning","summary":[]})),
+        (
+            "plain-key-absent".to_string(),
+            json!({"type":"reasoning","summary":[]}),
+            false,
+        ),
+    ];
+    for (summary_label, summary) in [
+        (
+            "plaintext",
+            json!([{"type":"summary_text","text":"plan the bounded lookup"}]),
+        ),
+        ("empty", json!([])),
     ] {
+        for (cipher_label, encrypted_content) in [
+            ("key-null", Some(Value::Null)),
+            ("key-empty", Some(Value::String(String::new()))),
+            ("key-absent", None),
+        ] {
+            let label = format!("{summary_label}-{cipher_label}");
+            let mut reasoning = json!({
+                "type":"reasoning",
+                "summary":summary,
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"redacted_thinking",
+                        "signature":"",
+                        "data":"stale-extension-data",
+                        "cache_control":{"type":"ephemeral"}
+                    }
+                }
+            });
+            if let Some(value) = encrypted_content {
+                reasoning["encrypted_content"] = value;
+            }
+            reasoning_variants.push((label, reasoning, summary_label == "plaintext"));
+        }
+    }
+
+    for (label, reasoning, expects_thinking) in reasoning_variants {
         let second = client
             .post(format!("{base}/v1/responses"))
             .json(
                 &json!({"model":"client-test","stream":true,"tools":tools,"input":[
-                    {"role":"user","content":"look up p0 reasoning"},
+                    {"role":"user","content":REASONING_LOOKUP_CONTROL},
                     reasoning,
                     assistant_text.clone(),
                     call.clone(),
-                    {"type":"function_call_output","call_id":call_id,"output":"42"}
+                    {"type":"function_call_output","call_id":call_id,"output":tool_output}
                 ]}),
             )
             .send()
@@ -7146,37 +7868,188 @@ async fn responses_client_anthropic_null_encrypted_content_reasoning_history_com
         assert_eq!(second.status(), StatusCode::OK, "{label}");
         let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
         assert_eq!(second_body["status"], "completed", "{label}: {second_body}");
+        let final_text = second_body["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|item| {
+                item["content"]
+                    .as_array()
+                    .and_then(|content| content.iter().find_map(|part| part["text"].as_str()))
+            })
+            .unwrap_or_else(|| panic!("{label}: missing final text: {second_body}"));
+        assert_eq!(final_text, "lookup complete: 42", "{label}: {second_body}");
 
         let capture = timeout(Duration::from_secs(5), captures.recv())
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(
+                capture.body["tools"],
+                json!(reasoning_lookup_expected_tools()),
+                "{label}: both exact hosted web_search and declared lookup tool must survive followup: {}",
+                capture.body
+            );
         let history = capture.body["messages"]
             .as_array()
             .unwrap_or_else(|| panic!("{label}: missing provider messages: {}", capture.body));
+        let blocks = history
+            .iter()
+            .flat_map(|message| message["content"].as_array().into_iter().flatten());
+        let blocks = blocks.collect::<Vec<_>>();
         assert!(
-            !history.iter().any(|message| {
-                message["content"].as_array().is_some_and(|content| {
-                    content
-                        .iter()
-                        .any(|block| block["type"] == "redacted_thinking")
-                })
-            }),
-            "{label}: data-less ciphertext must not become a redacted_thinking block on provider wire: {}",
+                !blocks
+                    .iter()
+                    .any(|block| block["type"] == "redacted_thinking"),
+                "{label}: data-less ciphertext must not become a redacted_thinking block on provider wire: {}",
+                capture.body
+            );
+        let replayed_reasoning = blocks.iter().find(|block| {
+            block["type"] == "thinking" && block["thinking"] == "plan the bounded lookup"
+        });
+        if expects_thinking {
+            assert_eq!(
+                blocks
+                    .iter()
+                    .filter(|block| block["type"] == "thinking")
+                    .count(),
+                1,
+                "{label}: exactly one representable thinking block must survive: {}",
+                capture.body
+            );
+            let replayed_reasoning = replayed_reasoning.unwrap_or_else(|| {
+                panic!(
+                    "{label}: representable reasoning must survive without ciphertext: {}",
+                    capture.body
+                )
+            });
+            assert_eq!(
+                replayed_reasoning["cache_control"],
+                json!({"type":"ephemeral"}),
+                "{label}: cache_control must survive alongside plaintext reasoning: {}",
+                capture.body
+            );
+            assert!(
+                replayed_reasoning.get("signature").is_none(),
+                "{label}: empty or null ciphertext must not emit an empty signature field: {}",
+                capture.body
+            );
+            assert!(
+                replayed_reasoning.get("data").is_none(),
+                "{label}: extension replay must not inject data onto a thinking block: {}",
+                capture.body
+            );
+        } else {
+            assert!(
+                !blocks.iter().any(|block| block["type"] == "thinking"),
+                "{label}: data-less reasoning must not fabricate a thinking block: {}",
+                capture.body
+            );
+        }
+        let tool_use = blocks
+            .iter()
+            .find(|block| block["type"] == "tool_use")
+            .unwrap_or_else(|| {
+                panic!(
+                    "{label}: paired tool call must reach provider wire: {}",
+                    capture.body
+                )
+            });
+        assert_eq!(tool_use["name"], declared_tool, "{label}: {}", capture.body);
+        assert_eq!(tool_use["id"], call_id, "{label}: {}", capture.body);
+        assert_eq!(
+            tool_use["input"],
+            json!({"query":"p0 reasoning","limit":3}),
+            "{label}: {}",
+            capture.body
+        );
+        let tool_result = blocks
+            .iter()
+            .find(|block| block["type"] == "tool_result")
+            .unwrap_or_else(|| {
+                panic!(
+                    "{label}: paired tool result must reach provider wire: {}",
+                    capture.body
+                )
+            });
+        assert_eq!(
+            tool_result["tool_use_id"], call_id,
+            "{label}: {}",
+            capture.body
+        );
+        assert_eq!(tool_result["content"], "42", "{label}: {}", capture.body);
+        assert!(
+            tool_result
+                .get("is_error")
+                .is_none_or(|value| value == &Value::Bool(false)),
+            "{label}: successful tool result must not be projected as an error: {}",
             capture.body
         );
         assert!(
-            history.iter().any(|message| {
-                message["content"].as_array().is_some_and(|content| {
-                    content
-                        .iter()
-                        .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
-                })
-            }),
-            "{label}: paired tool call must reach provider wire: {}",
-            capture.body
+            captures.try_recv().is_err(),
+            "{label}: the selected provider must accept the first attempt without fallback"
         );
     }
+
+    // Client-supplied Responses `thinking` with explicit empty `encrypted_content: ""`
+    // (separate from Responses output policy in `wire.rs` which retains only non-empty
+    // cipher strings; native `/v1/messages` empty signature round-trip is covered by
+    // `anthropic_empty_signature_tool_followup_reaches_first_provider_attempt`)
+    // must keep its explicit empty `signature` key on the first Anthropic attempt.
+    let native_empty_sig_second = client
+        .post(format!("{base}/v1/responses"))
+        .json(
+            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                {"role":"user","content":REASONING_LOOKUP_CONTROL},
+                {
+                    "type":"reasoning",
+                    "summary":[{"type":"summary_text","text":"plan the bounded lookup"}],
+                    "encrypted_content":"",
+                    "routecodex_chat_extension":{
+                        "anthropic_reasoning":{
+                            "type":"thinking",
+                            "cache_control":{"type":"ephemeral"}
+                        }
+                    }
+                },
+                assistant_text,
+                call,
+                {"type":"function_call_output","call_id":call_id,"output":tool_output}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(native_empty_sig_second.status(), StatusCode::OK);
+    let native_empty_sig_body =
+        reasoning_client_completed_response(&native_empty_sig_second.text().await.unwrap());
+    assert_eq!(native_empty_sig_body["status"], "completed");
+    let native_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        native_capture.body["tools"],
+        json!(reasoning_lookup_expected_tools()),
+        "native-thinking-key-empty: exact hosted web_search + lookup tools must survive: {}",
+        native_capture.body
+    );
+    let native_thinking_block = native_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|block| block["type"] == "thinking" && block["thinking"] == "plan the bounded lookup")
+        .expect("native thinking block must survive on provider wire");
+    assert_eq!(
+        native_thinking_block
+            .get("signature")
+            .and_then(Value::as_str),
+        Some(""),
+        "native thinking with encrypted_content=\"\" must preserve explicit empty signature: {}",
+        native_capture.body
+    );
+    assert!(captures.try_recv().is_err());
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -8017,7 +8890,8 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+        text,
+        "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -8105,7 +8979,8 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+        text,
+        "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -8136,17 +9011,42 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             "internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "",
         ),
-        ("<thinking>private</thinking>Visible answer", false, "Visible answer", "private"),
+        (
+            "<thinking>private</thinking>Visible answer",
+            false,
+            "Visible answer",
+            "private",
+        ),
         (
             "<thinking>private<\u{2f}thinking>Visible answer\n\"<\u{2f}｜DSML｜parameter>\"\n\"<\u{2f}｜DSML｜invoke>\"\n\"<\u{2f}｜DSML｜tool_calls>\"",
             false,
             "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "private",
         ),
-        ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
-        ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
-        ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),
-        ("Answer. <thinking>literal unfinished example", false, "Answer. literal unfinished example", ""),
+        (
+            "Quoted \"<thinking>literal</thinking>\" text",
+            false,
+            "Quoted \"<thinking>literal</thinking>\" text",
+            "",
+        ),
+        (
+            "```\n<thinking>literal</thinking>\n```",
+            false,
+            "```\n<thinking>literal</thinking>\n```",
+            "",
+        ),
+        (
+            "Prefix <thinking>literal</thinking>",
+            false,
+            "Prefix ",
+            "literal",
+        ),
+        (
+            "Answer. <thinking>literal unfinished example",
+            false,
+            "Answer. literal unfinished example",
+            "",
+        ),
     ];
     for (text, native_tool, expected_text, expected_reasoning) in cases {
         let (provider_base_url, mut captures, shutdown) =
@@ -10458,7 +11358,10 @@ async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
         .unwrap();
     let mut socket = TcpStream::connect(handle.listeners[0].addr).await.unwrap();
     let body = json!({"model":"client-test", "input":"keepalive", "stream":false}).to_string();
-    let request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
     socket.write_all(request.as_bytes()).await.unwrap();
     let first = timeout(
         Duration::from_secs(5),
@@ -12852,7 +13755,8 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                     )
                     .await;
                 let mut config = p6_manifest(free_port(), free_port(), &provider_url);
-                let transport_log = std::env::temp_dir().join(format!("v3-isolation-wire-{}.jsonl", free_port()));
+                let transport_log =
+                    std::env::temp_dir().join(format!("v3-isolation-wire-{}.jsonl", free_port()));
                 config.debug.log_file = Some(transport_log.to_string_lossy().into_owned());
                 if endpoint.starts_with("/v1beta/") {
                     let provider = config.providers.get_mut("test").unwrap();
@@ -12901,11 +13805,30 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 shutdown.send(()).unwrap();
                 let records = fs::read_to_string(&transport_log).unwrap();
                 fs::remove_file(&transport_log).unwrap();
-                let observations = records.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                    .filter(|event| event["event"] == "client_transport").collect::<Vec<_>>();
-                assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
-                let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
-                assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
+                let observations = records
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .filter(|event| event["event"] == "client_transport")
+                    .collect::<Vec<_>>();
+                assert!(
+                    observations
+                        .iter()
+                        .any(|e| e["stage"] == "request_identified"
+                            && e["request_id"].as_str().is_some()),
+                    "{endpoint} needs the actual allocated request identity"
+                );
+                let writes = observations
+                    .iter()
+                    .filter(|e| e["stage"] == "socket_write")
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    writes
+                        .iter()
+                        .map(|e| e["written_bytes"].as_u64().unwrap())
+                        .sum::<u64>(),
+                    wire.len() as u64,
+                    "{endpoint} socket receipts must match actual received bytes"
+                );
                 let capture = captures.try_recv().unwrap_or_else(|_| {
                     panic!("{endpoint} must exercise actual provider transport")
                 });
@@ -17471,8 +18394,7 @@ async fn debug_response_dry_run_preserves_missing_reason_and_rejects_malformed_e
         "malformed captured response must fail explicitly: {malformed_body}"
     );
     assert_eq!(
-        malformed_body["clientResponse"]["body"]["error"]["code"],
-        "network_error",
+        malformed_body["clientResponse"]["body"]["error"]["code"], "network_error",
         "malformed response must remain on the typed provider-response error chain: {malformed_body}"
     );
 }
