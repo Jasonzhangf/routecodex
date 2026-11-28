@@ -131,11 +131,25 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
-        _drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
+        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
     ) -> crate::shared::V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         let candidate = &policy.target.candidate;
+        let mut request_body = policy.request_body.clone();
+        let mut projection_drops = Vec::new();
+        crate::hub_v1::project_gemini_store_to_wire(&mut request_body, &mut projection_drops)
+            .map_err(|reason| {
+                raise_v3_source_via_err01(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3Req04StandardizedGemini",
+                    "gemini_store_projection_failed",
+                    reason,
+                    V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+                )
+                .map(|(_, source)| source)
+            })?;
+        drop_context.restamp_and_emit(&mut projection_drops);
         let wire_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
-            policy.request_body.clone(),
+            request_body,
             candidate,
         )
         .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
@@ -423,6 +437,56 @@ mod tests {
         );
         assert!(projection["body"].get("model").is_none());
         assert!(projection["body"].get("stream").is_none());
+    }
+
+    #[test]
+    fn direct_projection_omits_boolean_store_with_drop_record_and_rejects_malformed() {
+        let log_path = std::env::temp_dir().join(format!(
+            "v3-gemini-direct-store-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&log_path);
+        let mut policy = policy(false);
+        policy.request_body["store"] = json!(true);
+        let drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+            "req-gemini-direct-store",
+            "4444",
+            Some(log_path.to_string_lossy().into_owned()),
+            std::sync::Arc::new(policy.request_body.clone()),
+        );
+        let wire = <V3GeminiDirectCodec as V3DirectProtocolCodec>::run_request_projection(
+            &policy,
+            &crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog(),
+            &drop_context,
+        )
+        .expect("boolean store must omit with drop log rather than aborting");
+        assert!(wire.body().get("store").is_none());
+        let logged = std::fs::read_to_string(&log_path).expect("drop log written");
+        let _ = std::fs::remove_file(&log_path);
+        let lines: Vec<serde_json::Value> = logged
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("valid drop record json"))
+            .collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["target_protocol"], "gemini");
+        assert_eq!(lines[0]["json_path"], "$.store");
+        assert_eq!(lines[0]["drop_site"], "project_gemini_store_to_wire");
+        assert_eq!(lines[0]["source_value"], json!(true));
+
+        let mut invalid = policy;
+        invalid.request_body["store"] = json!("true");
+        let err = <V3GeminiDirectCodec as V3DirectProtocolCodec>::run_request_projection(
+            &invalid,
+            &crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog(),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect_err("non-boolean store must fail validation");
+        let raised = err.expect("raised error source");
+        assert!(raised.message.contains("store"));
     }
 
     fn policy(requested_stream: bool) -> V3GeminiDirect11Policy {
