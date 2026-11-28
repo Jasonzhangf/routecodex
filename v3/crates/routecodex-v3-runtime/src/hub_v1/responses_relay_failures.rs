@@ -654,7 +654,7 @@ mod relay_markup_source_tests {
 
 pub(crate) fn provider_failure_output(
     failure: V3ResponsesRelayProviderFailure,
-    mut trace: Vec<&'static str>,
+    trace: Vec<&'static str>,
     _candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
     provider_failure_output_with_observation(failure, trace, None)
@@ -677,8 +677,8 @@ pub(crate) fn provider_failure_output_with_observation(
             node_trace: trace,
             error_chain: None,
             observability: failure.observability,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|s| *s),
             stream_observation,
             finalized_response: None,
             provider_snapshots: None,
@@ -721,7 +721,7 @@ pub(crate) fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,
     provider_id: &str,
-    mut trace: Vec<&'static str>,
+    trace: Vec<&'static str>,
     mut observability: Option<V3RuntimeObservability>,
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
@@ -765,8 +765,8 @@ pub(super) fn local_error_output_from_projection(
                 node_trace: trace,
                 error_chain: None,
                 observability,
-                diagnostic_source: Some(fault.policy_failure),
-                diagnostic_cause: fault.original_source,
+                diagnostic_source: Some(*fault.policy_failure),
+                diagnostic_cause: fault.original_source.map(|s| *s),
                 stream_observation: None,
                 finalized_response: None,
                 provider_snapshots: None,
@@ -849,10 +849,11 @@ mod tests {
             Err(error),
         )
         .expect_err("the real OperationRunnerError must become a typed relay fault");
-        let policy_failure = fault.policy_failure.clone();
+        let policy_failure = (*fault.policy_failure).clone();
         let original_source = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the relay fault must preserve its original source");
         let trace = vec!["V3RuntimeRequestStarted"];
 
@@ -899,10 +900,11 @@ mod tests {
             Ok(None),
         )
         .expect_err("Ok(None) must produce a typed operator fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let diagnostic_cause = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the real source must remain the fault cause");
 
         let output = provider_failure_output(
@@ -1347,10 +1349,11 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 is a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let diagnostic_cause = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the SDK fault keeps its original source");
         assert_eq!(diagnostic_cause, source);
 

@@ -324,9 +324,9 @@ pub struct V3Error01SourceRaised {
     pub code: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub internal_error: Option<V3InternalErrorEnvelope>,
+    pub internal_error: Option<Box<V3InternalErrorEnvelope>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_error: Option<V3ExternalErrorLink>,
+    pub external_error: Option<Box<V3ExternalErrorLink>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -696,6 +696,17 @@ impl V3ExternalHttpWitness {
     pub fn body_read_failure(&self) -> Option<&str> {
         self.body_read_failure.as_deref()
     }
+
+    pub fn is_session_turn_limit_rejection(&self) -> bool {
+        self.status == 400
+            && self.body_read_failure.is_none()
+            && serde_json::from_slice::<serde_json::Value>(&self.body).is_ok_and(|body| {
+                body.pointer("/error/code")
+                    .or_else(|| body.get("code"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("session_turn_limit_exceeded")
+            })
+    }
 }
 
 /// The provider failure terminal carries either the real upstream HTTP response
@@ -834,10 +845,10 @@ pub fn build_v3_error_01_source_raised_internal(
         source_stage,
         code: code.into(),
         message: message.into(),
-        internal_error: Some(build_v3_internal_error_envelope(
+        internal_error: Some(Box::new(build_v3_internal_error_envelope(
             internal_code,
             source_stage,
-        )),
+        ))),
         external_error: None,
     }
 }
@@ -856,7 +867,7 @@ pub fn build_v3_error_01_source_raised_external(
         code: code.into(),
         message: message.into(),
         internal_error: None,
-        external_error: Some(external_error),
+        external_error: Some(Box::new(external_error)),
     }
 }
 
@@ -1617,6 +1628,11 @@ pub fn project_v3_pending_endpoint_error(
     projected
 }
 
+mod active_keys;
+pub use active_keys::{
+    classify_v3_active_key_failure, normalize_v3_active_key_failure_source,
+    plan_v3_active_key_recovery, V3ActiveKeyFailureClass, V3ActiveKeyRecoveryAction,
+};
 mod sse_disposition;
 /// Consecutive real failures required by the shared recoverable provider
 /// health policy.

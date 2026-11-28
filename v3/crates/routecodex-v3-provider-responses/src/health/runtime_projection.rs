@@ -1,19 +1,20 @@
 impl V3ProviderSchedulingReader for V3ProviderHealthStore {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
+        key_ref: V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        self.scheduling_projection_for_key_with_interface(
+        let V3ProviderKeyRef {
             provider_id,
-            interface_id,
             auth_alias,
             model_id,
+        } = key_ref;
+        self.scheduling_projection_for_key_with_interface(
+            key_ref,
+            interface_id,
             priority,
             base_weight,
             now_ms,

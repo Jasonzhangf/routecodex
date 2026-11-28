@@ -3,9 +3,7 @@ use crate::direct_response_hooks::{
     V3DirectResponseCompatContext, V3DirectResponseHookFailure,
 };
 use crate::kernel::direct_request_key_hooks::{
-    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
-    V3DirectRequestKeyEdits, V3DirectRequestKeyHookCatalog, V3DirectRequestKeyKind,
-    V3DirectRequestKeyMount, V3DirectRequestKeyView, V3DirectRequestProtocol,
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog, V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
@@ -21,7 +19,7 @@ use crate::shared::{
     V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error05ExecutionDecision,
+    V3Error01SourceRaised, V3Error05ExecutionDecision,
     V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
     V3ExternalErrorLink, V3InternalErrorCode,
 };
@@ -672,7 +670,19 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         )
         .map(|(_, source)| source)
     })?;
-    routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
+    let native_compaction =
+        policy.request_purpose == crate::nodes::V3RequestPurpose::NativeCompaction;
+    if native_compaction {
+        if let Some(body) = request_body.as_object_mut() {
+            body.remove("stream");
+        }
+    }
+    let endpoint = if native_compaction {
+        routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Compact
+    } else {
+        routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Responses
+    };
+    routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry_for_endpoint(
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
@@ -697,6 +707,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         },
         request_body,
         namespace_registry,
+        endpoint,
     )
     .map(|wire| wire.with_custom_tool_function_binding(custom_tool_function_binding))
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))

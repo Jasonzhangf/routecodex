@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "rccv3-admin"
 path = "src/main.rs"

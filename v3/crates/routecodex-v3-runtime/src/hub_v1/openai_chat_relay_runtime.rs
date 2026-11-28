@@ -10,13 +10,11 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderError, V3ProviderRequestHeader, V3ProviderSseStream, V3ResponsesProviderTarget,
-    V3Transport13ResponsesHttpRequest,
+    ResponsesTransport,
+    V3ProviderError, V3ProviderSseStream,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
-use std::pin::Pin;
 pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;
 pub type V3OpenAiChatCommittedStream = V3RelayCommittedSseStream;
 pub enum V3OpenAiChatRelayClientBody {
@@ -178,6 +176,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         V3HubExecutionMode::Relay,
         Some(handoff),
+        None,
     )
     .await
 }
@@ -229,6 +228,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         None,
+        None,
     )
     .await
 }
@@ -241,11 +241,12 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec；Chat Process 有界续杯循环在骨架之上的
     // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
-    let routing_group = server_routing_group(manifest, &input.server_id)
+    let _routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
     let (output, _failure_events) =
@@ -264,6 +265,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             provider_health,
             retry_policy,
             initial_handoff,
+            active_keys,
         )
         .await
         .map_err(|(error, failure_events)| {
@@ -293,6 +295,25 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             }
         })?;
     Ok(output)
+}
+
+pub async fn execute_v3_openai_chat_relay_runtime_with_active_keys(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        V3HubExecutionMode::Relay,
+        None,
+        active_keys,
+    )
+    .await
 }
 
 pub fn project_v3_openai_chat_relay_runtime_failure(
@@ -362,7 +383,7 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
 
 fn project_json_response(
     request_id: Option<&str>,
-    session_id: Option<&str>,
+    _session_id: Option<&str>,
     provider_value: Value,
     provider_protocol: V3HubProviderWireProtocol,
     chat_request: &Value,
@@ -371,7 +392,7 @@ fn project_json_response(
     compatibility_profile: Option<&str>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
-    expected_model_id: &str,
+    _expected_model_id: &str,
     complete_provider_attempt: bool,
     serialized_tool_context: &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext,
     refill: Option<&mut super::relay_runtime_core::V3RelayRefillCarrier>,
@@ -439,7 +460,7 @@ fn project_json_response(
         .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     trace.push("V3HubRespInbound02Normalized");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let mut response_profile = V3HubRelayResponseHookProfile::empty()
+    let response_profile = V3HubRelayResponseHookProfile::empty()
         .with_complete_provider_attempt(complete_provider_attempt)
         .with_serialized_tool_context(serialized_tool_context.clone())
         .with_retain_response_cipher(retain_response_cipher)
@@ -760,7 +781,7 @@ fn enqueue_sse_client_chunks(
         if object.has_data() && !object.is_json_valid() {
             return Err("OpenAI Chat SSE data is not valid JSON".into());
         }
-        let Some(mut payload) = object.data_value().cloned() else {
+        let Some(payload) = object.data_value().cloned() else {
             continue;
         };
         if !payload.is_object() {
@@ -850,7 +871,6 @@ fn project_responses_sse_as_openai_chat_stream(
     );
     let transducer =
         V3OpenAiChatResponsesSseTransducer::new_with_usage_option(client_include_usage);
-    let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
             stream,
@@ -1019,7 +1039,7 @@ fn project_responses_sse_as_openai_chat_stream(
                             stream_observation
                                 .record_provider_event_json(&event)
                                 .map_err(|error| error.to_string())?;
-                            for mut payload in transducer.push_event(event)? {
+                            for payload in transducer.push_event(event)? {
                                 let governed = project_sse_event_payload(
                                     request_id.as_str(),
                                     Some(session_id.as_str()),
@@ -1160,6 +1180,7 @@ fn openai_chat_provider_http_failure(
         provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
@@ -1229,6 +1250,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             provider_body_read_failure: None,
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
+            attempt_source: None,
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: None,
@@ -1282,9 +1304,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             Some(refill),
         )
         .map_err(|error| match error {
-            V3OpenAiChatRelayRuntimeError::Response(error) => {
-                V3RelayCoreError::ResponseGovernance(error)
-            }
             V3OpenAiChatRelayRuntimeError::Response(error) => {
                 V3RelayCoreError::ResponseGovernance(error)
             }

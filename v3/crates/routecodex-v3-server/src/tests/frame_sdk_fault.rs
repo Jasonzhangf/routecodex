@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 fn frame_sdk_fault_sources() -> (
     routecodex_v3_error::V3Error01SourceRaised,
@@ -45,8 +46,8 @@ async fn frame_sdk_fault_breaks_front_transport_and_preserves_typed_diagnostics(
                 let frame = build_v3_server_16_http_frame_from_error_sdk_result(
                     "V3Server03HttpRequestRaw",
                     Err(routecodex_v3_runtime::V3RelayErrorOperatorFault {
-                        policy_failure: route_source.clone(),
-                        original_source: Some(route_cause.clone()),
+                        policy_failure: Box::new(route_source.clone()),
+                        original_source: Some(Box::new(route_cause.clone())),
                     }),
                 );
                 let response = responses_direct_output_response(frame, None);

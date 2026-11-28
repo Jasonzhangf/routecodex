@@ -1,41 +1,37 @@
 use super::common::V3ChatProcessRefillDisposition;
 use super::*;
-use crate::provider_action_gate::V3ProviderActionRecoveryTransition;
 use crate::provider_failure_runtime_policy::{
-    expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
+    project_v3_client_disconnect,
+    provider_runtime_failure_stage,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
 use futures_util::StreamExt;
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest,
-    V3ProviderErrorMatcherManifest,
 };
 use routecodex_v3_debug::V3DebugError;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3Error05ExecutionAction,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
+    v3_provider_auth_handle_from_manifest_entry,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle, V3ProviderError,
     V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderResp14Raw,
     V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
     V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "responses_openai_chat_conversion.rs"]
@@ -53,18 +49,44 @@ mod responses_relay_types;
 use responses_relay_runtime_inner::{
     execute_v3_responses_relay_runtime_inner, execute_v3_responses_relay_runtime_inner_with_refill,
 };
-pub(crate) use responses_relay_runtime_inner::{
-    find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
-};
 pub use responses_relay_types::*;
 // Provider health store 保持 opaque：health handle 归 Provider runtime boundary
 //（worker 拆分时误入 types.rs，由 module-boundaries gate 强制移回）。
 #[derive(Debug, Clone)]
 pub struct V3ResponsesRelayProviderHealthHandle {
     runtime_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 }
 
 impl V3ResponsesRelayProviderHealthHandle {
+    pub fn with_active_keys(
+        mut self,
+        active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+    ) -> Self {
+        self.active_keys = active_keys;
+        self
+    }
+
+    pub fn active_keys(&self) -> Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>> {
+        self.active_keys.clone()
+    }
+
+    /// Read-only control projection for the listener's queue view.
+    pub fn active_key_health_status(
+        &self,
+        identity: &routecodex_v3_target::V3ActiveKeyIdentity,
+        now_ms: u64,
+    ) -> (bool, Option<String>) {
+        let projection = routecodex_v3_provider_responses::V3ProviderAvailabilityReader::availability_for_interface(
+            &self.runtime_health.store(), &identity.provider_id, &identity.interface_id,
+            Some(&identity.auth_alias), Some(&identity.model_id), now_ms,
+        );
+        (
+            projection.available,
+            projection.blocked_scopes.first().cloned(),
+        )
+    }
+
     pub fn with_observation_clock(
         mut self,
         clock: std::sync::Arc<dyn crate::V3ProviderHealthObservationClock>,
@@ -76,6 +98,7 @@ impl V3ResponsesRelayProviderHealthHandle {
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+            active_keys: None,
         }
     }
 
@@ -87,12 +110,14 @@ impl V3ResponsesRelayProviderHealthHandle {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_listener(
                 manifest, listener,
             ),
+            active_keys: None,
         }
     }
 
     pub fn from_manifest_without_persistence(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_tests(manifest),
+            active_keys: None,
         }
     }
 
@@ -114,9 +139,6 @@ impl V3ResponsesRelayProviderHealthHandle {
 }
 pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
 pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
-pub(crate) use responses_openai_chat_conversion::V3OpenAiChatToolCallProjection;
-use responses_openai_chat_conversion::*;
-use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
     execute_v3_responses_relay_dry_run_orchestration_outcome,
     execute_v3_responses_relay_dry_run_orchestration_with_client_identity,
@@ -127,8 +149,7 @@ use responses_relay_failures::{
     allowed_execution_modes_for_relay_server, error_output,
     is_v3_responses_provider_response_failure, provider_failure_output,
     provider_failure_output_with_observation, provider_http_failure,
-    provider_request_relay_failure, provider_response_hook_failure,
-    provider_response_stream_failure, provider_runtime_failure, server_routing_group,
+    provider_request_relay_failure, provider_response_hook_failure, provider_runtime_failure,
     terminalize_v3_responses_relay_provider_failure,
 };
 use responses_relay_json_hooks::*;
@@ -167,6 +188,10 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: Respons
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let seeds = V3ResponsesRelayRuntimeSeeds {
+        active_keys: provider_health.active_keys(),
+        ..V3ResponsesRelayRuntimeSeeds::default()
+    };
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -179,7 +204,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: Respons
         None,
         None,
         BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds::default(),
+        seeds,
     )
     .await
 }
@@ -206,6 +231,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     };
     let max_refills = v3_chat_process_refill_max_consecutive();
     let mut relay_seeds = initial_relay_seeds.clone();
+    relay_seeds.active_keys = provider_health.active_keys();
     let mut payload = input.payload.clone();
     let mut accumulated_items: Vec<Value> = Vec::new();
     let mut accumulated_usage: Option<V3RuntimeUsageSummary> = None;
@@ -386,6 +412,10 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let seeds = V3ResponsesRelayRuntimeSeeds {
+        active_keys: provider_health.active_keys(),
+        ..V3ResponsesRelayRuntimeSeeds::default()
+    };
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -398,7 +428,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds::default(),
+        seeds,
     )
     .await
 }
@@ -412,9 +442,10 @@ async fn handle_v3_responses_relay_provider_failure(
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source(
+    let attempt_source = failure.attempt_source.clone();
+    let mut result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(
         context,
-        selected,
+        selected.clone(),
         failure.source_stage,
         failure.status,
         Some(failure.policy_error_type.clone()),
@@ -432,9 +463,10 @@ async fn handle_v3_responses_relay_provider_failure(
             last_external_http: state.last_external_http,
         },
         failure.response_processing_code,
-        failure.attempt_source.clone(),
+        attempt_source,
         failure.provider_status,
         failure.provider_body_read_failure.as_deref(),
+        state.active_keys,
     )
     .await
     {
@@ -445,6 +477,14 @@ async fn handle_v3_responses_relay_provider_failure(
             return Ok(Some(failure));
         }
     };
+    if let Some(control) = context.recovery_control {
+        control.record_failure(
+            &selected,
+            &result.event.diagnostic_source,
+            state.last_external_http.as_ref(),
+            state.active_attempt_dispatched,
+        );
+    }
     // Carry the real upstream HTTP status (if any) into the policy event so the
     // failure observation can separate it from the client projection status.
     let mut policy_event = result.event.clone();
@@ -458,6 +498,78 @@ async fn handle_v3_responses_relay_provider_failure(
         sink(&observability, &event);
     }
     failure = attach_v3_provider_failure_events_to_failure(failure, state.provider_failure_events);
+    if let (Some(active_keys), Some(episode)) =
+        (state.active_keys, state.active_episode.as_deref_mut())
+    {
+        use routecodex_v3_error::{
+            classify_v3_active_key_failure, plan_v3_active_key_recovery, V3ActiveKeyFailureClass,
+            V3ActiveKeyRecoveryAction,
+        };
+        let class = classify_v3_active_key_failure(
+            &result.event.diagnostic_source,
+            state.active_attempt_dispatched,
+        );
+        if class == V3ActiveKeyFailureClass::Neutral {
+            episode.cancel();
+        } else {
+            let feedback = active_keys
+                .record_delivery_failure(episode)
+                .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string()))?;
+            if let Some(diagnostic) =
+                crate::provider_failure_runtime_policy::active_key_durability_diagnostic(
+                    &selected,
+                    feedback.durability_error.clone(),
+                )
+            {
+                state.provider_failure_events.push(diagnostic.clone());
+                if let Some(sink) = state.provider_failure_event_sink {
+                    let mut observability = state.selected_observability.clone();
+                    observability.provider_failure_events = state.provider_failure_events.clone();
+                    sink(&observability, &diagnostic);
+                }
+            }
+            let failed_key =
+                crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                );
+            state.failed_candidates.remove(&failed_key);
+            let health = routecodex_v3_provider_responses::V3ProviderAvailabilityReader::availability_for_interface(
+                context.provider_health,
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
+            )
+            .available;
+            let eligible = !result.business_trial_failed
+                && !feedback.stale
+                && !feedback.transitioned
+                && !(selected.route.estimated_history_turns.is_some()
+                    && context.provider_health.provider_blocked_until_compact(
+                        &context.failure_session_scope,
+                        &selected.candidate.provider_id,
+                    ))
+                && active_keys.selection_current(&episode.selection)
+                && health;
+            match plan_v3_active_key_recovery(class, episode.can_retry(eligible)) {
+                V3ActiveKeyRecoveryAction::RetrySelectedActiveKey => {
+                    *state.retry_selected = Some(selected);
+                    return Ok(None);
+                }
+                V3ActiveKeyRecoveryAction::Reselect => {
+                    active_keys.close_failure(episode).map_err(|error| {
+                        V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string())
+                    })?;
+                    state.failed_candidates.insert(failed_key);
+                    *state.retry_selected = None;
+                    result.retry_selected = None;
+                }
+                V3ActiveKeyRecoveryAction::Neutral => {}
+            }
+        }
+    }
     match result.decision.action {
         V3Error05ExecutionAction::ReevaluateTarget => {
             *state.retry_selected = None;
@@ -916,8 +1028,8 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
                     }
                 }
             }
-            let terminal_frame_index;
-            if failed {
+
+            let terminal_frame_index = if failed {
                 frames.push(build_v3_runtime_sse_json_frame(
                     "response.failed",
                     &json!({
@@ -925,7 +1037,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
                         "response": response,
                     }),
                 ));
-                terminal_frame_index = frames.len() - 1;
+                frames.len() - 1
             } else {
                 let terminal_response = project_v3_responses_client_completed_response(&response);
                 let terminal_event = match status {
@@ -940,8 +1052,8 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
                         "response": terminal_response,
                     }),
                 ));
-                terminal_frame_index = frames.len() - 1;
-            }
+                frames.len() - 1
+            };
             let mut committed =
                 crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
                     .map_err(|error| error.to_string())?;
@@ -1273,8 +1385,10 @@ mod tests {
     use super::*;
     use crate::provider_failure_runtime_policy::{
         resolve_v3_relay_target_outcome, V3RelayProviderTargetResolution,
+        V3RelayProviderTargetResolutionInput,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+    use routecodex_v3_error::build_v3_error_01_source_raised;
 
     fn operator_fault_manifest() -> V3Config05ManifestPublished {
         let source = r#"
@@ -1363,6 +1477,9 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
         let mut state = V3ResponsesRelayProviderRetryState {
+            active_keys: None,
+            active_episode: None,
+            active_attempt_dispatched: false,
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             retry_selected: &mut retry_selected,
@@ -1498,6 +1615,9 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
         let mut state = V3ResponsesRelayProviderRetryState {
+            active_keys: None,
+            active_episode: None,
+            active_attempt_dispatched: false,
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             retry_selected: &mut retry_selected,

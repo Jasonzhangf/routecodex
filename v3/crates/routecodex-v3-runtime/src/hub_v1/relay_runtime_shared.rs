@@ -16,7 +16,6 @@ use crate::hub_v1::{
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy_with_response_source,
     v3_relay_provider_candidate_key_parts, V3RelayErrorOperatorFault,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
     V3RelayProviderFailurePolicyState,
@@ -24,7 +23,7 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3Error05ExecutionAction, V3Error06ClientProjected,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind, V3ExternalErrorKind,
     V3ExternalErrorLink, V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS,
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
@@ -159,6 +158,8 @@ pub struct V3RelayProviderFailure {
     pub provider_body_read_failure: Option<String>,
     pub client_response: Value,
     pub source_stage: &'static str,
+    /// Original typed runtime cause, used only by an explicit active episode.
+    pub attempt_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub terminal_projection: Option<V3Error06ClientProjected>,
     pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub error_operator_fault: Option<V3RelayErrorOperatorFault>,
@@ -182,6 +183,7 @@ pub(crate) fn provider_operator_fault_failure(
         provider_body_read_failure: None,
         client_response: Value::Null,
         source_stage: fault.policy_failure.source_stage,
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: Some(fault),
@@ -347,12 +349,12 @@ pub(crate) fn bind_v3_selected_business_auth_kind(
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    mut failure: V3RelayProviderFailure,
+    failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
-    handle_provider_failure_with_response_code(
+    handle_provider_failure_with_response_code_and_active_keys(
         context,
         selected,
         failure,
@@ -360,6 +362,9 @@ pub async fn handle_provider_failure(
         retry_selected,
         provider_failure_events,
         None,
+        None,
+        None,
+        false,
     )
     .await
 }
@@ -367,18 +372,59 @@ pub async fn handle_provider_failure(
 pub(crate) async fn handle_provider_failure_with_response_code(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    mut failure: V3RelayProviderFailure,
+    failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
-    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
-        return Ok(Some(failure));
-    }
-    let mut result = match run_v3_relay_provider_failure_policy_with_response_source(
+    handle_provider_failure_with_response_code_and_active_keys(
         context,
         selected,
+        failure,
+        state,
+        retry_selected,
+        provider_failure_events,
+        response_processing_code,
+        None,
+        None,
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn handle_provider_failure_with_response_code_and_active_keys(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    mut failure: V3RelayProviderFailure,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
+    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+    active_keys: Option<&routecodex_v3_target::V3ActiveKeySelectionState>,
+    episode: Option<&mut routecodex_v3_target::V3ActiveKeyEpisode>,
+    dispatched: bool,
+) -> Result<Option<V3RelayProviderFailure>, String> {
+    if failure.error_operator_fault.is_some() {
+        return Ok(Some(failure));
+    }
+    if failure.terminal_projection.is_some() && (active_keys.is_none() || episode.is_none()) {
+        return Ok(Some(failure));
+    }
+    let terminal_source = failure
+        .terminal_projection
+        .as_ref()
+        .map(|projection| projection.diagnostic_source.clone());
+    let active_source = if active_keys.is_some() && episode.is_some() {
+        terminal_source
+            .clone()
+            .or_else(|| failure.attempt_source.clone())
+    } else {
+        None
+    };
+    let mut result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source_and_active_keys(
+        context,
+        selected.clone(),
         failure.source_stage,
         failure.status,
         failure_error_type(&failure),
@@ -386,9 +432,10 @@ pub(crate) async fn handle_provider_failure_with_response_code(
         None,
         state,
         response_processing_code,
-        None,
+        active_source,
         failure.provider_status,
         failure.provider_body_read_failure.as_deref(),
+        active_keys,
     )
     .await
     {
@@ -399,10 +446,98 @@ pub(crate) async fn handle_provider_failure_with_response_code(
             return Ok(Some(failure));
         }
     };
+    if let Some(control) = context.recovery_control {
+        control.record_failure(
+            &selected,
+            &result.event.diagnostic_source,
+            state.last_external_http.as_ref(),
+            dispatched,
+        );
+    }
     result.event.provider_status = failure.provider_status;
     result.event.failed_attempt_evidence = failure.failed_attempt_evidence.clone();
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
+    if let (Some(active_keys), Some(episode)) = (active_keys, episode) {
+        use routecodex_v3_error::{
+            classify_v3_active_key_failure, plan_v3_active_key_recovery, V3ActiveKeyFailureClass,
+            V3ActiveKeyRecoveryAction,
+        };
+        let class = classify_v3_active_key_failure(
+            terminal_source
+                .as_ref()
+                .unwrap_or(&result.event.diagnostic_source),
+            dispatched,
+        );
+        if class == V3ActiveKeyFailureClass::Neutral {
+            episode.cancel();
+            if failure.terminal_projection.is_some() {
+                return Ok(Some(failure));
+            }
+        } else {
+            let feedback = active_keys
+                .record_delivery_failure(episode)
+                .map_err(|error| error.to_string())?;
+            if let Some(diagnostic) =
+                crate::provider_failure_runtime_policy::active_key_durability_diagnostic(
+                    &selected,
+                    feedback.durability_error.clone(),
+                )
+            {
+                provider_failure_events.push(diagnostic);
+            }
+            let failed_key =
+                crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                );
+            // The legacy policy's exclusion is provisional while this explicit
+            // active-key episode still owns the same identity.
+            state.failed_candidates.remove(&failed_key);
+            let health = routecodex_v3_provider_responses::V3ProviderAvailabilityReader::availability_for_interface(
+                context.provider_health,
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(|_| "active-key eligibility clock failed".to_string())?,
+            )
+            .available;
+            let eligible = !result.business_trial_failed
+                && !feedback.stale
+                && !feedback.transitioned
+                && !(selected.route.estimated_history_turns.is_some()
+                    && context.provider_health.provider_blocked_until_compact(
+                        &context.failure_session_scope,
+                        &selected.candidate.provider_id,
+                    ))
+                && active_keys.selection_current(&episode.selection)
+                && health;
+            match plan_v3_active_key_recovery(class, episode.can_retry(eligible)) {
+                V3ActiveKeyRecoveryAction::RetrySelectedActiveKey => {
+                    for event in provider_failure_events
+                        .iter_mut()
+                        .rev()
+                        .filter(|event| event.action != "active_key_durability_failure")
+                        .take(1)
+                    {
+                        event.action = "retry_active_key".to_string();
+                    }
+                    *retry_selected = Some(selected);
+                    return Ok(None);
+                }
+                V3ActiveKeyRecoveryAction::Reselect => {
+                    active_keys
+                        .close_failure(episode)
+                        .map_err(|error| error.to_string())?;
+                    state.failed_candidates.insert(failed_key);
+                    *retry_selected = None;
+                    result.retry_selected = None;
+                }
+                V3ActiveKeyRecoveryAction::Neutral => {}
+            }
+        }
+    }
     match result.decision.action {
         V3Error05ExecutionAction::ReevaluateTarget => {
             *retry_selected = None;
@@ -507,6 +642,7 @@ pub fn provider_http_failure(
         provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
@@ -861,6 +997,7 @@ pub fn provider_request_failure(
         provider_body_read_failure: None,
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
@@ -907,6 +1044,7 @@ pub fn provider_runtime_failure(
                     }
                 }),
                 source_stage,
+                attempt_source: None,
                 terminal_projection: Some(projected),
                 terminal_disposition: None,
                 error_operator_fault: None,
@@ -925,6 +1063,7 @@ pub fn provider_runtime_failure(
                     }
                 }),
                 source_stage,
+                attempt_source: None,
                 terminal_projection: None,
                 terminal_disposition: Some(
                     routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
@@ -940,13 +1079,13 @@ pub fn provider_runtime_failure(
         V3ProviderError::Transport { reason, .. }
             if routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason) =>
         {
-            V3_TRANSIENT_TRANSPORT_HANG_CODE
+            V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
         }
         // SSE 已经完成 provider response inbound 的协议判定；把这个语义错误码
         // 保留下游，健康策略才能把它和 transport hang 区分开。不能降成通用
         // provider_error，否则 relay 会按 transient 同 provider 重试后直接投影给客户端。
-        V3ProviderError::MalformedSse { .. } => "provider_response_sse_event_invalid",
-        _ => "provider_error",
+        V3ProviderError::MalformedSse { .. } => "provider_response_sse_event_invalid".to_string(),
+        _ => "provider_error".to_string(),
     };
     let (terminal_projection, error_operator_fault) =
         if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
@@ -961,7 +1100,7 @@ pub fn provider_runtime_failure(
         } else {
             (None, None)
         };
-    V3RelayProviderFailure {
+    let mut failure = V3RelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
         } else {
@@ -979,13 +1118,19 @@ pub fn provider_runtime_failure(
         },
         client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
+        attempt_source: None,
         terminal_projection,
         terminal_disposition: None,
         error_operator_fault,
         failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
+    };
+    match crate::hooks::build_v3_provider_error_source(failure.source_stage, error) {
+        Ok(source) => failure.attempt_source = Some(source),
+        Err(fault) => failure.error_operator_fault = Some(fault),
     }
+    failure
 }
 
 /// 从 failure 提取 error type（共享版；走协议提取函数字段）。
@@ -1419,8 +1564,7 @@ mod tests {
             body: vec![],
             body_read_failure: Some("truncated body".into()),
         };
-        let last = Some(external_http_witness(&incomplete));
-        let latest = last.expect("the new response head is real evidence");
+        let latest = external_http_witness(&incomplete);
         assert_eq!(latest.status(), 400);
         assert_eq!(latest.body_read_failure(), Some("truncated body"));
         assert_ne!(latest, prior);

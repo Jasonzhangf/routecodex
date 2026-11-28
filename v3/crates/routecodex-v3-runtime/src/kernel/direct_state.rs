@@ -73,6 +73,7 @@ pub struct V3ResponsesDirectRuntimeSharedState {
     client_identity_headers: Vec<(String, String)>,
     image_history: Option<crate::V3ImageHistoryView>,
     provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     debug_node_publication: V3DirectDebugNodePublication,
@@ -87,6 +88,7 @@ impl V3ResponsesDirectRuntimeSharedState {
             client_identity_headers: Vec::new(),
             image_history: None,
             provider_health: provider_health.into(),
+            active_keys: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
             debug_node_publication: V3DirectDebugNodePublication::Runtime,
@@ -95,6 +97,14 @@ impl V3ResponsesDirectRuntimeSharedState {
 
     pub fn with_client_identity_headers(mut self, headers: Vec<(String, String)>) -> Self {
         self.client_identity_headers = headers;
+        self
+    }
+
+    pub fn with_active_keys(
+        mut self,
+        active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+    ) -> Self {
+        self.active_keys = active_keys;
         self
     }
 
@@ -133,6 +143,7 @@ struct V3ResponsesDirectRuntimeCoreState {
     client_identity_headers: Vec<(String, String)>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
     provider_health_neutral: bool,
     allow_exhaustion_rescue_probe: bool,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
@@ -160,6 +171,7 @@ impl V3ResponsesDirectRuntimeCoreState {
             client_identity_headers: Vec::new(),
             now_epoch_ms: 0,
             provider_health: None,
+            active_keys: None,
             provider_health_neutral: false,
             allow_exhaustion_rescue_probe: true,
             initial_selected_target: None,
@@ -184,6 +196,14 @@ impl V3ResponsesDirectRuntimeCoreState {
 
     fn with_provider_health(mut self, provider_health: V3ProviderFailureRuntimeHealth) -> Self {
         self.provider_health = Some(provider_health);
+        self
+    }
+
+    fn with_active_keys(
+        mut self,
+        active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+    ) -> Self {
+        self.active_keys = active_keys;
         self
     }
 
@@ -266,6 +286,7 @@ pub struct V3ResponsesDirectRuntimeOutput {
 
 #[derive(Debug)]
 pub struct V3ResponsesProtocolRelayHandoff {
+    pub active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     pub request_local_excluded_candidates: BTreeSet<String>,
@@ -281,6 +302,7 @@ pub struct V3ResponsesProtocolRelayHandoff {
 impl V3ResponsesProtocolRelayHandoff {
     pub fn relay_runtime_seeds(&self) -> crate::V3ResponsesRelayRuntimeSeeds {
         crate::V3ResponsesRelayRuntimeSeeds {
+            active_keys: self.active_keys.clone(),
             route_policy_pending: self.route_policy_pending.clone(),
             route_policy_scope: self.route_policy_scope.clone(),
             observability_accumulator: Some(self.observability_accumulator.clone()),
@@ -338,10 +360,11 @@ impl V3ResponsesProtocolExecutionPlan {
 
 #[derive(Debug, Clone)]
 pub struct V3ResponsesProtocolExecutionPlanFailure {
-    pub source: V3Error01SourceRaised,
+    pub source: Box<V3Error01SourceRaised>,
     pub node_trace: Vec<&'static str>,
     pub error_operator_fault: Option<crate::V3RelayErrorOperatorFault>,
-    pub(crate) recovery_candidates: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    pub(crate) recovery_candidates:
+        Option<Box<routecodex_v3_target::V3Target09CandidateSetExpanded>>,
 }
 
 pub(crate) fn protocol_plan_operator_fault(
@@ -349,7 +372,7 @@ pub(crate) fn protocol_plan_operator_fault(
     node_trace: Vec<&'static str>,
 ) -> V3ResponsesProtocolExecutionPlanFailure {
     V3ResponsesProtocolExecutionPlanFailure {
-        source: fault.policy_failure.clone(),
+        source: Box::new((*fault.policy_failure).clone()),
         node_trace,
         error_operator_fault: Some(fault),
         recovery_candidates: None,
@@ -363,7 +386,7 @@ pub fn project_v3_protocol_execution_plan_failure(
         return Err(fault);
     }
     crate::provider_failure_runtime_policy::project_v3_relay_error_source(
-        failure.source,
+        *failure.source,
         V3ErrorActionScope::None,
         0,
         None,

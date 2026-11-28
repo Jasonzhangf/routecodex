@@ -209,6 +209,7 @@ pub fn build_v3_chat_direct_11_policy_from_v3_target_10(
 pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
+    pub request_purpose: V3RequestPurpose,
     pub request_body: Value,
 }
 
@@ -492,8 +493,77 @@ fn build_v3_router_request_facts_for_entry_with_control(
         capabilities,
         input_tokens,
         current_turn_input_tokens: current_turn_tokens,
+        estimated_history_turns: (!route_facts.is_compaction)
+            .then(|| estimate_history_turns(body, entry_protocol)),
         route_classification,
     }
+}
+
+pub(crate) fn estimate_history_turns(body: &Value, entry_protocol: &str) -> u64 {
+    let field = match entry_protocol {
+        "responses" => "input",
+        "gemini" => "contents",
+        _ => "messages",
+    };
+    let Some(items) = body.get(field).and_then(Value::as_array).or_else(|| {
+        ["input", "messages", "contents"]
+            .into_iter()
+            .find_map(|field| body.get(field).and_then(Value::as_array))
+    }) else {
+        return 0;
+    };
+
+    let mut count = 0_u64;
+    let mut last_is_user = false;
+    for item in items {
+        let kind = item.get("type").and_then(Value::as_str);
+        match kind {
+            Some("function_call" | "custom_tool_call" | "tool_call") => {
+                // A standalone call can be the entire model reply. Counting
+                // each call is conservative when a reply contains parallel calls.
+                count += 1;
+                last_is_user = false;
+            }
+            Some("function_call_output" | "custom_tool_call_output" | "tool_call_output") => {
+                last_is_user = false;
+            }
+            _ => {}
+        }
+        if kind.is_some_and(|kind| kind != "message") {
+            continue;
+        }
+        let role = item.get("role").and_then(Value::as_str).or_else(|| {
+            (entry_protocol == "gemini" && item.get("parts").is_some()).then_some("user")
+        });
+        match role {
+            Some("user") => {
+                let tool_result = item
+                    .get("content")
+                    .or_else(|| item.get("parts"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        !parts.is_empty()
+                            && parts.iter().all(|part| {
+                                part.get("type").is_some_and(|kind| kind == "tool_result")
+                                    || part.get("functionResponse").is_some()
+                            })
+                    });
+                if tool_result {
+                    last_is_user = false;
+                    continue;
+                }
+                last_is_user = true;
+            }
+            Some("assistant" | "model") => last_is_user = false,
+            Some("tool") => {
+                last_is_user = false;
+                continue;
+            }
+            _ => continue,
+        }
+        count += 1;
+    }
+    count.saturating_sub(u64::from(last_is_user))
 }
 
 /// Resolve-target uses the same complete facts builder as direct routing,
@@ -671,6 +741,7 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
     V3ResponsesDirect11Policy {
         target: selected,
         request_id: standardized.request_id.clone(),
+        request_purpose: standardized.request_purpose,
         request_body: standardized.body.clone(),
     }
 }
@@ -802,6 +873,61 @@ mod tests {
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_error::V3ProviderFailureSessionScope;
     use serde_json::json;
+
+    #[test]
+    fn estimated_turns_ignore_tool_results_and_only_use_the_protocol_history() {
+        let responses = json!({
+            "input": [
+                {"role":"system","content":"instructions"},
+                {"role":"user","content":"question"},
+                {"type":"reasoning"},
+                {"type":"function_call","call_id":"call-1"},
+                {"type":"function_call_output","call_id":"call-1","output":"result"},
+                {"type":"message","role":"assistant","content":"answer"},
+                {"role":"user","content":"current"}
+            ],
+            "messages": [{"role":"user"}, {"role":"assistant"}, {"role":"assistant"}]
+        });
+        assert_eq!(super::estimate_history_turns(&responses, "responses"), 3);
+        assert_eq!(super::estimate_history_turns(&responses, "openai_chat"), 3);
+        let continuation = json!({"input":[
+            {"role":"user","content":"question"},
+            {"type":"function_call","call_id":"call-1"},
+            {"type":"function_call_output","call_id":"call-1","output":"result"}
+        ]});
+        assert_eq!(super::estimate_history_turns(&continuation, "responses"), 2);
+        for (call, output) in [
+            ("custom_tool_call", "custom_tool_call_output"),
+            ("tool_call", "tool_call_output"),
+        ] {
+            let continuation = json!({"input":[
+                {"role":"user","content":"question"},
+                {"type":call,"call_id":"call-1"},
+                {"type":output,"call_id":"call-1","output":"result"}
+            ]});
+            assert_eq!(super::estimate_history_turns(&continuation, "responses"), 2);
+        }
+        let anthropic = json!({"messages":[
+            {"role":"user","content":"question"},
+            {"role":"assistant","content":[{"type":"tool_use","id":"tool-1"}]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1"}]}
+        ]});
+        assert_eq!(super::estimate_history_turns(&anthropic, "anthropic"), 2);
+        let gemini = json!({"contents":[
+            {"parts":[{"text":"question"}]},
+            {"role":"model","parts":[{"functionCall":{"name":"lookup"}}]},
+            {"parts":[{"functionResponse":{"name":"lookup"}}]}
+        ]});
+        assert_eq!(super::estimate_history_turns(&gemini, "gemini"), 2);
+        let compact = build_v3_router_request_facts_for_entry_with_control(
+            &responses,
+            "responses",
+            None,
+            true,
+            None,
+        );
+        assert_eq!(compact.estimated_history_turns, None);
+    }
 
     const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
 

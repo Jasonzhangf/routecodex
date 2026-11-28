@@ -111,6 +111,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             .with_client_identity_headers(shared_state.client_identity_headers.clone())
             .with_now_epoch_ms(now_epoch_ms)
             .with_provider_health(shared_state.provider_health.clone())
+            .with_active_keys(shared_state.active_keys.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
             .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
             .with_request_execution_control(Some(control.clone()));
@@ -186,7 +187,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                     .provider_response_snapshot
                     .as_ref()
                     .and_then(|snapshot| snapshot.get("body"))
-                    .map(|body| crate::hub_v1::has_v3_source_explicit_nonempty_summary(body))
+                    .map(crate::hub_v1::has_v3_source_explicit_nonempty_summary)
                     .unwrap_or(false);
                 (
                     V3ResponsesDirectRefillFacts {
@@ -201,6 +202,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             V3ClientBody::CommittedSse(stream) => {
                 let governed = direct_runtime_helpers_stream::inspect_direct_sse_governed_frames(
                     stream.sealed_frames().as_slice(),
+                    output.stream_observation.as_ref(),
                 );
                 // The attempt-scoped typed fact is recorded from the complete
                 // native stream while each provider event is decoded. The raw
@@ -259,7 +261,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                 // irrevocable. Count the business items they
                                 // carried so the assembly never synthesizes a
                                 // second `output_item.done` for them.
-                                let sealed_frames = stream.sealed_frames();
+                                let _sealed_frames = stream.sealed_frames();
                                 let delivered_item_count = 0;
                                 let chunks = collect_direct_committed_sse(stream).await;
                                 let segments =

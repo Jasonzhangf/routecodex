@@ -179,6 +179,15 @@ pub(super) fn execute_responses_direct_server_outcome<'a>(
     request_purpose: V3RequestPurpose,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = V3ResponsesDirectServerOutcome> + Send + 'a>>
 {
+    #[cfg(test)]
+    if observability_accumulator.is_some() {
+        if let Some(plan) = responses_protocol_plan {
+            state.observe_responses_handoff(
+                &plan.decision.target,
+                V3EntryProtocolExecutionMode::Direct,
+            );
+        }
+    }
     // Construct this future outside the shared protocol-dispatch poll frame.
     Box::pin(execute_responses_direct_server_outcome_inner(
         state,
@@ -319,6 +328,7 @@ async fn execute_responses_direct_server_outcome_inner(
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
+                .with_active_keys(state.active_keys.clone())
                 .with_client_identity_headers(client_identity_headers.clone())
                 .with_provider_failure_event_sink(
                     provider_failure_event_sink
@@ -345,6 +355,7 @@ async fn execute_responses_direct_server_outcome_inner(
         None => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
                 V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
+                .with_active_keys(state.active_keys.clone())
                 .with_image_history(state.image_history.for_request(&provider_failure_session_scope))
                 .with_client_identity_headers(client_identity_headers.clone())
                 .with_provider_failure_event_sink(
@@ -368,6 +379,8 @@ async fn execute_responses_direct_server_outcome_inner(
         }
     };
     if let Some(handoff) = output.protocol_relay_handoff {
+        #[cfg(test)]
+        state.observe_responses_handoff(&handoff.target, V3EntryProtocolExecutionMode::Relay);
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
             failure_session_scope: provider_failure_session_scope,
@@ -381,6 +394,7 @@ async fn execute_responses_direct_server_outcome_inner(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let mut relay_runtime_seeds = handoff.relay_runtime_seeds();
+        relay_runtime_seeds.request_purpose = Some(request_purpose);
         relay_runtime_seeds.client_identity_headers = client_identity_headers.clone();
         let relay_result = if capture_provider_request || capture_provider_response {
             execute_v3_responses_relay_runtime_with_default_transport_health(

@@ -89,13 +89,18 @@ impl Entry {
         );
     }
     async fn cleanup(self) -> Vec<String> {
-        let mut failures = self
-            .handle
-            .shutdown()
-            .await
+        let report = self.handle.shutdown().await;
+        let mut failures = report
+            .codex_sample_persist_failures
             .into_iter()
             .map(|failure| format!("{failure:?}"))
             .collect::<Vec<_>>();
+        failures.extend(
+            report
+                .control_cleanup_failures
+                .iter()
+                .map(ToString::to_string),
+        );
         if self.shutdown.send(()).is_err() {
             failures.push("owned upstream shutdown receiver was already closed".to_string());
         }
@@ -768,7 +773,7 @@ async fn collect_a83b3ce_local_response_decode_failure_recovery(
                     ));
                 }
                 let attempts = artifact["attempts"].as_array();
-                if attempts.map_or(true, |attempts| attempts.len() != 1) {
+                if attempts.is_none_or(|attempts| attempts.len() != 1) {
                     controls.push(format!(
                         "{process}: expected one failed attempt in artifact: {artifact}"
                     ));
@@ -939,7 +944,7 @@ async fn provider_http_failure_recovers_before_client_business_commit() {
 #[tokio::test]
 async fn final_provider_error_projects_native_responses_sse_error_event() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start("chat", false).await;
+    let entry = start("chat", false).await;
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(5))

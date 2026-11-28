@@ -3,7 +3,7 @@
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
 use routecodex_v3_admin::{router, AppState};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn temp_home() -> PathBuf {
@@ -16,7 +16,7 @@ fn temp_home() -> PathBuf {
     dir
 }
 
-fn write_init_config(home: &PathBuf) -> PathBuf {
+fn write_init_config(home: &Path) -> PathBuf {
     let provider_dir = home.join("provider").join("p1");
     std::fs::create_dir_all(&provider_dir).expect("provider dir");
     std::fs::write(
@@ -216,7 +216,7 @@ fn observability_attempt_row_with_failed(
         "finished_epoch_ms": null,
         "duration_ms": null,
         "meta": {
-            "request_id": request_key.split(':').last().unwrap_or(request_key),
+            "request_id": request_key.split(':').next_back().unwrap_or(request_key),
             "endpoint": "/v1/chat/completions",
             "provider_status": provider_status,
             "error_category": format!("provider_http_{provider_status}"),
@@ -279,6 +279,124 @@ async fn routes_get_returns_tree() {
     assert_eq!(
         members[0].get("use").and_then(|v| v.as_str()),
         Some("p1/m1")
+    );
+}
+
+#[tokio::test]
+async fn routes_selection_controls_are_registered_and_release_requires_admin_token() {
+    let (base, _state, home) = bind_test_server().await;
+    let response = http_client()
+        .get(format!("{base}/api/routes/active-keys?server_id=missing"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        400,
+        "unknown listener must not be forwarded"
+    );
+    let release = serde_json::json!({"server_id":"missing", "routing_group_id":"missing", "pool_id":"default", "provider_id":"p", "interface_id":"responses", "model_id":"m", "auth_alias":"a"});
+    let response = http_client()
+        .post(format!("{base}/api/routes/active-keys/release"))
+        .json(&release)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        401,
+        "release retains normal admin authorization"
+    );
+    let response = http_client()
+        .post(format!("{base}/api/routes/active-keys/release"))
+        .header("x-routecodex-admin-token", admin_token(&home))
+        .json(&release)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+}
+
+#[tokio::test]
+async fn selected_loopback_bind_is_not_rewritten_to_another_loopback_address() {
+    let mut verified = 0;
+    for bind in ["127.0.0.2", "::1"] {
+        let address = std::net::SocketAddr::new(bind.parse().unwrap(), 0);
+        let listener = match tokio::net::TcpListener::bind(address).await {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrNotAvailable => {
+                eprintln!("UNVERIFIED_HOST_ADDRESS selected listener {bind}: {error}");
+                continue;
+            }
+            Err(error) => panic!("bind selected loopback {bind}: {error}"),
+        };
+        let control_addr = listener.local_addr().unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let app = axum::Router::new().route(
+            "/_routecodex/selection/active-keys",
+            axum::routing::get(move || {
+                let sender = sender.clone();
+                async move {
+                    sender.send(()).await.unwrap();
+                    axum::Json(serde_json::json!({"pools": []}))
+                }
+            }),
+        );
+        let control_task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let home = temp_home();
+        let config = write_init_config(&home);
+        std::fs::write(
+            &config,
+            format!(
+                r#"version = 3
+[servers.selected]
+bind = "{bind}"
+port = {port}
+[servers.selected.routes.default]
+tiers = [[{{ use = "p1/m1" }}]]
+"#,
+                port = control_addr.port()
+            ),
+        )
+        .unwrap();
+        let state = AppState::new(config);
+        let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let admin_addr = admin_listener.local_addr().unwrap();
+        let admin_task =
+            tokio::spawn(async move { axum::serve(admin_listener, router(state)).await.unwrap() });
+        let response = http_client()
+            .get(format!(
+                "http://{admin_addr}/api/routes/active-keys?server_id=selected"
+            ))
+            .send()
+            .await;
+        let observed = match response {
+            Ok(response) => (response.status().as_u16(), response.text().await.unwrap()),
+            Err(error) => (0, error.to_string()),
+        };
+        let reached = receiver.try_recv().is_ok();
+        admin_task.abort();
+        control_task.abort();
+        let _ = admin_task.await;
+        let _ = control_task.await;
+        assert!(tokio::net::TcpStream::connect(control_addr).await.is_err());
+        assert!(tokio::net::TcpStream::connect(admin_addr).await.is_err());
+        std::fs::remove_dir_all(home).unwrap();
+        assert_eq!(observed.0, 200, "selected {bind}: {}", observed.1);
+        assert!(
+            reached,
+            "request must reach the actual selected listener {bind}"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&observed.1).unwrap()["pools"],
+            serde_json::json!([])
+        );
+        eprintln!("VERIFIED selected listener control bind={bind}");
+        verified += 1;
+    }
+    assert!(
+        verified > 0,
+        "this host must support a specific loopback fixture"
     );
 }
 

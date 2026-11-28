@@ -3,12 +3,11 @@
 use super::*;
 use tokio::sync::Semaphore;
 
-#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
-mod fixture;
+use super::hub_v1_fixture as fixture;
 
 #[tokio::test]
 async fn id9_terminal_join_releases_both_listener_probe_permits() {
-    let _lock = TEST_HOME_LOCK.lock().unwrap();
+    let _lock = TEST_HOME_LOCK.lock().await;
     let directory = std::env::temp_dir().join(format!("id9-terminal-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     struct RestoreHome(Option<std::ffi::OsString>, std::path::PathBuf);

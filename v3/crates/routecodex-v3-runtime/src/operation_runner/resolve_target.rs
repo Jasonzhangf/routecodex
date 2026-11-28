@@ -22,6 +22,8 @@ pub(crate) enum V3ResolveTargetExecutionMode {
         entry_kind: String,
         endpoint_path: String,
         requested_model: Option<String>,
+        source_estimated_turns: Option<u64>,
+        is_compaction: bool,
         deterministic_sample: u64,
     },
     DirectFresh {
@@ -69,22 +71,15 @@ impl std::fmt::Display for V3ResolveTargetOperatorError {
 
 impl std::error::Error for V3ResolveTargetOperatorError {}
 
+type V3ResolveTargetInnerResult =
+    Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>;
+type V3ResolveTargetSideOutputSlot =
+    Arc<Mutex<Option<Result<V3ResolveTargetSideOutput, V3ResolveTargetInnerResult>>>>;
+
 struct ResolveTargetOperator {
     mode: V3ResolveTargetExecutionMode,
     has_unprojected_history_images: bool,
-    side_output: Arc<
-        Mutex<
-            Option<
-                Result<
-                    V3ResolveTargetSideOutput,
-                    Result<
-                        V3Error01SourceRaised,
-                        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
-                    >,
-                >,
-            >,
-        >,
-    >,
+    side_output: V3ResolveTargetSideOutputSlot,
 }
 
 impl Operator for ResolveTargetOperator {
@@ -145,10 +140,12 @@ fn resolve_target_from_value(
             entry_kind,
             endpoint_path,
             requested_model,
+            source_estimated_turns,
+            is_compaction,
             deterministic_sample,
         } => {
             let routing_view = routing_view_with_requested_model(input, requested_model.as_deref());
-            let opaque_hit =
+            let mut opaque_hit =
                 crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_with_history_images(
                     manifest,
                     server_id,
@@ -157,7 +154,14 @@ fn resolve_target_from_value(
                     routing_view.as_ref(),
                     *deterministic_sample,
                     has_unprojected_history_images,
+                    *is_compaction,
                 )?;
+            if let (Some(estimate), Some(source)) = (
+                opaque_hit.estimated_history_turns.as_mut(),
+                source_estimated_turns,
+            ) {
+                *estimate = *source;
+            }
             Ok(V3ResolveTargetSideOutput {
                 opaque_hit,
                 route_policy_pending: None,

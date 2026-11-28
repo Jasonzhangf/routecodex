@@ -20,6 +20,8 @@ const state = {
   busy: false,
   collapsedPools: new Set(),
   collapsedTiers: new Set(),
+  queues: new Map(),
+  queueBusy: false,
 };
 
 const tree = document.getElementById("route-tree");
@@ -50,6 +52,7 @@ function setBusy(busy, label) {
     saveState.textContent = label;
     saveState.classList.toggle("dirty", isDirty() && !busy);
   }
+  renderRoutes();
 }
 
 function announce(kind, message) {
@@ -108,10 +111,65 @@ function renderRoutes() {
         <button type="button" class="pool-toggle" data-action="toggle-pool" data-pool="${poolIndex}" aria-expanded="${!state.collapsedPools.has(poolIndex)}"><span class="caret">▾</span><h2>${escapeHtml(pool.name)}</h2></button>
         <button class="btn route-add-tier" data-action="add-tier" data-pool="${poolIndex}">Add backup tier</button>
       </div>
-      <div class="route-tier-list">${tiers}</div>
+      <div class="route-tier-list">${renderActiveKeys(pool, poolIndex)}${tiers}</div>
     </article>`;
   }).join("");
   tree.setAttribute("aria-busy", "false");
+}
+
+function identityLabel(member) {
+  return `${member.provider_id} / ${member.auth_alias} · ${member.interface_id} / ${member.model_id}`;
+}
+
+function renderActiveKeys(pool, index) {
+  const policy = pool.active_keys;
+  const strategy = pool.selection?.strategy || "priority";
+  const modes = policy ? [["active_queue", "Sequential"], ["round_robin", "Round robin"], ["sticky", "Session sticky"]]
+    : [[strategy, `Legacy (${strategy})`], ["active_queue", "Sequential with active keys"], ["round_robin", "Round robin with active keys"], ["sticky", "Session sticky with active keys"]];
+  const cached = state.queues.get(state.activeServer);
+  const runtime = cached?.data?.pools?.find(item => item.pool_id === pool.name && item.routing_group_id === state.activeServer);
+  const members = policy?.members || [];
+  const queue = runtime ? `<p class="hint">Runtime strategy: ${escapeHtml(runtime.strategy)}. Configured aliases: ${escapeHtml((runtime.configured_members || []).map(item => `${item.provider}/${item.alias}`).join(", ") || "none")}.</p>
+    <h4>Current queue</h4><ol>${(runtime.order || []).map(member => `<li class="mono">${escapeHtml(identityLabel(member))}</li>`).join("") || "<li>No queued members</li>"}</ol>
+    <h4>Held by queue policy</h4><ul>${(runtime.held || []).map((member, heldIndex) => `<li>${escapeHtml(identityLabel(member))} <button class="btn" data-action="release-key" data-pool="${index}" data-held="${heldIndex}" ${state.queueBusy ? "disabled" : ""}>Release to tail</button></li>`).join("") || "<li>No held members</li>"}</ul>
+    <h4>Health cooldown (separate)</h4><ul>${(runtime.health || []).map(member => `<li>${escapeHtml(identityLabel(member))}: ${member.eligible ? "eligible" : "unavailable"}${member.reason ? ` — ${escapeHtml(member.reason)}` : ""}</li>`).join("") || "<li>No health restrictions reported</li>"}</ul>
+    ${runtime.persistence_error ? `<p class="error">Durability error: ${escapeHtml(runtime.persistence_error)}</p>` : ""}`
+    : `<p class="hint">${escapeHtml(cached?.error || (cached ? "No active-key runtime scope for this pool." : "Load queue to view the running listener. Unsaved edits are shown above."))}</p>`;
+  return `<section class="route-tier" aria-label="Active keys for ${escapeHtml(pool.name)}">
+    <h3>Active keys</h3><label>Selection <select data-action="selection-mode" data-pool="${index}" ${state.busy ? "disabled" : ""}>${modes.map(([value, label], modeIndex) => `<option value="${value}" ${modeIndex === 0 && !policy || policy && value === strategy ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+    ${policy ? `<p class="hint">${members.length} active aliases. An empty list sends no requests through this pool.</p>
+      <label>Retries after initial attempt <input type="number" min="0" step="1" value="${escapeHtml(policy.retries ?? 3)}" data-action="key-retries" data-pool="${index}"></label>
+      <label>After failure <select data-action="key-failure" data-pool="${index}"><option value="hold" ${policy.on_failure !== "tail" ? "selected" : ""}>Hold until released</option><option value="tail" ${policy.on_failure === "tail" ? "selected" : ""}>Move to tail</option></select></label>
+      ${members.map((member, memberIndex) => `<div class="route-member"><label>Provider <input value="${escapeHtml(member.provider)}" data-action="key-provider" data-pool="${index}" data-key="${memberIndex}"></label><label>Key alias <input value="${escapeHtml(member.alias)}" data-action="key-alias" data-pool="${index}" data-key="${memberIndex}"></label><button class="icon-btn danger" data-action="remove-key" data-pool="${index}" data-key="${memberIndex}" aria-label="Remove active alias">×</button></div>`).join("")}
+      <button class="btn" data-action="add-key" data-pool="${index}">Add active alias</button>
+      <button class="btn" data-action="legacy-keys" data-pool="${index}">Remove active-key policy</button>` : "<p class=\"hint\">Existing selection is preserved. Choose an active-key mode to configure an explicit subset.</p>"}
+    <p class="hint">Release appends a held member to the tail. It does not clear health cooldown or retry an old request.</p>
+    <button class="btn" data-action="load-queue" data-pool="${index}" ${state.queueBusy || state.busy ? "disabled" : ""}>${state.queueBusy ? "Loading queue…" : "Load queue"}</button>${queue}
+  </section>`;
+}
+
+async function loadQueue(serverId = state.activeServer) {
+  state.queueBusy = true; renderRoutes();
+  try {
+    const data = await api(`/api/routes/active-keys?server_id=${encodeURIComponent(serverId)}`);
+    state.queues.set(serverId, { data });
+  } catch (error) {
+    state.queues.set(serverId, { error: error.message });
+    announce("err", `Queue load failed: ${error.message}`);
+  } finally { state.queueBusy = false; renderRoutes(); }
+}
+
+async function releaseKey(pool, heldIndex) {
+  const serverId = state.activeServer;
+  const runtime = state.queues.get(serverId)?.data?.pools?.find(item => item.pool_id === pool.name && item.routing_group_id === serverId);
+  const member = runtime?.held?.[heldIndex];
+  if (!member || state.queueBusy) return;
+  state.queueBusy = true; renderRoutes();
+  try {
+    await api("/api/routes/active-keys/release", { method: "POST", body: JSON.stringify({ server_id: serverId, routing_group_id: runtime.routing_group_id, pool_id: runtime.pool_id, provider_id: member.provider_id, interface_id: member.interface_id, model_id: member.model_id, auth_alias: member.auth_alias }) });
+    announce("ok", "Member released to queue tail. Health cooldown is unchanged.");
+  } catch (error) { announce("err", `Release failed: ${error.message}`); }
+  finally { await loadQueue(serverId); }
 }
 
 function renderTier(pool, poolIndex, tier, tierIndex) {
@@ -161,6 +219,15 @@ tree.addEventListener("click", event => {
   }
   const pool = poolFrom(button);
   if (!pool) return;
+  if (button.dataset.action === "load-queue") { loadQueue(); return; }
+  if (button.dataset.action === "release-key") { releaseKey(pool, Number(button.dataset.held)); return; }
+  if (state.busy) return;
+  if (button.dataset.action === "add-key") {
+    pool.active_keys.members.push({ provider: pool.tiers[0]?.members[0]?.use.split("/")[0] || "", alias: "" });
+    markDirty(); renderRoutes(); return;
+  }
+  if (button.dataset.action === "remove-key") { pool.active_keys.members.splice(Number(button.dataset.key), 1); markDirty(); renderRoutes(); return; }
+  if (button.dataset.action === "legacy-keys") { pool.active_keys = null; pool.selection = { strategy: "priority" }; markDirty(); renderRoutes(); return; }
   const tierIndex = Number(button.dataset.tier);
   if (button.dataset.action === "tier-up" || button.dataset.action === "tier-down") {
     const next = tierIndex + (button.dataset.action === "tier-up" ? -1 : 1);
@@ -180,8 +247,24 @@ tree.addEventListener("click", event => {
 });
 
 tree.addEventListener("change", event => {
-  if (event.target.dataset.action !== "weight") return;
   const pool = poolFrom(event.target);
+  if (!pool || state.busy) return;
+  const action = event.target.dataset.action;
+  if (action === "selection-mode") {
+    // The first legacy option is a no-op; opting in starts with an explicit empty subset.
+    if (!pool.active_keys && event.target.selectedIndex === 0) return;
+    pool.selection = { ...(pool.selection || {}), strategy: event.target.value };
+    pool.active_keys ||= { members: [], retries: 3, on_failure: "hold" };
+    markDirty(); renderRoutes(); return;
+  }
+  if (action === "key-retries") {
+    const retries = Number(event.target.value);
+    if (event.target.value === "" || !Number.isSafeInteger(retries) || retries < 0) { announce("err", "Retries must be a nonnegative integer."); event.target.value = pool.active_keys.retries ?? 3; return; }
+    pool.active_keys.retries = retries;
+  } else if (action === "key-failure") pool.active_keys.on_failure = event.target.value;
+  else if (action === "key-provider" || action === "key-alias") pool.active_keys.members[Number(event.target.dataset.key)][action === "key-provider" ? "provider" : "alias"] = event.target.value.trim();
+  else if (action !== "weight") return;
+  if (action !== "weight") { markDirty(); return; }
   const member = pool?.tiers[Number(event.target.dataset.tier)]?.members[Number(event.target.dataset.member)];
   if (!member) return;
   member.weight = event.target.value === "" ? null : Number(event.target.value);
@@ -293,7 +376,11 @@ saveButton.addEventListener("click", async () => {
     // manifest, so success is only announced after reload confirms it.
     try {
       await api("/api/reload", { method: "POST" });
-      announce("ok", `Routes saved as revision #${result.revision_seq} and runtime reloaded.`);
+      state.queues.clear();
+      await loadQueue();
+      const queueError = state.queues.get(state.activeServer)?.error;
+      if (queueError) announce("err", `Routes saved as revision #${result.revision_seq} and runtime reloaded, but queue status failed: ${queueError}`);
+      else announce("ok", `Routes saved as revision #${result.revision_seq} and runtime reloaded.`);
       setBusy(false, "Saved");
     } catch (reloadError) {
       announce("err", `Revision #${result.revision_seq} saved but runtime reload failed, so it is not active yet: ${reloadError.message}`);

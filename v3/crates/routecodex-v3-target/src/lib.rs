@@ -1,15 +1,19 @@
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ForwarderTargetManifest, V3ProviderManifest,
     V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort, V3ResponsesTransportKind,
-    V3RouteGroupManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
-    V3WebSearchExecutionMode,
+    V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
+    V3SelectionStrategy, V3WebSearchExecutionMode,
 };
-use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
+use routecodex_v3_provider_responses::{
+    V3ProviderAvailabilityReader, V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+};
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+mod active_keys;
 mod sticky;
+pub use active_keys::*;
 
 pub use sticky::{
     V3StickyBinding, V3StickyKey, V3StickyMember, V3StickySelection, V3StickySelectionScope,
@@ -62,14 +66,32 @@ pub struct V3TargetCandidate {
     pub priority: i32,
     pub weight: u32,
     pub pool_ids: Vec<String>,
+    /// Route-plan pool occurrences that produced this concrete identity.
+    pub occurrences: Vec<V3TargetOccurrence>,
     pub default_pool_member: bool,
     pub path: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3TargetOccurrence {
+    pub pool_id: String,
+    pub tier_index: usize,
+    pub plan_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3TargetOccurrenceEligibility {
+    pub occurrence: V3TargetOccurrence,
+    pub identities: BTreeSet<V3ActiveKeyIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Target09CandidateSetExpanded {
     pub route: V3Router07OpaqueTargetHitOnce,
     pub candidates: Vec<V3TargetCandidate>,
+    /// Unmerged declaration rows retain occurrence-local route properties.
+    /// `candidates` remains the legacy complete-identity view.
+    pub occurrence_candidates: Vec<V3TargetCandidate>,
     pub provider_priority_schedule: routecodex_v3_config::V3ProviderPriorityScheduleAuthoringConfig,
     pub route_pool_tier_priorities: BTreeMap<String, Vec<i32>>,
     /// Declared member identity of each pool that participated in the target
@@ -78,6 +100,14 @@ pub struct V3Target09CandidateSetExpanded {
     /// set so a request that only makes part of a pool eligible cannot evict
     /// the session's remembered provider.
     pub sticky_pool_members: BTreeMap<String, Vec<V3StickyMember>>,
+    pub active_pools: BTreeMap<String, V3ActiveKeyPool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ActiveKeyPool {
+    pub policy: routecodex_v3_config::V3ActiveKeyPolicy,
+    pub strategy: V3SelectionStrategy,
+    pub universe: Vec<V3ActiveKeyIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +118,8 @@ pub struct V3Target10ConcreteProviderSelected {
     pub unavailable_candidates: Vec<String>,
     pub attempts: usize,
     pub default_floor_protected: bool,
+    pub active_selection: Option<V3ActiveKeySelection>,
+    pub occurrence: V3TargetOccurrence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -128,6 +160,8 @@ pub enum V3TargetError {
     },
     #[error("selected target has no concrete candidates")]
     CandidateSetEmpty,
+    #[error("all concrete candidates exceeded or reached their configured estimated turn limit")]
+    EstimatedTurnLimitReached,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -152,14 +186,17 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
 {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
+        key_ref: routecodex_v3_provider_responses::V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        let routecodex_v3_provider_responses::V3ProviderKeyRef {
+            provider_id,
+            auth_alias,
+            model_id,
+        } = key_ref;
         let availability = self.availability.availability_for_interface(
             provider_id,
             interface_id,
@@ -222,7 +259,220 @@ struct V3TargetExpansionScope {
     interface_filter: Option<String>,
 }
 
+struct ExpandProviderOptions {
+    priority: i32,
+    weight: u32,
+    sample: u64,
+    scope: V3TargetExpansionScope,
+}
+
+struct EligibleOccurrence<'a> {
+    index: usize,
+    candidate: &'a V3TargetCandidate,
+    occurrence: &'a V3TargetOccurrence,
+    projection: V3ProviderSchedulingProjection,
+    bucket: (usize, i32, bool, i32),
+}
+
 impl V3TargetInterpreter {
+    pub fn observe_eligible_occurrences<R: V3ProviderSchedulingReader>(
+        &self,
+        expanded: &V3Target09CandidateSetExpanded,
+        scheduling: &R,
+        now_ms: u64,
+        excluded: &BTreeSet<V3ActiveKeyIdentity>,
+        _listener_id: &str,
+        active: Option<&V3ActiveKeySelectionContext<'_>>,
+    ) -> Vec<V3TargetOccurrenceEligibility> {
+        let mut observed = BTreeMap::<(String, usize, usize), BTreeSet<V3ActiveKeyIdentity>>::new();
+        let (eligible, _, _) =
+            self.eligible_occurrences(expanded, scheduling, now_ms, excluded, active);
+        for item in eligible {
+            let occurrence = item.occurrence;
+            observed
+                .entry((
+                    occurrence.pool_id.clone(),
+                    occurrence.tier_index,
+                    occurrence.plan_index,
+                ))
+                .or_default()
+                .insert(item.candidate.active_key_identity());
+        }
+        observed
+            .into_iter()
+            .map(
+                |((pool_id, tier_index, plan_index), identities)| V3TargetOccurrenceEligibility {
+                    occurrence: V3TargetOccurrence {
+                        pool_id,
+                        tier_index,
+                        plan_index,
+                    },
+                    identities,
+                },
+            )
+            .collect()
+    }
+
+    fn eligible_occurrences<'a, R: V3ProviderSchedulingReader>(
+        &self,
+        expanded: &'a V3Target09CandidateSetExpanded,
+        scheduling: &R,
+        now_ms: u64,
+        excluded: &BTreeSet<V3ActiveKeyIdentity>,
+        active: Option<&V3ActiveKeySelectionContext<'_>>,
+    ) -> (
+        Vec<EligibleOccurrence<'a>>,
+        Vec<String>,
+        BTreeSet<V3StickyKey>,
+    ) {
+        let indices = expanded
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| (candidate.active_key_identity(), index))
+            .collect::<BTreeMap<_, _>>();
+        let admitted_count = Self::admitted_candidate_count(expanded, now_ms);
+        let mut eligible = Vec::new();
+        let mut unavailable = Vec::new();
+        let mut cooled = BTreeSet::new();
+        let mut record_unavailable = |reason: String| {
+            if !unavailable.contains(&reason) {
+                unavailable.push(reason);
+            }
+        };
+        let selection_rows = if expanded.active_pools.is_empty() {
+            &expanded.candidates
+        } else {
+            &expanded.occurrence_candidates
+        };
+        for candidate in selection_rows {
+            let identity = candidate.active_key_identity();
+            let Some(index) = indices.get(&identity).copied() else {
+                continue;
+            };
+            let Some(occurrence) = candidate.occurrences.first() else {
+                continue;
+            };
+            if excluded.contains(&identity)
+                || active.is_some_and(|context| context.excluded.contains(&identity))
+            {
+                record_unavailable(format!(
+                    "{}:{}:{}:{}:active_key_excluded",
+                    candidate.provider_id,
+                    candidate.interface_id,
+                    candidate.auth_alias,
+                    candidate.model_id
+                ));
+                continue;
+            }
+            if let Some(context) =
+                active.filter(|_| expanded.active_pools.contains_key(&occurrence.pool_id))
+            {
+                let scope = V3ActiveKeyScope {
+                    listener_id: context.listener_id.to_string(),
+                    routing_group_id: expanded.route.routing_group_id.clone(),
+                    pool_id: occurrence.pool_id.clone(),
+                };
+                if !context.state.selectable(&scope, &identity) {
+                    record_unavailable(format!(
+                        "{}:{}:{}:{}:active_key_excluded",
+                        candidate.provider_id,
+                        candidate.interface_id,
+                        candidate.auth_alias,
+                        candidate.model_id
+                    ));
+                    continue;
+                }
+            }
+            if !Self::candidate_admitted(candidate, now_ms) {
+                record_unavailable(format!(
+                    "{}:{}:{}:{}:availability_inactive",
+                    candidate.provider_id,
+                    candidate.interface_id,
+                    candidate.auth_alias,
+                    candidate.model_id
+                ));
+                cooled.insert(V3StickyKey::new(
+                    &candidate.provider_id,
+                    &candidate.auth_alias,
+                    &candidate.model_id,
+                ));
+                continue;
+            }
+            let mut projection = scheduling.scheduling_projection_for_interface(
+                routecodex_v3_provider_responses::V3ProviderKeyRef::new(
+                    &candidate.provider_id,
+                    &candidate.auth_alias,
+                    &candidate.model_id,
+                ),
+                &candidate.interface_id,
+                candidate.priority,
+                candidate.weight,
+                now_ms,
+            );
+            if !projection.available
+                && Self::ignores_single_candidate_automatic_cooldown(
+                    admitted_count,
+                    &projection.blocked_scopes,
+                )
+            {
+                projection.available = true;
+                projection.blocked_scopes.clear();
+            }
+            if !projection.available {
+                if projection
+                    .blocked_scopes
+                    .iter()
+                    .any(|scope| scope != "request_local_provider_failure")
+                {
+                    cooled.insert(V3StickyKey::new(
+                        &candidate.provider_id,
+                        &candidate.auth_alias,
+                        &candidate.model_id,
+                    ));
+                }
+                record_unavailable(format_candidate_scheduling_unavailable(
+                    candidate,
+                    &projection,
+                ));
+                continue;
+            }
+            let rank = expanded
+                .route
+                .target_plan
+                .len()
+                .saturating_sub(occurrence.tier_index);
+            let scheduled_priority =
+                self.provider_priority_schedule_priority(expanded, candidate, now_ms);
+            projection.effective_priority = projection
+                .effective_priority
+                .saturating_add(scheduled_priority.saturating_sub(candidate.priority))
+                .saturating_add((rank as i32).saturating_mul(1_000_000));
+            let near_limit =
+                context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
+                    .is_some()
+                    || context_window_near_limit_reason(
+                        expanded.route.request_input_tokens,
+                        candidate,
+                    )
+                    .is_some();
+            let bucket = (
+                rank,
+                scheduled_priority,
+                !near_limit,
+                projection.effective_priority,
+            );
+            eligible.push(EligibleOccurrence {
+                index,
+                candidate,
+                occurrence,
+                projection,
+                bucket,
+            });
+        }
+        (eligible, unavailable, cooled)
+    }
+
     pub fn classify_kind(&self, route: V3Router07OpaqueTargetHitOnce) -> V3Target08KindClassified {
         V3Target08KindClassified { route }
     }
@@ -237,8 +487,9 @@ impl V3TargetInterpreter {
             .route_groups
             .get(&classified.route.routing_group_id)
             .ok_or(V3TargetError::SelectedPoolMissing)?;
-        let mut candidates = Vec::new();
-        let mut candidate_indices = BTreeMap::new();
+        let mut candidates: Vec<V3TargetCandidate> = Vec::new();
+        let mut occurrence_candidates = Vec::new();
+        let mut candidate_indices = BTreeMap::<(String, String, String, String), usize>::new();
         let mut last_error = None;
         let route_required_capabilities =
             selected_route_required_capabilities(group, &classified.route);
@@ -252,20 +503,28 @@ impl V3TargetInterpreter {
                     Some(model_id),
                     None,
                     entry.interface.as_deref(),
-                    entry.priority,
-                    entry.weight,
-                    deterministic_sample,
-                    V3TargetExpansionScope {
-                        path: vec![format!("direct:{provider_id}.{model_id}")],
-                        pool_ids: vec![entry.pool_id.clone()],
-                        default_pool_member: false,
-                        required_capabilities: Vec::new(),
-                        visible_model_ids: Vec::new(),
-                        interface_filter: entry.interface.clone(),
+                    ExpandProviderOptions {
+                        priority: entry.priority,
+                        weight: entry.weight,
+                        sample: deterministic_sample,
+                        scope: V3TargetExpansionScope {
+                            path: vec![format!("direct:{provider_id}.{model_id}")],
+                            pool_ids: vec![entry.pool_id.clone()],
+                            default_pool_member: false,
+                            required_capabilities: Vec::new(),
+                            visible_model_ids: Vec::new(),
+                            interface_filter: entry.interface.clone(),
+                        },
                     },
                 ) {
                     Ok(expanded) => {
-                        for candidate in expanded {
+                        for mut candidate in expanded {
+                            candidate.occurrences.push(V3TargetOccurrence {
+                                pool_id: entry.pool_id.clone(),
+                                tier_index: entry.tier_index,
+                                plan_index,
+                            });
+                            occurrence_candidates.push(candidate.clone());
                             let key = (
                                 candidate.provider_id.clone(),
                                 candidate.interface_id.clone(),
@@ -330,10 +589,24 @@ impl V3TargetInterpreter {
                 },
             ) {
                 Ok(expanded) => {
-                    for candidate in expanded {
+                    for mut candidate in expanded {
+                        candidate.occurrences.push(V3TargetOccurrence {
+                            pool_id: entry.pool_id.clone(),
+                            tier_index: entry.tier_index,
+                            plan_index,
+                        });
+                        if pool.active_keys.as_ref().is_some_and(|policy| {
+                            !policy.members.iter().any(|member| {
+                                member.provider == candidate.provider_id
+                                    && member.alias == candidate.auth_alias
+                            })
+                        }) {
+                            continue;
+                        }
                         if requires_vision && !candidate.supports_vision() {
                             continue;
                         }
+                        occurrence_candidates.push(candidate.clone());
                         let key = (
                             candidate.provider_id.clone(),
                             candidate.interface_id.clone(),
@@ -341,6 +614,14 @@ impl V3TargetInterpreter {
                             candidate.model_id.clone(),
                         );
                         if let Some(index) = candidate_indices.get(&key).copied() {
+                            if !candidates[index]
+                                .occurrences
+                                .contains(&candidate.occurrences[0])
+                            {
+                                candidates[index]
+                                    .occurrences
+                                    .push(candidate.occurrences[0].clone());
+                            }
                             merge_candidate_route_provenance(&mut candidates[index], &candidate);
                         } else {
                             candidate_indices.insert(key, candidates.len());
@@ -359,8 +640,27 @@ impl V3TargetInterpreter {
             .get(&classified.route.server_id)
             .map(|server| server.provider_priority_schedule.clone())
             .unwrap_or_default();
+        let mut active_pools = BTreeMap::new();
+        for entry in &classified.route.target_plan {
+            let Some(pool) = group.pools.get(&entry.pool_id) else {
+                continue;
+            };
+            if active_pools.contains_key(&entry.pool_id) {
+                continue;
+            }
+            if let Some(declaration) =
+                self.active_key_pool_declaration(manifest, &entry.pool_id, pool)
+            {
+                active_pools.insert(entry.pool_id.clone(), declaration);
+            }
+        }
+        let tier_rows = if active_pools.is_empty() {
+            &candidates
+        } else {
+            &occurrence_candidates
+        };
         let mut route_pool_tiers = BTreeMap::<String, BTreeSet<i32>>::new();
-        for candidate in &candidates {
+        for candidate in tier_rows {
             for pool_id in &candidate.pool_ids {
                 // Synthetic pools (for example `implicit:<capability>` and
                 // `direct`) have no declared route-pool tier list. They keep
@@ -383,14 +683,97 @@ impl V3TargetInterpreter {
                 (pool_id, priorities)
             })
             .collect();
+        candidates.retain(|candidate| {
+            Self::candidate_within_turn_limit(manifest, &classified.route, candidate)
+        });
+        if candidates.is_empty() {
+            return Err(V3TargetError::EstimatedTurnLimitReached);
+        }
         let sticky_pool_members = Self::sticky_pool_members(manifest, group, &classified.route);
         Ok(V3Target09CandidateSetExpanded {
             route: classified.route,
             candidates,
+            occurrence_candidates,
             provider_priority_schedule,
             route_pool_tier_priorities,
             sticky_pool_members,
+            active_pools,
         })
+    }
+
+    /// Listener controls use the same declared-target expansion as requests.
+    /// Enumerating every provider model/interface would invent queue members.
+    pub fn active_key_pool_declarations(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        routing_group_id: &str,
+    ) -> Result<BTreeMap<String, V3ActiveKeyPool>, V3TargetError> {
+        let group = manifest
+            .route_groups
+            .get(routing_group_id)
+            .ok_or(V3TargetError::SelectedPoolMissing)?;
+        Ok(group
+            .pools
+            .iter()
+            .filter_map(|(id, pool)| {
+                self.active_key_pool_declaration(manifest, id, pool)
+                    .map(|declaration| (id.clone(), declaration))
+            })
+            .collect())
+    }
+
+    fn active_key_pool_declaration(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        pool_id: &str,
+        pool: &V3RoutePoolManifest,
+    ) -> Option<V3ActiveKeyPool> {
+        let policy = pool.active_keys.as_ref()?;
+        let mut universe = Vec::new();
+        for target in &pool.targets {
+            if let Ok(expanded) = self.expand_route_target(
+                manifest,
+                target,
+                0,
+                &mut BTreeSet::new(),
+                V3TargetExpansionScope {
+                    path: Vec::new(),
+                    pool_ids: vec![pool_id.to_owned()],
+                    default_pool_member: pool_id == "default",
+                    required_capabilities: Vec::new(),
+                    visible_model_ids: Vec::new(),
+                    interface_filter: None,
+                },
+            ) {
+                for candidate in expanded {
+                    let identity = candidate.active_key_identity();
+                    if !universe.contains(&identity) {
+                        universe.push(identity);
+                    }
+                }
+            }
+        }
+        Some(V3ActiveKeyPool {
+            policy: policy.clone(),
+            strategy: pool.selection.strategy.clone(),
+            universe,
+        })
+    }
+
+    pub fn candidate_within_turn_limit(
+        manifest: &V3Config05ManifestPublished,
+        route: &V3Router07OpaqueTargetHitOnce,
+        candidate: &V3TargetCandidate,
+    ) -> bool {
+        let Some(estimate) = route.estimated_history_turns else {
+            return true;
+        };
+        manifest
+            .providers
+            .get(&candidate.provider_id)
+            .and_then(|provider| provider.models.get(&candidate.model_id))
+            .and_then(|model| model.exclude_at_estimated_turns)
+            .is_none_or(|threshold| estimate < threshold.get())
     }
 
     /// Expands the configured members of every sticky pool in the target plan
@@ -414,7 +797,7 @@ impl V3TargetInterpreter {
                     manifest,
                     target,
                     &mut visited,
-                    &mut members.entry(entry.pool_id.clone()).or_default(),
+                    members.entry(entry.pool_id.clone()).or_default(),
                 );
             }
         }
@@ -494,6 +877,7 @@ impl V3TargetInterpreter {
             now_ms,
             deterministic_sample,
             None,
+            None,
         )
     }
 
@@ -517,6 +901,34 @@ impl V3TargetInterpreter {
             now_ms,
             deterministic_sample,
             Some(sticky),
+            None,
+        )
+    }
+
+    /// Runtime supplies listener-local custody and request-local closed episode
+    /// identities. Selection remains inside the unchanged final health bucket.
+    pub fn select_available_with_health_active<R: V3ProviderSchedulingReader>(
+        &self,
+        expanded: V3Target09CandidateSetExpanded,
+        scheduling: &R,
+        now_ms: u64,
+        deterministic_sample: u64,
+        active: &V3ActiveKeySelectionContext<'_>,
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+        let sticky = active.session_id.map(|session_id| {
+            V3StickySelectionScope::new(
+                active.listener_id,
+                &expanded.route.routing_group_id,
+                session_id,
+            )
+        });
+        self.select_available_with_health_inner(
+            expanded,
+            scheduling,
+            now_ms,
+            deterministic_sample,
+            sticky.as_ref(),
+            Some(active),
         )
     }
 
@@ -527,254 +939,159 @@ impl V3TargetInterpreter {
         now_ms: u64,
         deterministic_sample: u64,
         sticky: Option<&V3StickySelectionScope>,
+        active: Option<&V3ActiveKeySelectionContext<'_>>,
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
-        let mut unavailable = Vec::new();
-        // Candidates of the sticky pool that this attempt cannot use because of
-        // health, cooldown or a declared availability window. Only these hand
-        // the main slot over; a request-local failure never does.
-        let mut sticky_cooled = BTreeSet::new();
-        let mut eligible = Vec::new();
-        // Window-inactive siblings cannot inflate the automatic-cooldown
-        // exemption's candidate count.
-        let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
-        for (index, candidate) in expanded.candidates.iter().enumerate() {
-            // Availability is declared on the provider model and is not a
-            // fallback tier: outside its windows the candidate is not eligible.
-            if !Self::candidate_admitted(candidate, now_ms) {
-                unavailable.push(format!(
-                    "{}:{}:{}:{}:availability_inactive",
-                    candidate.provider_id,
-                    candidate.interface_id,
-                    candidate.auth_alias,
-                    candidate.model_id
-                ));
-                sticky_cooled.insert(V3StickyKey::new(
-                    &candidate.provider_id,
-                    &candidate.auth_alias,
-                    &candidate.model_id,
-                ));
+        if let Some(context) = active {
+            for (pool_id, pool) in &expanded.active_pools {
+                context
+                    .state
+                    .configure(
+                        V3ActiveKeyScope {
+                            listener_id: context.listener_id.to_string(),
+                            routing_group_id: expanded.route.routing_group_id.clone(),
+                            pool_id: pool_id.clone(),
+                        },
+                        pool.policy.clone(),
+                        pool.strategy.clone(),
+                        &pool.universe,
+                    )
+                    .expect("compiled active pool policy");
+            }
+        }
+        let excluded = BTreeSet::new();
+        let (mut eligible, mut unavailable, cooled) =
+            self.eligible_occurrences(&expanded, scheduling, now_ms, &excluded, active);
+        while let Some(best) = eligible.iter().map(|item| item.bucket).max() {
+            let pool_id = eligible
+                .iter()
+                .filter(|item| item.bucket == best)
+                .min_by_key(|item| item.occurrence.plan_index)
+                .unwrap()
+                .occurrence
+                .pool_id
+                .clone();
+            let mut seen = BTreeSet::new();
+            let tier = eligible
+                .iter()
+                .filter(|item| item.bucket == best && item.occurrence.pool_id == pool_id)
+                .filter(|item| seen.insert(item.candidate.active_key_identity()))
+                .collect::<Vec<_>>();
+            let is_active = expanded.active_pools.contains_key(&pool_id);
+            let active_selection = if is_active {
+                active.and_then(|context| {
+                    let scope = V3ActiveKeyScope {
+                        listener_id: context.listener_id.to_string(),
+                        routing_group_id: expanded.route.routing_group_id.clone(),
+                        pool_id: pool_id.clone(),
+                    };
+                    let identities = tier
+                        .iter()
+                        .map(|item| item.candidate.active_key_identity())
+                        .collect();
+                    context
+                        .state
+                        .choose(&scope, &identities, context.excluded, context.session_id)
+                        .expect("configured active pool")
+                })
+            } else {
+                None
+            };
+            if is_active && active_selection.is_none() {
+                // Observation is not a selection witness. A concurrent hold
+                // makes this bucket unavailable; only declared successors remain.
+                unavailable.push(format!("{pool_id}:active_bucket_unavailable"));
+                eligible.retain(|item| item.bucket != best || item.occurrence.pool_id != pool_id);
                 continue;
             }
-            // The context estimate is advisory ordering evidence, never an
-            // admission boundary or provider refusal. Preserve health,
-            // capability and request-local exclusion; demote an eligible
-            // candidate only inside its route tier when its scaled estimate
-            // is near or above its declared window.
-            let near_limit =
-                context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
-                    .is_some()
-                    || context_window_near_limit_reason(
-                        expanded.route.request_input_tokens,
-                        candidate,
-                    )
-                    .is_some();
-            // Earlier route tiers have precedence over later/default tiers.
-            // Keep that precedence while candidate priority itself is ordered
-            // descending (larger configured values win).
-            let route_tier_index = Self::route_tier_index_for_candidate(&expanded.route, candidate);
-            let route_tier_rank = expanded
-                .route
-                .target_plan
-                .len()
-                .saturating_sub(route_tier_index);
-            let route_priority = (route_tier_rank as i32).saturating_mul(1_000_000);
-            let mut projection = scheduling.scheduling_projection_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
-                &candidate.auth_alias,
-                &candidate.model_id,
-                candidate.priority,
-                candidate.weight,
-                now_ms,
-            );
-            // A configured singleton does not participate in automatic health
-            // scheduling. Keep manual auth, capacity and request-local blocks.
-            if !projection.available
-                && Self::ignores_single_candidate_automatic_cooldown(
-                    admitted_candidate_count,
-                    &projection.blocked_scopes,
-                )
-            {
-                projection.available = true;
-                projection.blocked_scopes.clear();
-            }
-            let scheduled_priority =
-                self.provider_priority_schedule_priority(&expanded, candidate, now_ms);
-            projection.effective_priority = projection
-                .effective_priority
-                .saturating_add(scheduled_priority.saturating_sub(candidate.priority));
-            projection.effective_priority =
-                route_priority.saturating_add(projection.effective_priority);
-            if projection.available {
-                eligible.push((
-                    index,
-                    candidate,
-                    projection,
-                    route_tier_rank,
-                    scheduled_priority,
-                    near_limit,
-                ));
-            } else {
-                // A request-local failure is only a per-attempt exclusion. Any
-                // health, quota, capacity or declared-availability block hands
-                // the sticky main slot over.
-                if sticky.is_some()
-                    && projection
-                        .blocked_scopes
+            let sticky_choice = if !is_active
+                && tier.iter().any(|item| {
+                    expanded
+                        .route
+                        .target_plan
+                        .get(item.occurrence.plan_index)
+                        .is_some_and(|entry| entry.session_sticky)
+                }) {
+                sticky.and_then(|scope| {
+                    let universe = expanded
+                        .sticky_pool_members
+                        .get(&pool_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    let universe_keys = universe
                         .iter()
-                        .any(|scope| scope != "request_local_provider_failure")
-                {
-                    sticky_cooled.insert(V3StickyKey::new(
-                        &candidate.provider_id,
-                        &candidate.auth_alias,
-                        &candidate.model_id,
-                    ));
-                }
-                unavailable.push(format_candidate_scheduling_unavailable(
-                    candidate,
-                    &projection,
-                ));
-            }
-        }
-        // Capability labels select route pools; they never remove a declared
-        // provider from the selected pool or override its priority.
-        let candidate_count = eligible.len().max(1);
-        // A route pool can encode its configured tiers as target priority.
-        // Plan tier index orders separate pools; scheduled priority orders the
-        // tiers inside one pool. Near-limit is only a same-tier demotion, so it
-        // cannot hand selection to a lower pool or a lower in-pool tier.
-        let Some(max_route_tier_scope) = eligible
-            .iter()
-            .map(|(_, _, _, route_tier_rank, scheduled_priority, _)| {
-                (*route_tier_rank, *scheduled_priority)
-            })
-            .max()
-        else {
-            return Err(V3TargetExhaustion {
-                route: Box::new(expanded.route),
-                attempted_candidates: unavailable,
-            });
-        };
-        let highest_route_tier_has_normal = eligible.iter().any(
-            |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
-                (*route_tier_rank, *scheduled_priority) == max_route_tier_scope && !*near_limit
-            },
-        );
-        let mut candidates = eligible
-            .into_iter()
-            .filter(
-                |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
-                    (*route_tier_rank, *scheduled_priority) == max_route_tier_scope
-                        && (!highest_route_tier_has_normal || !*near_limit)
-                },
-            )
-            .collect::<Vec<_>>();
-        let Some(max_priority) = candidates
-            .iter()
-            .map(|(_, _, projection, _, _, _)| projection.effective_priority)
-            .max()
-        else {
-            return Err(V3TargetExhaustion {
-                route: Box::new(expanded.route),
-                attempted_candidates: unavailable,
-            });
-        };
-        let mut tier = candidates
-            .drain(..)
-            .filter(|(_, _, projection, _, _, _)| projection.effective_priority == max_priority)
-            .collect::<Vec<_>>();
-        // Session-sticky selection only applies to the final bucket when that
-        // bucket belongs to a sticky pool. Other pools keep weighted sampling.
-        let sticky_pools = expanded
-            .route
-            .target_plan
-            .iter()
-            .filter(|entry| entry.session_sticky)
-            .map(|entry| entry.pool_id.clone())
-            .collect::<BTreeSet<_>>();
-        let sticky_chosen = sticky.and_then(|scope| {
-            let tier_pool_id = tier.iter().find_map(|(_, candidate, _, _, _, _)| {
-                candidate
-                    .pool_ids
-                    .iter()
-                    .find(|pool_id| sticky_pools.contains(*pool_id))
-            })?;
-            let scope_key = scope.scope_key(tier_pool_id);
-            // The sticky universe is the pool's declared member set, not the
-            // per-request expansion: a request that only makes part of the pool
-            // eligible (model filter, capability, availability) must not evict
-            // the session's remembered provider from the pool.
-            let universe = expanded
-                .sticky_pool_members
-                .get(tier_pool_id)
-                .cloned()
-                .unwrap_or_default();
-            let universe_keys = universe
-                .iter()
-                .map(|member| member.key.clone())
-                .collect::<BTreeSet<_>>();
-            let eligible_keys = tier
-                .iter()
-                .map(|(_, candidate, _, _, _, _)| {
-                    V3StickyKey::new(
-                        &candidate.provider_id,
-                        &candidate.auth_alias,
-                        &candidate.model_id,
-                    )
+                        .map(|member| member.key.clone())
+                        .collect::<BTreeSet<_>>();
+                    let identities = tier
+                        .iter()
+                        .map(|item| {
+                            V3StickyKey::new(
+                                &item.candidate.provider_id,
+                                &item.candidate.auth_alias,
+                                &item.candidate.model_id,
+                            )
+                        })
+                        .collect();
+                    let cooled = cooled.intersection(&universe_keys).cloned().collect();
+                    scope
+                        .state
+                        .select(&scope.scope_key(&pool_id), &universe, &identities, &cooled)
+                        .and_then(|selection| {
+                            tier.iter().position(|item| {
+                                V3StickyKey::new(
+                                    &item.candidate.provider_id,
+                                    &item.candidate.auth_alias,
+                                    &item.candidate.model_id,
+                                ) == selection.chosen
+                            })
+                        })
                 })
-                .collect::<BTreeSet<_>>();
-            let cooled = sticky_cooled
-                .iter()
-                .filter(|key| universe_keys.contains(*key))
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            let selection = scope
-                .state
-                .select(&scope_key, &universe, &eligible_keys, &cooled)?;
-            tier.iter().position(|(_, candidate, _, _, _, _)| {
-                V3StickyKey::new(
-                    &candidate.provider_id,
-                    &candidate.auth_alias,
-                    &candidate.model_id,
-                ) == selection.chosen
-            })
-        });
-        let chosen = match sticky_chosen {
-            Some(index) => index,
-            None => {
-                let total_weight = tier
-                    .iter()
-                    .map(|(_, _, projection, _, _, _)| projection.effective_weight_milli)
-                    .sum::<u64>();
-                let mut point = deterministic_sample % total_weight.max(1);
-                let mut weighted = 0;
-                for (tier_index, (_, _, projection, _, _, _)) in tier.iter().enumerate() {
-                    if point < projection.effective_weight_milli {
-                        weighted = tier_index;
-                        break;
+            } else {
+                None
+            };
+            let chosen = active_selection
+                .as_ref()
+                .and_then(|selection| {
+                    tier.iter()
+                        .position(|item| item.candidate.active_key_identity() == selection.identity)
+                })
+                .or(sticky_choice)
+                .unwrap_or_else(|| {
+                    let total_weight = tier
+                        .iter()
+                        .map(|item| item.projection.effective_weight_milli)
+                        .sum::<u64>();
+                    let mut point = deterministic_sample % total_weight.max(1);
+                    for (index, item) in tier.iter().enumerate() {
+                        if point < item.projection.effective_weight_milli {
+                            return index;
+                        }
+                        point = point.saturating_sub(item.projection.effective_weight_milli);
                     }
-                    point = point.saturating_sub(projection.effective_weight_milli);
-                }
-                weighted
-            }
-        };
-        let (index, candidate, _, _, _, _) = tier.swap_remove(chosen);
-        let mut route = expanded.route;
-        if let Some(pool_id) = route
-            .target_plan
-            .iter()
-            .find(|entry| candidate.pool_ids.contains(&entry.pool_id))
-            .map(|entry| entry.pool_id.clone())
-        {
+                    0
+                });
+            let item = tier[chosen];
+            let candidate_count = eligible
+                .iter()
+                .map(|item| item.candidate.active_key_identity())
+                .collect::<BTreeSet<_>>()
+                .len()
+                .max(1);
+            let mut route = expanded.route.clone();
             route.pool_id = pool_id;
+            return Ok(V3Target10ConcreteProviderSelected {
+                route,
+                candidate: item.candidate.clone(),
+                occurrence: item.occurrence.clone(),
+                candidate_count,
+                unavailable_candidates: unavailable,
+                attempts: item.index + 1,
+                default_floor_protected: false,
+                active_selection,
+            });
         }
-        Ok(V3Target10ConcreteProviderSelected {
-            route,
-            candidate: candidate.clone(),
-            candidate_count,
-            unavailable_candidates: unavailable,
-            attempts: index + 1,
-            default_floor_protected: false,
+        Err(V3TargetExhaustion {
+            route: Box::new(expanded.route),
+            attempted_candidates: unavailable,
         })
     }
 
@@ -889,10 +1206,12 @@ impl V3TargetInterpreter {
                 target.model.as_deref(),
                 target.key.as_deref(),
                 target.interface.as_deref(),
-                target.priority.unwrap_or(0),
-                target.weight.unwrap_or(1),
-                sample,
-                scope,
+                ExpandProviderOptions {
+                    priority: target.priority.unwrap_or(0),
+                    weight: target.weight.unwrap_or(1),
+                    sample,
+                    scope,
+                },
             ),
             V3RouteTargetKind::Forwarder => self.expand_forwarder(
                 manifest,
@@ -953,10 +1272,12 @@ impl V3TargetInterpreter {
                     target.model.as_deref().or(Some(forwarder.model.as_str())),
                     target.key.as_deref(),
                     target.interface.as_deref(),
-                    target.priority.unwrap_or(0),
-                    target.weight.unwrap_or(1),
-                    sample.wrapping_add(index as u64),
-                    scope.clone(),
+                    ExpandProviderOptions {
+                        priority: target.priority.unwrap_or(0),
+                        weight: target.weight.unwrap_or(1),
+                        sample: sample.wrapping_add(index as u64),
+                        scope: scope.clone(),
+                    },
                 ),
                 V3RouteTargetKind::Forwarder => self.expand_forwarder(
                     manifest,
@@ -989,11 +1310,14 @@ impl V3TargetInterpreter {
         model_id: Option<&str>,
         key: Option<&str>,
         interface_id: Option<&str>,
-        priority: i32,
-        weight: u32,
-        sample: u64,
-        mut scope: V3TargetExpansionScope,
+        options: ExpandProviderOptions,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
+        let ExpandProviderOptions {
+            priority,
+            weight,
+            sample,
+            mut scope,
+        } = options;
         let provider_id = provider_id.ok_or(V3TargetError::ProviderTargetIncomplete)?;
         let provider = manifest
             .providers
@@ -1113,6 +1437,7 @@ impl V3TargetInterpreter {
                     priority,
                     weight: weight.max(1),
                     pool_ids: scope.pool_ids.clone(),
+                    occurrences: Vec::new(),
                     default_pool_member: scope.default_pool_member,
                     path: scope.path.clone(),
                 })
@@ -1166,7 +1491,7 @@ impl V3TargetInterpreter {
             // A forwarder target is not a concrete provider, so it has no
             // sticky identity. Order it deterministically by declared priority
             // and let the concrete provider selection downstream own stickiness.
-            V3SelectionStrategy::Sticky => {
+            V3SelectionStrategy::ActiveQueue | V3SelectionStrategy::Sticky => {
                 order = priority_tier_indices(targets, |target| target.priority)
                     .into_iter()
                     .flatten()
@@ -1178,6 +1503,15 @@ impl V3TargetInterpreter {
 }
 
 impl V3TargetCandidate {
+    pub fn active_key_identity(&self) -> V3ActiveKeyIdentity {
+        V3ActiveKeyIdentity {
+            provider_id: self.provider_id.clone(),
+            interface_id: self.interface_id.clone(),
+            model_id: self.model_id.clone(),
+            auth_alias: self.auth_alias.clone(),
+        }
+    }
+
     pub fn supports_vision(&self) -> bool {
         self.model_capabilities
             .iter()
@@ -1285,13 +1619,13 @@ fn collect_sticky_members(
 /// expansion that produces one candidate per auth entry.
 fn declared_auth_aliases(provider: &V3ProviderManifest, key: Option<&str>) -> Vec<String> {
     match key {
-        Some(key) => provider
-            .auth
-            .entries
-            .iter()
-            .any(|entry| entry.alias == key)
-            .then(|| vec![key.to_string()])
-            .unwrap_or_default(),
+        Some(key) => {
+            if provider.auth.entries.iter().any(|entry| entry.alias == key) {
+                vec![key.to_string()]
+            } else {
+                Vec::new()
+            }
+        }
         None => provider
             .auth
             .entries
@@ -1335,6 +1669,11 @@ fn merge_candidate_route_provenance(
     existing: &mut V3TargetCandidate,
     duplicate: &V3TargetCandidate,
 ) {
+    for occurrence in &duplicate.occurrences {
+        if !existing.occurrences.contains(occurrence) {
+            existing.occurrences.push(occurrence.clone());
+        }
+    }
     for pool_id in &duplicate.pool_ids {
         if !existing.pool_ids.iter().any(|existing| existing == pool_id) {
             existing.pool_ids.push(pool_id.clone());
@@ -1381,11 +1720,10 @@ fn context_window_exceeded_reason(
     candidate: &V3TargetCandidate,
 ) -> Option<String> {
     let max_context_tokens = candidate.max_context_tokens?;
-    let scaled_input_tokens = ((u128::from(request_input_tokens)
-        * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
-        .min(u128::from(u64::MAX)) as u64;
+    let scaled_input_tokens = (u128::from(request_input_tokens)
+        * u128::from(candidate.context_token_estimate_scale_bps))
+    .div_ceil(10_000)
+    .min(u128::from(u64::MAX)) as u64;
     (scaled_input_tokens > max_context_tokens).then(|| {
         format!(
             "{}:{}:{}:context_window_exceeded(input_tokens={},max_context_tokens={})",
@@ -1417,9 +1755,8 @@ fn context_window_near_limit_reason(
 }
 
 fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_tokens: u64) -> u64 {
-    ((u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
+    (u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps))
+        .div_ceil(10_000)
         .min(u128::from(u64::MAX)) as u64
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 
-const PREVIOUS_RELEASE_RESTART_FILE: &str = "previous-release-restart.json";
+pub(crate) const PREVIOUS_RELEASE_RESTART_FILE: &str = "previous-release-restart.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -11,37 +11,34 @@ struct PreviousReleaseRestartTransfer {
     target: V3ManagedInstanceDeclaration,
 }
 
-pub(crate) fn retire_abandoned_previous_release_transfer(
-    state_root: &Path,
+pub(crate) async fn retire_abandoned_previous_release_transfer(
     current_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<(), V3LifecycleError> {
     let path = current_dir.join(PREVIOUS_RELEASE_RESTART_FILE);
-    if !path.try_exists()? {
+    let Some((transfer, previous_dir)) = previous_transfer(current_dir, expected)? else {
+        return Ok(());
+    };
+    if pid_is_alive(transfer.pid.pid) || process_start_token(transfer.pid.pid)?.is_some() {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous-release transfer still has a live or changed owner".into(),
+        ));
+    }
+    if interrupted_legacy_transfer(current_dir, expected)?.is_some()
+        || has_exact_front_control_handoff(current_dir)?
+    {
+        recover_exited_front_control_handoff(current_dir, expected).await?;
         return Ok(());
     }
-    let transfer: PreviousReleaseRestartTransfer = read_json(&path)?;
-    let previous_dir = state_root
-        .join("instances")
-        .join(&transfer.previous.instance_id);
-    if transfer.schema_version != SCHEMA_VERSION
-        || transfer.target != *expected
-        || transfer.previous.schema_version != SCHEMA_VERSION
-        || transfer.pid.schema_version != SCHEMA_VERSION
-        || transfer.previous.instance_id == expected.instance_id
-        || transfer.pid.instance_id != transfer.previous.instance_id
-        || transfer.pid.pid == 0
-        || transfer.pid.start_nonce.is_empty()
-        || transfer
-            .pid
-            .process_start_token
-            .as_deref()
-            .is_none_or(str::is_empty)
-        || !listener_sets_exactly_match(&transfer.previous.listeners, &expected.listeners)
-    {
-        return Err(V3LifecycleError::IdentityMismatch(
-            "refusing to retire invalid previous-release transfer".into(),
-        ));
+    let _lock = acquire_operation_lock(&previous_dir, "recover-control")?;
+    // A dead transfer with no prepared handoffs is the pre-adoption interval.
+    // Never retire it in isolation if a checkpoint still needs disposition.
+    for file in [FRONT_HANDOFF_FILE, PROVIDER_HANDOFF_FILE] {
+        if exclusive_handoff_location(&previous_dir, current_dir, file)?.is_some() {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "previous-release handoff requires verified reconciliation".into(),
+            ));
+        }
     }
     let target_pid_path = current_dir.join("pid.cache");
     if target_pid_path.try_exists()? {
@@ -65,15 +62,13 @@ pub(crate) fn retire_abandoned_previous_release_transfer(
         }
     }
     let previous_path = previous_dir.join("instance.json");
-    if previous_path.try_exists()?
-        && read_json::<V3ManagedInstanceDeclaration>(&previous_path)? != transfer.previous
-    {
+    if read_json::<V3ManagedInstanceDeclaration>(&previous_path)? != transfer.previous {
         return Err(V3LifecycleError::IdentityMismatch(
             "previous declaration differs from abandoned transfer".into(),
         ));
     }
     let pid_path = previous_dir.join("pid.cache");
-    if pid_path.try_exists()? && read_json::<V3ManagedPidCache>(&pid_path)? != transfer.pid {
+    if read_json::<V3ManagedPidCache>(&pid_path)? != transfer.pid {
         return Err(V3LifecycleError::IdentityMismatch(
             "previous PID record differs from abandoned transfer".into(),
         ));
@@ -161,13 +156,7 @@ pub(crate) fn prepare_previous_release_restart_transfer(
     let published: V3ManagedInstanceDeclaration = read_json(&previous_dir.join("instance.json"))?;
     let pid: V3ManagedPidCache = read_json(&previous_dir.join("pid.cache"))?;
     let control: V3ManagedControlRecord = read_json(&previous_dir.join("control.json"))?;
-    if &published != previous
-        || pid.schema_version != SCHEMA_VERSION
-        || control.schema_version != SCHEMA_VERSION
-        || pid.instance_id != previous.instance_id
-        || control.instance_id != previous.instance_id
-        || pid.start_nonce != control.start_nonce
-        || Path::new(&control.socket_path) != managed_control_socket_path(&previous.instance_id)
+    if !managed_control_matches_declaration(previous, &published, &pid, &control)
         || !Path::new(&control.socket_path).exists()
         || pid.process_start_token.is_none()
         || process_start_token(pid.pid)? != pid.process_start_token
@@ -236,59 +225,195 @@ pub(crate) fn bind_previous_release_restart_transfer(
     }))
 }
 
-pub(crate) fn adopt_previous_release_restart_declaration_change(
-    state_root: &Path,
-    current_dir: &Path,
-    expected: &V3ManagedInstanceDeclaration,
-) -> Result<bool, V3LifecycleError> {
-    let path = current_dir.join(PREVIOUS_RELEASE_RESTART_FILE);
-    if !path.try_exists()? {
-        return Ok(false);
+fn previous_transfer(
+    dir: &Path,
+    target: &V3ManagedInstanceDeclaration,
+) -> Result<Option<(PreviousReleaseRestartTransfer, PathBuf)>, V3LifecycleError> {
+    let path = dir.join(PREVIOUS_RELEASE_RESTART_FILE);
+    if !regular_handoff_exists(&path)? {
+        return Ok(None);
     }
     let transfer: PreviousReleaseRestartTransfer = read_json(&path)?;
-    let previous_dir = state_root
-        .join("instances")
-        .join(&transfer.previous.instance_id);
-    let published: V3ManagedInstanceDeclaration = read_json(&previous_dir.join("instance.json"))?;
-    let pid: V3ManagedPidCache = read_json(&previous_dir.join("pid.cache"))?;
-    let status: V3ManagedStatusRecord = read_json(&previous_dir.join("status.json"))?;
+    let id = &transfer.previous.instance_id;
     if transfer.schema_version != SCHEMA_VERSION
-        || &transfer.target != expected
-        || transfer.previous != published
-        || transfer.pid != pid
-        || pid.pid != std::process::id()
-        || pid.process_start_token.is_none()
-        || process_start_token(pid.pid)? != pid.process_start_token
-        || published.instance_id == expected.instance_id
-        || pid.instance_id != published.instance_id
-        || status.instance_id != published.instance_id
+        || transfer.previous.schema_version != SCHEMA_VERSION
+        || transfer.target != *target
+        || id == &target.instance_id
+        || Path::new(id).file_name() != Some(std::ffi::OsStr::new(id))
+        || transfer.pid.schema_version != SCHEMA_VERSION
+        || transfer.pid.instance_id != *id
+        || transfer.pid.pid == 0
+        || transfer.pid.start_nonce.is_empty()
+        || transfer
+            .pid
+            .process_start_token
+            .as_deref()
+            .is_none_or(str::is_empty)
+        || !listener_sets_exactly_match(&transfer.previous.listeners, &target.listeners)
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "invalid previous-release transfer".into(),
+        ));
+    }
+    let previous = dir.with_file_name(id);
+    Ok(Some((transfer, previous)))
+}
+
+// This selector cannot authorize a write. Native staged handoffs already
+// select exact recovery and keep their own independent verification.
+pub(crate) fn interrupted_legacy_transfer(
+    dir: &Path,
+    target: &V3ManagedInstanceDeclaration,
+) -> Result<Option<PathBuf>, V3LifecycleError> {
+    let Some((transfer, previous)) = previous_transfer(dir, target)? else {
+        return Ok(None);
+    };
+    if pid_is_alive(transfer.pid.pid)
+        || regular_handoff_exists(&dir.join(EXEC_RESTART_DECLARATION_FILE))?
+    {
+        return Ok(None);
+    }
+    if has_exact_front_control_handoff(dir)?
+        && regular_handoff_exists(&dir.join("pid.cache"))?
+        && regular_handoff_exists(&dir.join("instance.json"))?
+    {
+        return Ok(None);
+    }
+    for owner in [dir, previous.as_path()] {
+        for file in [FRONT_HANDOFF_FILE, PROVIDER_HANDOFF_FILE] {
+            if regular_handoff_exists(&owner.join(file))? {
+                return Ok(Some(previous.clone()));
+            }
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn normalize_previous_release_handoff(
+    dir: &Path,
+    target: &V3ManagedInstanceDeclaration,
+    live_exec: bool,
+) -> Result<Option<ManagedFrontControlHandoff>, V3LifecycleError> {
+    let Some((transfer, previous)) = previous_transfer(dir, target)? else {
+        return Ok(None);
+    };
+    let origin = transfer.pid;
+    let status: V3ManagedStatusRecord = read_json(&previous.join("status.json"))?;
+    let token = process_start_token(origin.pid)?;
+    let right_process = if live_exec {
+        origin.pid == std::process::id() && token == origin.process_start_token
+    } else {
+        !pid_is_alive(origin.pid) && token.is_none()
+    };
+    if !right_process
+        || read_json::<V3ManagedInstanceDeclaration>(&previous.join("instance.json"))?
+            != transfer.previous
+        || read_json::<V3ManagedPidCache>(&previous.join("pid.cache"))? != origin
+        || status.instance_id != origin.instance_id
         || status.state != V3ManagedRunState::Starting
-        || !listener_sets_exactly_match(&published.listeners, &expected.listeners)
-        || previous_dir.join("control.json").try_exists()?
-        || managed_control_socket_path(&published.instance_id).try_exists()?
-        || current_dir.join("pid.cache").try_exists()?
-        || current_dir.join("control.json").try_exists()?
-        || current_dir
-            .join(EXEC_RESTART_DECLARATION_FILE)
-            .try_exists()?
+        || (live_exec
+            && (regular_handoff_exists(&previous.join("control.json"))?
+                || managed_control_socket_path(&origin.instance_id).try_exists()?))
+        || regular_handoff_exists(&dir.join("control.json"))?
+        || regular_handoff_exists(&dir.join(EXEC_RESTART_DECLARATION_FILE))?
+        || (regular_handoff_exists(&dir.join("instance.json"))?
+            && read_json::<V3ManagedInstanceDeclaration>(&dir.join("instance.json"))? != *target)
+        || (regular_handoff_exists(&dir.join("status.json"))?
+            && read_json::<V3ManagedStatusRecord>(&dir.join("status.json"))?.instance_id
+                != target.instance_id)
     {
         return Err(V3LifecycleError::IdentityMismatch(
             "previous-release exec transfer does not match the exact replacement process".into(),
         ));
     }
-    let _: Vec<serde_json::Value> = read_json(&previous_dir.join(FRONT_HANDOFF_FILE))?;
-    let _: Vec<routecodex_v3_provider_responses::V3ProviderTransportCheckpoint> =
-        read_json(&previous_dir.join(PROVIDER_HANDOFF_FILE))?;
-    for file in [FRONT_HANDOFF_FILE, PROVIDER_HANDOFF_FILE] {
-        if current_dir.join(file).try_exists()? {
+    let front =
+        exclusive_handoff_location(&previous, dir, FRONT_HANDOFF_FILE)?.ok_or_else(|| {
+            V3LifecycleError::IdentityMismatch("missing previous-release front".into())
+        })?;
+    let provider =
+        exclusive_handoff_location(&previous, dir, PROVIDER_HANDOFF_FILE)?.ok_or_else(|| {
+            V3LifecycleError::IdentityMismatch(
+                "missing previous-release provider checkpoint".into(),
+            )
+        })?;
+    validate_transition_records(&previous, &transfer.previous, &origin, target)?;
+    if (live_exec && (front.parent() != Some(&previous) || provider.parent() != Some(&previous)))
+        || (front.parent() == Some(&previous) && provider.parent() != Some(&previous))
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous-release target handoff already exists".into(),
+        ));
+    }
+    // Before adoption both arrays belong to the old handler. A partial fresh
+    // invocation may already have normalized the target front.
+    if live_exec {
+        let _: Vec<routecodex_v3_provider_responses::V3ProviderTransportCheckpoint> =
+            read_json(&provider)?;
+    }
+    let target_front = dir.join(FRONT_HANDOFF_FILE);
+    let handoff = if front == target_front && has_exact_front_control_handoff(dir)? {
+        let existing: ManagedFrontControlHandoff = read_json(&front)?;
+        if existing.origin != origin
+            || existing.declaration != *target
+            || !existing.controls.is_empty()
+        {
             return Err(V3LifecycleError::IdentityMismatch(
-                "previous-release target handoff already exists".into(),
+                "previous-release front identity differs".into(),
             ));
         }
+        existing
+    } else {
+        ManagedFrontControlHandoff {
+            declaration: target.clone(),
+            origin,
+            checkpoints: read_json(&front)?,
+            controls: Default::default(),
+        }
+    };
+    let cache = dir.join("pid.cache");
+    if regular_handoff_exists(&cache)?
+        && (live_exec
+            || !cache_authorizes_control_origin(&read_json(&cache)?, &handoff.origin, target))
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous-release target PID cache differs".into(),
+        ));
     }
-    finish_exec_restart_adoption(&previous_dir, current_dir, &published, expected, None)?;
-    fs::remove_file(path)?;
-    Ok(true)
+    if front != target_front {
+        fs::rename(front, &target_front)?;
+    }
+    write_json_atomic(&target_front, &handoff)?;
+    if !live_exec {
+        write_json_atomic(&dir.join("instance.json"), target)?;
+        if !regular_handoff_exists(&cache)? {
+            let successor = V3ManagedPidCache {
+                instance_id: target.instance_id.clone(),
+                retained_control: Some(handoff.link()),
+                ..handoff.origin.clone()
+            };
+            write_json_atomic(&cache, &successor)?;
+        }
+    }
+    Ok(Some(handoff))
+}
+
+pub(crate) fn adopt_previous_release_restart_declaration_change(
+    current_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+    handoff: &ManagedFrontControlHandoff,
+    successor: &V3ManagedPidCache,
+) -> Result<(), V3LifecycleError> {
+    let previous = current_dir.with_file_name(&handoff.origin.instance_id);
+    let published = read_json(&previous.join("instance.json"))?;
+    write_json_atomic(&current_dir.join("pid.cache"), successor)?;
+    finish_exec_restart_adoption(
+        &previous,
+        current_dir,
+        &published,
+        &handoff.origin,
+        expected,
+        None,
+    )
 }
 
 fn listener_sets_overlap(
@@ -461,6 +586,7 @@ pub(crate) fn adopt_exec_restart_declaration_change(
     current_instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
     owner: &ExecRestartOwner,
+    successor: &V3ManagedPidCache,
 ) -> Result<PathBuf, V3LifecycleError> {
     let previous_instance_dir = state_root.join("instances").join(&owner.instance_id);
     let previous_declaration: V3ManagedInstanceDeclaration =
@@ -488,45 +614,97 @@ pub(crate) fn adopt_exec_restart_declaration_change(
             "prepared restart declaration does not match replacement image".into(),
         ));
     }
+    validate_transition_records(
+        &previous_instance_dir,
+        &previous_declaration,
+        &pid,
+        expected,
+    )?;
+    if previous_instance_dir != current_instance_dir
+        && regular_handoff_exists(&current_instance_dir.join("pid.cache"))?
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "restart target already has a PID cache".into(),
+        ));
+    }
+    write_json_atomic(&current_instance_dir.join("pid.cache"), successor)?;
     finish_exec_restart_adoption(
         &previous_instance_dir,
         current_instance_dir,
         &previous_declaration,
+        &pid,
         expected,
         Some(&staged_declaration),
     )?;
-    let transfer_path = current_instance_dir.join(PREVIOUS_RELEASE_RESTART_FILE);
-    if transfer_path.try_exists()? {
-        let transfer: PreviousReleaseRestartTransfer = read_json(&transfer_path)?;
-        if transfer.previous != previous_declaration
-            || transfer.pid != pid
-            || &transfer.target != expected
-        {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "current exec transfer changed".into(),
-            ));
-        }
-        fs::remove_file(transfer_path)?;
-    }
     Ok(previous_instance_dir)
+}
+
+pub(crate) fn close_verified_restart_transfer(
+    dir: &Path,
+    previous: &V3ManagedInstanceDeclaration,
+    pid: &V3ManagedPidCache,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    if let Some(path) = verify_restart_transfer(dir, previous, pid, expected)? {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_restart_transfer(
+    current_instance_dir: &Path,
+    previous: &V3ManagedInstanceDeclaration,
+    pid: &V3ManagedPidCache,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<Option<PathBuf>, V3LifecycleError> {
+    let transfer_path = current_instance_dir.join(PREVIOUS_RELEASE_RESTART_FILE);
+    match fs::symlink_metadata(&transfer_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+        Ok(metadata) if !metadata.is_file() => Err(V3LifecycleError::IdentityMismatch(
+            "current exec transfer is not a regular file".into(),
+        )),
+        Ok(_) => {
+            let transfer: PreviousReleaseRestartTransfer = read_json(&transfer_path)?;
+            if transfer.schema_version != SCHEMA_VERSION
+                || &transfer.previous != previous
+                || &transfer.pid != pid
+                || &transfer.target != expected
+            {
+                return Err(V3LifecycleError::IdentityMismatch(
+                    "current exec transfer changed".into(),
+                ));
+            }
+            Ok(Some(transfer_path))
+        }
+    }
 }
 
 fn finish_exec_restart_adoption(
     previous_instance_dir: &Path,
     current_instance_dir: &Path,
     previous_declaration: &V3ManagedInstanceDeclaration,
+    previous_pid: &V3ManagedPidCache,
     expected: &V3ManagedInstanceDeclaration,
     staged_declaration: Option<&Path>,
 ) -> Result<(), V3LifecycleError> {
     ensure_private_dir(current_instance_dir)?;
     V3HooksSidecarSupervisor::retain_exec_owner(previous_instance_dir, current_instance_dir)?;
     if previous_instance_dir != current_instance_dir {
-        for file in [FRONT_HANDOFF_FILE, PROVIDER_HANDOFF_FILE] {
-            fs::rename(
-                previous_instance_dir.join(file),
-                current_instance_dir.join(file),
-            )?;
+        if exclusive_handoff_location(
+            previous_instance_dir,
+            current_instance_dir,
+            PROVIDER_HANDOFF_FILE,
+        )? != Some(previous_instance_dir.join(PROVIDER_HANDOFF_FILE))
+        {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "provider handoff must be at the verified predecessor".into(),
+            ));
         }
+        fs::rename(
+            previous_instance_dir.join(PROVIDER_HANDOFF_FILE),
+            current_instance_dir.join(PROVIDER_HANDOFF_FILE),
+        )?;
     }
     if let Some(staged_declaration) = staged_declaration {
         fs::rename(
@@ -544,6 +722,12 @@ fn finish_exec_restart_adoption(
             "exec restart adopted changed declaration from {}",
             previous_declaration.instance_id
         )),
+    )?;
+    close_verified_restart_transfer(
+        current_instance_dir,
+        previous_declaration,
+        previous_pid,
+        expected,
     )?;
     if previous_instance_dir != current_instance_dir {
         cleanup_previous_exec_restart_owner(previous_instance_dir, previous_declaration, expected)?;
@@ -580,12 +764,12 @@ pub(crate) fn cleanup_previous_exec_restart_owner(
             fs::remove_file(socket_path)?;
         }
         fs::remove_file(control_path)?;
+    } else {
+        reap_unowned_managed_control_socket(previous_instance_dir, previous)?;
     }
-    for file in ["pid.cache", RESTART_PLAN_FILE] {
-        let path = previous_instance_dir.join(file);
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
+    let front = previous_instance_dir.join(FRONT_HANDOFF_FILE);
+    if regular_handoff_exists(&front)? {
+        fs::remove_file(front)?;
     }
     write_status(
         previous_instance_dir,
@@ -596,5 +780,11 @@ pub(crate) fn cleanup_previous_exec_restart_owner(
             expected.instance_id
         )),
     )?;
+    for file in [RESTART_PLAN_FILE, "pid.cache"] {
+        let path = previous_instance_dir.join(file);
+        if regular_handoff_exists(&path)? {
+            fs::remove_file(path)?;
+        }
+    }
     Ok(())
 }

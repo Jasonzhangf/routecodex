@@ -68,7 +68,7 @@ fn classify_provider_probe_failure(
     eprintln!(
         "provider health probe error: provider={} status={} class={}",
         probe_provider_id,
-        status.map_or(0, |value| value),
+        status.unwrap_or(0),
         classified.class,
     );
     let action = apply_v3_internal_provider_failure_policy(

@@ -627,6 +627,7 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
         &mut projected,
         target_protocol,
         preserve_responses_custom_tools,
+        &mut drops,
     )?;
     Ok((projected, drops))
 }
@@ -677,6 +678,7 @@ fn apply_outbound_projection_transforms(
     projected: &mut Value,
     target_protocol: V3OutboundTargetProtocol,
     preserve_responses_custom_tools: bool,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
@@ -689,7 +691,7 @@ fn apply_outbound_projection_transforms(
         }
         V3OutboundTargetProtocol::OpenAiChat => {
             project_responses_request_chat_extension_to_openai_chat(projected)?;
-            project_openai_client_metadata_to_metadata(projected, "openai_chat")?;
+            project_openai_client_metadata_to_metadata(projected, "openai_chat", drops)?;
             validate_openai_metadata(projected, "openai_chat")?;
             project_openai_chat_reasoning_summary_policy(projected)?;
             project_openai_chat_reasoning_context_policy(projected)?;
@@ -1144,7 +1146,7 @@ fn project_openai_responses_reasoning_extensions_to_reasoning(
     Ok(())
 }
 
-fn json_path_child(parent: &str, key: &str) -> String {
+pub(super) fn json_path_child(parent: &str, key: &str) -> String {
     // An empty key must take the quoted branch: the bare form would render as
     // `$.`, which the path reader rejects, so the drop would be recorded
     // without ever being removed from the wire.
@@ -1189,6 +1191,10 @@ pub(crate) fn build_responses_input_from_chat_messages(
     messages: &[Value],
 ) -> Result<Value, String> {
     let mut output = Vec::new();
+    let source_order = |item: &Value| {
+        item.pointer("/routecodex_chat_extension/responses_tool_input_order")
+            .and_then(Value::as_u64)
+    };
     for message in messages {
         let Some(row) = message.as_object() else {
             continue;
@@ -1204,27 +1210,27 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 .is_some()
         {
             if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
-                output.push(item);
+                output.push((source_order(message), item));
             }
             continue;
         }
         if role.eq_ignore_ascii_case("assistant") {
             if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row)? {
                 match reasoning {
-                    Value::Array(reasoning_items) => output.extend(reasoning_items),
-                    reasoning_item => output.push(reasoning_item),
+                    Value::Array(reasoning_items) => {
+                        output.extend(reasoning_items.into_iter().map(|item| (None, item)))
+                    }
+                    reasoning_item => output.push((None, reasoning_item)),
                 }
             }
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                let items = tool_calls
-                    .iter()
-                    .map(chat_tool_call_to_responses_input_item)
-                    .collect::<Result<Vec<Option<Value>>, String>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<Value>>();
-                if !items.is_empty() {
-                    output.extend(items);
+                let start = output.len();
+                for call in tool_calls {
+                    if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
+                        output.push((source_order(call), item));
+                    }
+                }
+                if output.len() != start {
                     continue;
                 }
             }
@@ -1234,16 +1240,26 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .map(|content| chat_content_to_responses_content(content, role))
             .transpose()?
             .unwrap_or_else(|| Value::Array(Vec::new()));
-        output.push(Value::Object(Map::from_iter([
-            ("type".to_string(), Value::String("message".to_string())),
-            (
-                "role".to_string(),
-                Value::String(if role.is_empty() { "user" } else { role }.to_string()),
-            ),
-            ("content".to_string(), content),
-        ])));
+        output.push((
+            None,
+            Value::Object(Map::from_iter([
+                ("type".to_string(), Value::String("message".to_string())),
+                (
+                    "role".to_string(),
+                    Value::String(if role.is_empty() { "user" } else { role }.to_string()),
+                ),
+                ("content".to_string(), content),
+            ])),
+        ));
     }
-    Ok(Value::Array(output))
+    // Canonical Chat groups pending calls, while Responses represents separate
+    // items. Restore their source order within each native tool-item run.
+    for group in output.chunk_by_mut(|left, right| left.0.is_some() && right.0.is_some()) {
+        group.sort_by_key(|(order, _)| *order);
+    }
+    Ok(Value::Array(
+        output.into_iter().map(|(_, item)| item).collect(),
+    ))
 }
 
 fn chat_assistant_reasoning_to_responses_input_item(

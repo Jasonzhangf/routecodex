@@ -102,7 +102,7 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
         routecodex_v3_error::V3Error06ClientProjected,
         routecodex_v3_runtime::V3RelayErrorOperatorFault,
     >,
-) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Box<Response<Body>>> {
     let projected = match projected {
         Ok(projected) => projected,
         Err(fault) => {
@@ -112,8 +112,8 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 path,
                 request_id,
                 &[],
-                Some(&fault.policy_failure),
-                fault.original_source.as_ref(),
+                Some(fault.policy_failure.as_ref()),
+                fault.original_source.as_deref(),
             );
             // The Error06 projection operator itself failed, so there is no
             // projected chain to carry; the typed policy source still names the
@@ -131,13 +131,13 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 None,
                 false,
             );
-            return Err(provider_terminal_response(
+            return Err(Box::new(provider_terminal_response(
                 state,
                 front_connection_identity,
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                 requested_stream,
                 terminal_evidence,
-            ));
+            )));
         }
     };
     Ok(projected)
@@ -349,6 +349,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             state.provider_health.runtime_health(),
             current_epoch_ms(),
             image_history,
+            state.active_keys.clone(),
         )
         .await;
         let plan = match plan_result {
@@ -369,7 +370,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     project_v3_protocol_execution_plan_failure(failure),
                 ) {
                     Ok(projected) => projected,
-                    Err(response) => return response,
+                    Err(response) => return *response,
                 };
                 if projected.pool_exhausted {
                     // A selection-time pool exhaustion is a provider terminal:
@@ -557,6 +558,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     plan.relay_runtime_seeds()
                 });
                 seeds.request_execution_control = responses_request_execution_control.clone();
+                seeds.request_purpose = Some(request_purpose);
                 seeds.client_identity_headers = responses_client_identity_headers(&request_headers);
                 seeds
             },
@@ -739,7 +741,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                         None => response,
                     };
                 }
-                V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
+                V3ResponsesDirectServerOutcome::RelayOutput(relay_output) => {
                     if let Some(disposition) = relay_output.terminal_disposition.clone() {
                         // Same entry, same defect as the branch below: a
                         // provider terminal disposition bypasses the relay
@@ -1437,7 +1439,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 &console_payload,
             );
             let output =
-                match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+                match routecodex_v3_runtime::execute_v3_openai_chat_relay_runtime_with_active_keys(
                     &state.manifest,
                     V3OpenAiChatRelayRuntimeInput {
                         server_id: state.server.id.clone(),
@@ -1446,7 +1448,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                         payload: payload.clone(),
                     },
                     state.provider_health.runtime_health(),
-                    V3HubExecutionMode::Relay,
+                    state.active_keys.clone(),
                 )
                 .await
                 {
@@ -1567,22 +1569,24 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     );
                 }
             };
-            let output = match execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
-                &state.manifest,
-                V3AnthropicRelayRuntimeInput {
-                    server_id: state.server.id.clone(),
-                    failure_session_scope: provider_failure_session_scope.clone(),
-                    request_id: request_id.clone(),
-                    payload: payload.clone(),
-                },
-                client_headers,
-                state.provider_health.runtime_health(),
-            )
-            .await
-            {
-                Ok(output) => output,
-                Err(error) => project_v3_anthropic_relay_runtime_failure(error),
-            };
+            let output =
+                match routecodex_v3_runtime::execute_v3_anthropic_relay_runtime_with_active_keys(
+                    &state.manifest,
+                    V3AnthropicRelayRuntimeInput {
+                        server_id: state.server.id.clone(),
+                        failure_session_scope: provider_failure_session_scope.clone(),
+                        request_id: request_id.clone(),
+                        payload: payload.clone(),
+                    },
+                    client_headers,
+                    state.provider_health.runtime_health(),
+                    state.active_keys.clone(),
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(error) => project_v3_anthropic_relay_runtime_failure(error),
+                };
             persist_v3_anthropic_relay_failure_evidence(state, &path, &request_id, &output);
             if let Some(disposition) = output.terminal_disposition.clone() {
                 record_v3_provider_terminal_request_row(
@@ -1696,7 +1700,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
         }
         if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
             let mut output =
-                match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
+                match routecodex_v3_runtime::execute_v3_gemini_relay_runtime_with_active_keys(
                     &state.manifest,
                     V3GeminiRelayRuntimeInput {
                         server_id: state.server.id.clone(),
@@ -1706,6 +1710,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                         payload: payload.clone(),
                     },
                     state.provider_health.runtime_health(),
+                    state.active_keys.clone(),
                 )
                 .await
                 {

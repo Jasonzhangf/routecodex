@@ -271,7 +271,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
         })?;
     let mut terminal_seen = false;
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let mut has_business_content;
+    let has_business_content;
     while let Some(frame) = stream.next().await {
         // The attempt is complete at the protocol terminal.  A provider
         // transport error or an unterminated tail after the terminal is
@@ -297,7 +297,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
             ));
         }
         let frame = frame.bytes;
-        has_business_content = direct_sse_chunk_has_business_content(
+        direct_sse_chunk_has_business_content(
             provider_protocol,
             &frame,
             &mut business_decoder,
@@ -872,8 +872,12 @@ pub(crate) struct V3DirectSseGovernedFacts {
 /// provider observation is a bounded diagnostic (2 MiB) that also predates
 /// governance, so a harvested tool call never appears there and a long stream
 /// loses its terminal. The sealed frames are the governed client projection.
-pub(crate) fn inspect_direct_sse_governed_frames(frames: &[Vec<u8>]) -> V3DirectSseGovernedFacts {
+pub(crate) fn inspect_direct_sse_governed_frames(
+    frames: &[Vec<u8>],
+    observation: Option<&V3RuntimeStreamObservation>,
+) -> V3DirectSseGovernedFacts {
     let mut facts = V3DirectSseGovernedFacts::default();
+    let mut completed_terminal = None;
     for segment in split_direct_sse_committed_chunks(frames) {
         let Some(value) = segment.value.as_ref() else {
             continue;
@@ -899,9 +903,26 @@ pub(crate) fn inspect_direct_sse_governed_frames(frames: &[Vec<u8>]) -> V3Direct
             "response.done" => matches!(status, Some("completed") | Some("done")),
             _ => false,
         };
+        if facts.response_completed {
+            completed_terminal = Some(value.clone());
+        }
         if let Some(response) = value.get("response") {
             facts.tool_calls = crate::hub_v1::collect_v3_governed_response_tool_calls(response);
             facts.finalized_response = Some(response.clone());
+        }
+    }
+    if let Some(observation) = observation {
+        let inferred = completed_terminal
+            .as_ref()
+            .and_then(crate::hub_v1::v3_direct_responses_inferred_finish_reason);
+        if let Err(error) = observation.record_direct_responses_finish_reason(
+            None,
+            inferred,
+            facts.response_completed,
+        ) {
+            let _ = observation.record_observation_error(&format!(
+                "governed Direct finish reason observation failed: {error}"
+            ));
         }
     }
     facts
@@ -1122,7 +1143,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     dsml_context: &crate::direct_response_hooks::V3DirectDsmlContext,
     namespace_tool_identities: provider_compat_core::namespace_identity::NamespaceToolAliases,
     hook_registry: &V3HookRegistry,
-    failure_session_scope: &V3ProviderFailureSessionScope,
+    _failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
@@ -1256,7 +1277,11 @@ fn record_direct_sse_provider_event_json_chunk(
                 ));
             }
         };
-        record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
+        record_direct_sse_provider_event_json_frame(
+            frame.frame().fields(),
+            stream_observation,
+            provider_protocol,
+        )?;
         if frame_disposition == V3SseFrameDisposition::SemanticTerminal
             && !stream_observation
                 .has_semantic_terminal()
@@ -1309,13 +1334,14 @@ fn record_direct_sse_provider_event_json_chunk(
 fn record_direct_sse_provider_event_json_frame(
     fields: &[SseField],
     stream_observation: &V3RuntimeStreamObservation,
+    provider_protocol: V3HubProviderWireProtocol,
 ) -> crate::shared::V3DirectSourceResult<()> {
     let data = collect_v3_provider_sse_json_data(fields);
     if is_v3_provider_sse_keepalive_text(&data) {
         return Ok(());
     }
     record_direct_sse_source_summary_fact(&data, stream_observation);
-    record_v3_provider_sse_json_frame(fields, stream_observation)
+    record_v3_provider_sse_json_frame_for_protocol(fields, stream_observation, provider_protocol)
         .map_err(provider_sse_failure_source)
 }
 
@@ -1573,8 +1599,8 @@ pub(crate) fn operator_fault_output_with_observability_and_snapshots(
     V3ResponsesDirectRuntimeOutput {
         observability,
         terminal_disposition: Some(V3ProviderTerminalDisposition::NoResponse),
-        diagnostic_source: Some(fault.policy_failure),
-        diagnostic_cause: fault.original_source,
+        diagnostic_source: Some(*fault.policy_failure),
+        diagnostic_cause: fault.original_source.map(|s| *s),
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1681,8 +1707,8 @@ pub(crate) fn policy_failure_output_with_observability(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
     sdk_runtime_fault_output_with_observability_and_snapshots(
-        failure.original_source,
-        failure.policy_failure,
+        *failure.original_source,
+        *failure.policy_failure,
         last_external_http,
         node_trace,
         observability,
@@ -1698,9 +1724,16 @@ pub(crate) fn target_exhausted_output_with_observability(
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let disposition = match &source {
+        Ok(actual) => {
+            V3ErrorHandlingCenter::provider_terminal_disposition_for_source(actual, true, witness)
+        }
+        Err(_) => witness
+            .map(V3ProviderTerminalDisposition::ExternalHttp)
+            .unwrap_or(V3ProviderTerminalDisposition::NoResponse),
+    };
     let mut output = match source {
         Ok(source) => {
-            assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
             error_output_with_observability(source, node_trace, hook_registry, observability)
         }
         Err(fault) => operator_fault_output_with_observability_and_snapshots(
@@ -1711,10 +1744,7 @@ pub(crate) fn target_exhausted_output_with_observability(
             None,
         ),
     };
-    output.terminal_disposition = Some(match witness {
-        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-        None => V3ProviderTerminalDisposition::NoResponse,
-    });
+    output.terminal_disposition = Some(disposition);
     output
 }
 
@@ -1967,6 +1997,7 @@ fn sdk_runtime_fault_output_with_observability_and_snapshots(
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
+    use routecodex_v3_error::{V3Error05RecoveryAdmissionWitness, V3ErrorHandlingCenterInput};
 
     #[test]
     fn seeded_direct_source_fault_retains_prior_http_witness_and_original_cause() {
@@ -1990,8 +2021,8 @@ mod target_exhaustion_disposition_tests {
         let output = source_failure_output(
             Err(
                 crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-                    policy_failure: policy_failure.clone(),
-                    original_source: Some(original.clone()),
+                    policy_failure: Box::new(policy_failure.clone()),
+                    original_source: Some(Box::new(original.clone())),
                 },
             ),
             Some(witness.clone()),
@@ -2072,8 +2103,8 @@ mod target_exhaustion_disposition_tests {
             "Error01 operator failed",
         );
         let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-            policy_failure: policy_failure.clone(),
-            original_source: Some(original.clone()),
+            policy_failure: Box::new(policy_failure.clone()),
+            original_source: Some(Box::new(original.clone())),
         };
         let witness = V3ExternalHttpWitness::new(
             429,
@@ -2438,6 +2469,7 @@ pub(crate) fn relay_handoff_output(
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     observability_accumulator: V3RuntimeObservabilityAccumulator,
     request_execution_control: V3RequestExecutionControl,
+    active_keys: Option<std::sync::Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability: None,
@@ -2460,6 +2492,7 @@ pub(crate) fn relay_handoff_output(
         node_trace: node_trace.clone(),
         error_chain: None,
         protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
+            active_keys,
             target,
             expanded,
             request_local_excluded_candidates,

@@ -153,7 +153,13 @@ fn late_probe_outcomes_cannot_release_replacement_or_sibling_owners() {
             ("sibling", "alternate", "k", "m"),
         ] {
             store
-                .add_cooldown_entry_for_interface(p, i, Some(k), Some(m), "probe", 60_000, 100)
+                .add_cooldown_entry_for_interface(
+                    V3ProviderIdentityRef::new(p, Some(k), Some(m)),
+                    i,
+                    "probe",
+                    60_000,
+                    100,
+                )
                 .unwrap();
             siblings.push(
                 store
@@ -200,10 +206,8 @@ fn probe_acquisition_exhaustion_is_explicit_without_owning_or_reusing() {
     let store = V3ProviderHealthStore::default();
     store
         .add_cooldown_entry_for_interface(
-            "p",
+            V3ProviderIdentityRef::new("p", Some("k"), Some("m")),
             "default",
-            Some("k"),
-            Some("m"),
             "probe",
             60_000,
             100,
@@ -222,10 +226,8 @@ fn probe_acquisition_is_not_reused_after_cooldown_removal() {
     let store = V3ProviderHealthStore::default();
     store
         .add_cooldown_entry_for_interface(
-            "p",
+            V3ProviderIdentityRef::new("p", Some("k"), Some("m")),
             "default",
-            Some("k"),
-            Some("m"),
             "probe",
             60_000,
             100,
@@ -242,10 +244,8 @@ fn probe_acquisition_is_not_reused_after_cooldown_removal() {
         .unwrap();
     store
         .add_cooldown_entry_for_interface(
-            "p",
+            V3ProviderIdentityRef::new("p", Some("k"), Some("m")),
             "default",
-            Some("k"),
-            Some("m"),
             "probe",
             60_000,
             200,
@@ -1282,3 +1282,4 @@ fn concurrency_budget_is_shared_across_interfaces() {
             .available
     );
 }
+use crate::provider_identity::V3ProviderIdentityRef;

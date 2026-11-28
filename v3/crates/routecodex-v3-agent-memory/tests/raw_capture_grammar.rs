@@ -255,7 +255,7 @@ fn chat_completion_with_memory_captures_chat_response() {
     assert_eq!(report.captured.len(), 1);
     assert_eq!(
         strip_memory_envelope_from_text(
-            &body["choices"][0]["message"]["content"].as_str().unwrap(),
+            body["choices"][0]["message"]["content"].as_str().unwrap(),
             &report
         ),
         "Preceeding chat answer."
@@ -324,8 +324,8 @@ fn long_host_id_and_source_remain_collision_resistant_after_typed_identity() {
     ];
     let envelope_str = serde_json::to_string(&json!({"memory": {"entries": entries}})).unwrap();
     let body = json!({"status": "completed", "output": [
-        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": format!("{envelope_str}")}]},
-        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": format!("{envelope_str}")}]}
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": envelope_str.to_string()}]},
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": envelope_str.to_string()}]}
     ]});
     let report = capture_responses_json(&body, &long, "sample/long-host").unwrap();
     assert_eq!(report.captured.len(), 4);
@@ -363,8 +363,8 @@ fn response_level_byte_budget_spans_output_parts() {
     ]}}))
     .unwrap();
     let body = json!({"status": "completed", "output": [
-        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": format!("{envelope_str}")}]},
-        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": format!("{envelope_str}")}]}
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": envelope_str.to_string()}]},
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": envelope_str.to_string()}]}
     ]});
     let report = capture_responses_json(&body, &host_id(), "sample/response-bytes").unwrap();
     assert!(report.captured.len() < 16);

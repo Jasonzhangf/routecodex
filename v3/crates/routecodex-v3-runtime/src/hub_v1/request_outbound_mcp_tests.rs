@@ -1095,6 +1095,7 @@ fn project_namespace_history(
         oauth_declaration: None,
         required_capabilities: Vec::new(),
         pool_ids: vec!["test".into()],
+        occurrences: vec![routecodex_v3_target::V3TargetOccurrence { pool_id: "test".into(), tier_index: 0, plan_index: 0 }],
         default_pool_member: false,
         path: vec!["provider".into()],
     };

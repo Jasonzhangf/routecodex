@@ -1,4 +1,8 @@
 use super::request_outbound_format::{
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
+    build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_responses_standard_request_for_selected_target,
+    build_v3_openai_responses_standard_request_from_chat_canonical,
     project_outbound_payload_for_target_protocol, V3OutboundTargetProtocol,
 };
 use super::*;
@@ -293,6 +297,11 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "test".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: false,
             path: vec!["provider".into()],
         },
@@ -375,6 +384,11 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "test".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: false,
             path: vec!["provider".into()],
         },
@@ -456,6 +470,11 @@ fn provider_req_compat_loads_selected_target_profile() {
             oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
+            occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "test".into(),
+                tier_index: 0,
+                plan_index: 0,
+            }],
             default_pool_member: false,
             path: vec!["provider".into()],
         },
@@ -867,7 +886,7 @@ fn responses_reasoning_summary_survives_chat_canonical_round_trip_before_tool_ou
 
 fn v3_output_cap_test_candidate(
     provider_type: &'static str,
-    entry_protocol: V3HubEntryProtocol,
+    _entry_protocol: V3HubEntryProtocol,
     declared_max_tokens: Option<u64>,
 ) -> routecodex_v3_target::V3TargetCandidate {
     routecodex_v3_target::V3TargetCandidate {
@@ -906,6 +925,11 @@ fn v3_output_cap_test_candidate(
         oauth_declaration: None,
         required_capabilities: Vec::new(),
         pool_ids: vec!["test".into()],
+        occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+            pool_id: "test".into(),
+            tier_index: 0,
+            plan_index: 0,
+        }],
         default_pool_member: false,
         path: vec!["provider".into()],
     }
@@ -1008,7 +1032,7 @@ fn provider_req_compat_keeps_client_output_cap_over_declared_cap() {
     // Every Responses alias a client can send must win over the declared cap and
     // must not be joined by a second alias.
     for alias in ["max_output_tokens", "max_completion_tokens", "max_tokens"] {
-        let client_payload = serde_json::Map::new();
+        let _client_payload = serde_json::Map::new();
         let mut client_payload = json!({"messages":[{"role":"user","content":"hi"}]});
         client_payload[alias] = json!(64);
         let wire = project_v3_output_cap_wire(
@@ -1079,7 +1103,7 @@ fn provider_req_compat_does_not_inject_output_cap_without_declaration() {
         );
         for field in protocol.1 {
             assert!(
-                wire.get(&field).is_none(),
+                wire.get(field).is_none(),
                 "no provider-declared cap means no injected {field} on {:?} wire: {wire}",
                 protocol.0
             );

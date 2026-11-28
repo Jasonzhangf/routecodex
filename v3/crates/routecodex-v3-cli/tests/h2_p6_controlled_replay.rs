@@ -1112,6 +1112,10 @@ fn write_h2_config(
         .tempdir()
         .unwrap();
     let path = config_dir.path().join("config.h2.toml");
+    let exhausted_execution = format!(
+        "{}\n[servers.h2_exhausted.execution.attempt_store]\nresidence_timeout_ms = 6000\n",
+        hub_v1_server_execution("h2_exhausted")
+    );
     fs::write(
         &path,
         format!(
@@ -1274,7 +1278,7 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
             // 429. Declare a finite recovery budget rather than relying on the
             // retired immediate-exhaustion behavior. Six seconds permits the
             // declared five-second cross-provider action gate to reach B once.
-            exhausted_execution = format!("{}\n[servers.h2_exhausted.execution.attempt_store]\nresidence_timeout_ms = 6000\n", hub_v1_server_execution("h2_exhausted")),
+            exhausted_execution = exhausted_execution,
         ),
     )
     .unwrap();
@@ -1302,9 +1306,9 @@ fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
         // sandbox denies the real `$HOME/.rcc/codex-samples` retention lock, and
         // a scoped child must not touch shared user state.
         .env("HOME", temp_dir)
-        .env("TMPDIR", &temp_dir)
-        .env("TMP", &temp_dir)
-        .env("TEMP", &temp_dir)
+        .env("TMPDIR", temp_dir)
+        .env("TMP", temp_dir)
+        .env("TEMP", temp_dir)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

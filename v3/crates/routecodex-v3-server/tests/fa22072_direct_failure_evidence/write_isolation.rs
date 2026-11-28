@@ -323,6 +323,7 @@ async fn run_direct_case(block: bool, stream: bool, label: &str) -> (Vec<String>
     if block {
         let rid = request_id.as_deref().unwrap_or_default();
         let matching: Vec<_> = failures
+            .codex_sample_persist_failures
             .iter()
             .filter(|failure| failure.request_id == rid && failure.file_name == FAILED_ATTEMPT_FILE)
             .collect();
@@ -337,7 +338,9 @@ async fn run_direct_case(block: bool, stream: bool, label: &str) -> (Vec<String>
                 "{label}: the filesystem failure reason must be non-empty (ledger={failures:?})"
             ));
         }
-        if failures.len() != matching.len() {
+        if failures.codex_sample_persist_failures.len() != matching.len()
+            || !failures.control_cleanup_failures.is_empty()
+        {
             diagnostics.push(format!(
                 "{label}: unrelated diagnostic failures must not be accepted (ledger={failures:?})"
             ));

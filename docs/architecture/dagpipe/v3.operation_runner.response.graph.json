@@ -83,5 +83,8 @@
     { "from": "govern_chat_response", "to": "inverse_project_client_response", "arc_id": "governed-response" },
     { "from": "inverse_project_client_response", "to": "frame_committed_client_response", "arc_id": "client-semantic-response" }
   ],
-  "outputs": ["client-frame-candidate"]
+  "outputs": ["client-frame-candidate"],
+  "semantic_contract": {
+    "session_turn_limit": "Runtime clears observed conversation restrictions only after committing a usable compact result. Native Responses compact requires the Responses compact item. Auxiliary compact requires completed summary text and keeps restrictions on refusal, content filter and incomplete results. A rejection newer than compact start remains restricted."
+  }
 }

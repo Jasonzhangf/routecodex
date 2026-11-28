@@ -250,6 +250,7 @@ fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3Rela
         provider_body_read_failure: None,
         client_response: project_v3_responses_error_as_anthropic_error(body),
         source_stage: "V3ProviderReqOutbound09TransportRequest",
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
@@ -271,6 +272,7 @@ fn provider_request_failure(
         provider_body_read_failure: None,
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage,
+        attempt_source: None,
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
@@ -322,6 +324,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
                 }
             }),
             source_stage,
+            attempt_source: None,
             terminal_projection,
             terminal_disposition: None,
             error_operator_fault,
@@ -368,6 +371,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
         },
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
+        attempt_source: None,
         terminal_projection,
         terminal_disposition: None,
         error_operator_fault,
@@ -396,8 +400,8 @@ fn provider_failure_output(
             error_chain: None,
             observability: None,
             provider_failure_attempts,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|s| *s),
             stream_observation: None,
             provider_snapshots: None,
         };
@@ -443,8 +447,8 @@ fn error_output_from_projection(
                 error_chain: None,
                 observability: None,
                 provider_failure_attempts: Vec::new(),
-                diagnostic_source: Some(fault.policy_failure),
-                diagnostic_cause: fault.original_source,
+                diagnostic_source: Some(*fault.policy_failure),
+                diagnostic_cause: fault.original_source.map(|s| *s),
                 stream_observation: None,
                 provider_snapshots: None,
             }
@@ -500,6 +504,7 @@ fn extract_v3_anthropic_relay_usage_summary(
 #[cfg(test)]
 mod anthropic_client_sse_projection_tests {
     use super::*;
+    use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 
     #[tokio::test]
     async fn closeout_replay_uses_selected_provider_wire_protocol() {
@@ -807,10 +812,11 @@ mod tests {
                 Ok(None),
             )
             .expect_err("Ok(None) must produce a typed operator fault");
-            let diagnostic_source = fault.policy_failure.clone();
+            let diagnostic_source = (*fault.policy_failure).clone();
             let diagnostic_cause = fault
                 .original_source
                 .clone()
+                .map(|s| *s)
                 .expect("the real source must remain the fault cause");
             let expected_terminal_disposition = Some(
                 terminal_disposition
@@ -825,6 +831,7 @@ mod tests {
                     provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
+                    attempt_source: None,
                     terminal_projection: None,
                     terminal_disposition: terminal_disposition.clone(),
                     error_operator_fault: Some(fault),
@@ -880,10 +887,11 @@ mod tests {
             Err(runner_error),
         )
         .expect_err("an SDK fault must remain a typed relay error projection fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let original_source = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the real source must remain the fault cause");
         let trace = vec!["V3Error05ExecutionDecision"];
 
@@ -926,10 +934,11 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 is a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let diagnostic_cause = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the SDK fault keeps its original source");
         assert_eq!(diagnostic_cause, source);
 
@@ -940,6 +949,7 @@ mod tests {
                 provider_body_read_failure: None,
                 client_response: Value::Null,
                 source_stage: "ProviderRespCompat02ProviderCompat",
+                attempt_source: None,
                 terminal_projection: None,
                 terminal_disposition: Some(
                     routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
@@ -1011,10 +1021,11 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 must produce a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_source = (*fault.policy_failure).clone();
         let diagnostic_cause = fault
             .original_source
             .clone()
+            .map(|s| *s)
             .expect("the source fault preserves the canonical plain source");
         assert_eq!(diagnostic_cause, source);
 

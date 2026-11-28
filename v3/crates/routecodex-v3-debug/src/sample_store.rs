@@ -284,7 +284,7 @@ impl V3CodexSampleStore {
         force: bool,
         status: Option<u16>,
     ) -> Result<(), String> {
-        self.persist_at(
+        self.persist_with_clock(
             port,
             entry_protocol,
             endpoint,
@@ -293,10 +293,11 @@ impl V3CodexSampleStore {
             payload,
             force,
             status,
-            SystemTime::now(),
+            SystemTime::now,
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     fn persist_at(
         &self,
@@ -310,11 +311,41 @@ impl V3CodexSampleStore {
         status: Option<u16>,
         now: SystemTime,
     ) -> Result<(), String> {
+        self.persist_with_clock(
+            port,
+            entry_protocol,
+            endpoint,
+            request_id,
+            file_name,
+            payload,
+            force,
+            status,
+            || now,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn persist_with_clock<F>(
+        &self,
+        port: u16,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        file_name: &str,
+        payload: &Value,
+        force: bool,
+        status: Option<u16>,
+        mut clock: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut() -> SystemTime,
+    {
         if !self.should_persist(force, status) {
             return Ok(());
         }
         let samples_root = resolve_v3_codex_samples_root()?;
         let _filesystem_guard = lock_v3_codex_sample_filesystem(&samples_root)?;
+        let admission_at = clock();
         let dir = v3_codex_sample_request_dir(port, entry_protocol, endpoint, request_id)?;
         let is_new_request_dir = !dir.is_dir();
         let existing_kind = if is_new_request_dir {
@@ -326,19 +357,19 @@ impl V3CodexSampleStore {
         };
         let starts_failure_record =
             force && !matches!(existing_kind, V3CodexSampleRetentionKind::Failure { .. });
-        if starts_failure_record {
-            if matches!(
-                admit_v3_codex_sample_failure(&samples_root, None, now)?,
+        if starts_failure_record
+            && matches!(
+                admit_v3_codex_sample_failure(&samples_root, None, admission_at)?,
                 V3CodexSampleRetentionAdmission::FailureReserveFull
-            ) {
-                self.record_persist_failure(
-                    request_id.to_string(),
-                    file_name.to_string(),
-                    "diagnostic overflow: 256-directory failure reserve full; persistence skipped"
-                        .to_string(),
-                );
-                return Ok(());
-            }
+            )
+        {
+            self.record_persist_failure(
+                request_id.to_string(),
+                file_name.to_string(),
+                "diagnostic overflow: 256-directory failure reserve full; persistence skipped"
+                    .to_string(),
+            );
+            return Ok(());
         }
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。
@@ -351,12 +382,15 @@ impl V3CodexSampleStore {
         serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
         file.flush().map_err(|error| error.to_string())?;
+        // The retention floor and this write's sweep start when the first
+        // artifact is safely flushed; admission has its own, earlier clock.
+        let persisted_at = clock();
         let retention_marker = match existing_kind {
             V3CodexSampleRetentionKind::Failure { .. } => None,
             V3CodexSampleRetentionKind::Success {
                 first_persisted: Some(_),
             } if !force => None,
-            V3CodexSampleRetentionKind::Success { .. } => Some(now),
+            V3CodexSampleRetentionKind::Success { .. } => Some(persisted_at),
         };
         if let Some(first_persisted) = retention_marker {
             write_v3_codex_sample_retention_marker(&dir, force, first_persisted)?;
@@ -370,7 +404,7 @@ impl V3CodexSampleStore {
                 &samples_root,
                 Some(&dir),
                 self.retention,
-                now,
+                persisted_at,
             )?;
         }
         Ok(())

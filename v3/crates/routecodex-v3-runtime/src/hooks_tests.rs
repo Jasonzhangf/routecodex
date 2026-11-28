@@ -1,8 +1,13 @@
 use super::*;
+use crate::{
+    V3DirectRequestKeyEdits, V3DirectRequestKeyKind, V3DirectRequestKeyMount,
+    V3DirectRequestKeyView,
+};
 use routecodex_v3_config::{
     V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteTargetKind,
 };
 use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
+use routecodex_v3_error::build_v3_error_01_source_raised;
 use routecodex_v3_target::{V3Target10ConcreteProviderSelected, V3TargetCandidate};
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
 use serde_json::json;
@@ -77,6 +82,12 @@ fn direct_policy_with_models(
 ) -> V3ResponsesDirect11Policy {
     V3ResponsesDirect11Policy {
         target: V3Target10ConcreteProviderSelected {
+            occurrence: routecodex_v3_target::V3TargetOccurrence {
+                pool_id: "default".into(),
+                tier_index: 0,
+                plan_index: 0,
+            },
+            active_selection: None,
             route: V3Router07OpaqueTargetHitOnce {
                 server_id: "direct-model-binding".to_string(),
                 routing_group_id: "direct-model-binding".to_string(),
@@ -89,6 +100,7 @@ fn direct_policy_with_models(
                 request_client_model: Some(client_model.to_string()),
                 request_capabilities: BTreeSet::from(["text".to_string()]),
                 request_input_tokens: 1,
+                estimated_history_turns: None,
                 hit_count: 1,
             },
             candidate: V3TargetCandidate {
@@ -127,6 +139,11 @@ fn direct_policy_with_models(
                 oauth_declaration: None,
                 required_capabilities: Vec::new(),
                 pool_ids: vec!["default".to_string()],
+                occurrences: vec![routecodex_v3_target::V3TargetOccurrence {
+                    pool_id: "default".into(),
+                    tier_index: 0,
+                    plan_index: 0,
+                }],
                 default_pool_member: true,
                 path: vec!["selected-provider".to_string()],
             },
@@ -136,6 +153,7 @@ fn direct_policy_with_models(
             default_floor_protected: false,
         },
         request_id: "req-direct-model-binding".to_string(),
+        request_purpose: crate::nodes::V3RequestPurpose::Conversation,
         request_body: json!({"model": client_model, "input": "hello"}),
     }
 }
@@ -157,22 +175,22 @@ fn responses_direct_static_hooks_are_registered() {
 #[test]
 fn direct_source_boundary_preserves_err01_operator_fault() {
     let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error01SourceRaised",
             "err01_source_operator_sdk_failure",
             "seeded Err01 failure",
-        ),
-        original_source: Some(build_v3_error_01_source_raised(
+        )),
+        original_source: Some(Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "seeded_original_source",
             "seeded original source",
-        )),
+        ))),
     };
     let result: V3DirectSourceResult<()> = Err(Err(fault.clone()));
 
-    assert_eq!(result.unwrap_err().unwrap_err(), fault);
+    assert!(matches!(result, Err(Err(f)) if f == fault));
 }
 
 #[test]
@@ -187,7 +205,7 @@ fn direct_source_boundary_preserves_sdk_source() {
     .expect("real Error01 SDK must raise an Internal source");
     let result: V3DirectSourceResult<()> = Err(Ok(source.clone()));
 
-    assert_eq!(result.unwrap_err().unwrap(), source);
+    assert!(matches!(result, Err(Ok(s)) if s == source));
     assert_eq!(
         source
             .internal_error

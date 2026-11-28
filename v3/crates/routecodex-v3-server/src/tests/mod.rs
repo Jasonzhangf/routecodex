@@ -1,19 +1,32 @@
 use super::*;
+use crate::endpoint_handlers::{format_v3_request_id_entry, format_v3_request_id_token};
+use crate::request_id::{v3_request_id_clock_now, V3RequestCounterState};
 use crate::webui_observability::{
     build_v3_obs_request_key, record_v3_observability_event, V3ObsErrorProjection, V3ObsErrorTruth,
     V3ObsEventType, V3ObsRequestMeta, V3ObsScope, V3WebuiObservability,
 };
 use axum::body::Bytes;
+use axum::http::{HeaderValue, StatusCode};
 use routecodex_v3_error::V3ErrorSourceKind;
 use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
+use std::fs;
 use std::sync::Mutex as StdMutex;
+use tokio::sync::Mutex as AsyncMutex;
 
+#[path = "../../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
+mod hub_v1_fixture;
+
+mod active_key_control_contention;
+mod active_key_control_storage_race;
+mod active_key_handoff_projection;
+mod active_key_partial_release;
 mod foundation_output;
 mod frame_sdk_fault;
 mod local599_output;
 mod post_commit_sse_sdk_fault;
 mod provider_request_dry_run_handoff;
+mod target_origin_health_neutrality;
 mod terminal_probe_join;
 mod terminal_usage_closeout;
 mod websocket_sdk_fault;
@@ -57,7 +70,7 @@ async fn listener_bind_returns_non_eintr_without_retry() {
 }
 
 static TEST_TZ_LOCK: StdMutex<()> = StdMutex::new(());
-static TEST_HOME_LOCK: StdMutex<()> = StdMutex::new(());
+static TEST_HOME_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
 
 fn test_v3_provider_health(
     manifest: &V3Config05ManifestPublished,
@@ -241,6 +254,9 @@ fn test_v3_listener_state_with_debug(
     });
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
     Arc::new(V3ListenerState {
+        active_keys: None,
+        active_key_control_revoked: Default::default(),
+        responses_handoff_observer: Default::default(),
         server,
         manifest_version: manifest.version,
         manifest: Arc::clone(&manifest),
@@ -424,7 +440,7 @@ fn codex_sample_scope_blocks_direct_and_preserves_relay() {
 
 #[test]
 fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let _home = TestHomeGuard::unset();
     let log_file = std::env::temp_dir().join(format!(
         "routecodex-v3-missing-home-{}.log",
@@ -458,7 +474,7 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
 
 #[test]
 fn failure_evidence_preserves_distinct_terminal_sources() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-terminal-source-evidence-{}",
         std::process::id()
@@ -564,7 +580,7 @@ fn failure_evidence_preserves_distinct_terminal_sources() {
 
 #[test]
 fn relay_consumers_preserve_sources_without_observation_or_attempts() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-relay-source-consumers-{}",
         std::process::id()
@@ -703,7 +719,7 @@ fn relay_consumers_preserve_sources_without_observation_or_attempts() {
 
 #[tokio::test]
 async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_break() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-direct-policy-terminal-consumer-{}",
         std::process::id()
@@ -892,7 +908,7 @@ fn publish_terminal_outcome(
 /// a distinct cancelled terminal with no fabricated provider HTTP 502.
 #[tokio::test]
 async fn client_cancelled_direct_terminal_is_cancelled_not_provider_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-client-cancel-ledger-{}",
         std::process::id()
@@ -940,7 +956,7 @@ async fn client_cancelled_direct_terminal_is_cancelled_not_provider_502() {
 /// no-response disposition means no provider HTTP status and no `http_502`.
 #[tokio::test]
 async fn delivered_then_cancelled_no_response_is_not_provider_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-delivered-cancel-ledger-{}",
         std::process::id()
@@ -990,7 +1006,7 @@ async fn delivered_then_cancelled_no_response_is_not_provider_502() {
 /// typed transport terminal instead of fabricating a provider HTTP 502.
 #[tokio::test]
 async fn provider_response_body_timeout_is_typed_transport_terminal_not_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-body-timeout-ledger-{}",
         std::process::id()
@@ -1036,7 +1052,7 @@ async fn provider_response_body_timeout_is_typed_transport_terminal_not_502() {
 /// fix must not flatten the honest 502 family.
 #[tokio::test]
 async fn genuine_provider_http_502_terminal_still_records_502() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-genuine-502-ledger-{}",
         std::process::id()
@@ -1093,7 +1109,7 @@ async fn genuine_provider_http_502_terminal_still_records_502() {
 
 #[tokio::test]
 async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-protocol-plan-fault-consumer-{}",
         std::process::id()
@@ -1115,13 +1131,13 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
         "protocol plan failed before dispatch",
     );
     let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
-        policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+        policy_failure: Box::new(routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
             "V3Error06ClientProjected",
             "relay_error_operator_sdk_failure",
             "Error06 SDK rejected the source projection",
-        ),
-        original_source: Some(original_source.clone()),
+        )),
+        original_source: Some(Box::new(original_source.clone())),
     };
     let response = crate::endpoint_handlers::finish_v3_protocol_execution_plan_failure(
         &state,
@@ -1226,7 +1242,7 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
 
 #[test]
 fn responses_relay_operator_fault_terminal_without_error06_records_provider_terminal_row() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-responses-relay-terminal-no-chain-{}",
         std::process::id()
@@ -1452,7 +1468,7 @@ fn v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_o
         );
         return;
     }
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-optional-snapshot-failure-{}",
         std::process::id()
@@ -1657,7 +1673,7 @@ async fn collect_body_bytes(response: Response<Body>) -> Result<Vec<u8>, axum::E
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-sse-sample-{}",
         std::process::id()
@@ -1715,7 +1731,7 @@ async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_persists_source_error_and_preserves_business_error() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-source-error-{}",
         std::process::id()
@@ -1772,7 +1788,7 @@ async fn codex_sample_final_body_capture_persists_source_error_and_preserves_bus
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-drop-{}",
         std::process::id()
@@ -1821,7 +1837,7 @@ async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error(
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-break-{}",
         std::process::id()
@@ -1877,7 +1893,7 @@ async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
 
 #[tokio::test]
 async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-final-body-write-failure-{}",
         std::process::id()
@@ -1920,7 +1936,7 @@ async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire(
 
 #[test]
 fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-snapshot-redaction-{}",
         std::process::id()
@@ -1996,7 +2012,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
 
 #[test]
 fn relay_missing_provider_snapshot_does_not_project_client_failure() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-relay-missing-provider-snapshot-{}",
         std::process::id()
@@ -2038,7 +2054,7 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
 
 #[test]
 fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-anthropic-client-response-{}",
         std::process::id()
@@ -2092,7 +2108,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
 
 #[test]
 fn responses_direct_provider_snapshots_require_typed_carrier() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-direct-provider-snapshot-{}",
         std::process::id()
@@ -2396,7 +2412,7 @@ fn test_runtime_stream_observation_from_provider_event_json(
 ) -> V3RuntimeStreamObservation {
     let observation = V3RuntimeStreamObservation::default();
     observation
-        .record_provider_event_json(&event)
+        .record_direct_responses_payload_observation(&event)
         .expect("test provider event JSON observation must record");
     observation
 }
@@ -3953,7 +3969,7 @@ fn openai_chat_relay_records_started_before_runtime_can_project_terminal_error()
         .find("let console_context = build_v3_console_emission_context(")
         .expect("OpenAI Chat Relay observability context");
     let runtime = branch
-        .find("execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(")
+        .find("execute_v3_openai_chat_relay_runtime_with_active_keys(")
         .expect("OpenAI Chat Relay runtime");
     assert!(
         context < runtime,
@@ -4400,7 +4416,8 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
                 "input_tokens_details": {"cached_tokens": 0},
                 "output_tokens": 38,
                 "total_tokens": 79
-            }
+            },
+            "output": [{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
         })),
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: "none",
@@ -4423,10 +4440,279 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=unreported"), "{log}");
+    assert!(log.contains("finish_reason=stop"), "{log}");
     assert!(log.contains("usage_in=41 usage_out=38"), "{log}");
     assert!(log.contains("usage_total=79"), "{log}");
-    assert!(log.contains("finish_reason=unreported"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn direct_frame_console_infers_tool_calls_from_completed_json_output() {
+    let log_file = test_v3_console_log_file("direct-console-json-tool-finish");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-json-tool-finish",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "status": "completed",
+                "call_id": "call_json",
+                "name": "lookup",
+                "arguments": "{\"query\":\"json\"}"
+            }]
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Resp15ClientPayload"],
+        observability: Some(V3RuntimeObservability {
+            response_status: None,
+            finish_reason: None,
+            usage: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: None,
+    };
+
+    assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("responseStatus=completed"), "{log}");
+    assert!(log.contains("finish_reason=tool_calls"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn direct_frame_console_preserves_explicit_json_response_reason() {
+    let log_file = test_v3_console_log_file("direct-console-json-explicit-finish");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-json-explicit-finish",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "status": "completed",
+            "response": {
+                "status": "completed",
+                "stopReason": "content_filter",
+                "output": [{"type": "function_call", "call_id": "call_filtered", "name": "lookup", "arguments": "{}"}]
+            }
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Resp15ClientPayload"],
+        observability: Some(V3RuntimeObservability {
+            response_status: None,
+            finish_reason: None,
+            usage: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: None,
+    };
+
+    assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("finish_reason=content_filter"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+fn assert_direct_console_preserves_exact_reason(log: &str, request_id: &str) {
+    // The rendered field keeps the provider string verbatim, so the leading
+    // space follows `finish_reason=` and the trailing space doubles the field
+    // separator. A trimmed value would render neither shape.
+    assert!(
+        log.contains("finish_reason= outer vendor reason  elapsedMs="),
+        "missing exact headline reason: {log}"
+    );
+    assert!(
+        log.contains(&format!(
+            "req={request_id} event=completed detail=[usage] status=200 responseStatus=completed finish_reason= outer vendor reason  elapsedMs="
+        )),
+        "missing exact debug completion: {log}"
+    );
+}
+
+#[test]
+fn direct_frame_console_preserves_explicit_json_reason_whitespace() {
+    let log_file = test_v3_console_log_file("direct-console-json-explicit-whitespace");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let request_id = "req-direct-console-json-explicit-whitespace";
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5"}),
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "status": "completed",
+            "finish_reason": " outer vendor reason ",
+            "output": [{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Resp15ClientPayload"],
+        observability: Some(V3RuntimeObservability {
+            response_status: None,
+            finish_reason: None,
+            usage: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: None,
+    };
+
+    assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert_direct_console_preserves_exact_reason(&log, request_id);
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn direct_frame_console_other_entry_protocols_keep_normalized_explicit_reason() {
+    for (entry, endpoint, body) in [
+        (
+            "openai_chat",
+            "/v1/chat/completions",
+            json!({"choices":[{"finish_reason":" stop "}]}),
+        ),
+        (
+            "anthropic",
+            "/v1/messages",
+            json!({"stop_reason":" end_turn "}),
+        ),
+        (
+            "gemini",
+            "/v1beta/models/gemini:generateContent",
+            json!({"candidates":[{"finishReason":" STOP "}]}),
+        ),
+    ] {
+        let log_file = test_v3_console_log_file(&format!("direct-other-{entry}-reason"));
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let context = test_v3_console_emission_context(
+            &state,
+            entry,
+            endpoint,
+            "req-other-direct",
+            &test_direct_console_headers(),
+            &json!({"model":"test"}),
+        );
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(body),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                response_status: Some("completed".to_string()),
+                finish_reason: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: None,
+        };
+        assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        let reason = match entry {
+            "anthropic" => "end_turn",
+            "gemini" => "STOP",
+            _ => "stop",
+        };
+        assert!(
+            log.contains(&format!("finish_reason={reason} elapsedMs=")),
+            "{log}"
+        );
+        let mut observed = test_direct_observability(Vec::new());
+        observed.response_status = Some("completed".to_string());
+        observed.finish_reason = Some(format!(" {reason} "));
+        emit_v3_request_complete_console_line(
+            &context,
+            200,
+            &[],
+            &observed,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(
+            !log.contains(&format!("finish_reason= {reason}  elapsedMs=")),
+            "{log}"
+        );
+        let _ = std::fs::remove_file(&log_file);
+    }
+}
+
+#[test]
+fn relay_console_keeps_existing_trimmed_reason_semantics() {
+    let log_file = test_v3_console_log_file("relay-console-explicit-whitespace");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-relay-console-explicit-whitespace",
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5"}),
+    );
+    let mut observability = test_direct_observability(Vec::new());
+    observability.execution_mode = "relay".to_string();
+    observability.finish_reason = Some(" relay vendor ".to_string());
+    emit_v3_request_complete_console_line(
+        &context,
+        200,
+        &["V3Resp15ClientPayload"],
+        &observability,
+        std::time::Duration::from_millis(1),
+    )
+    .unwrap();
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("finish_reason=relay vendor "), "{log}");
+    assert!(!log.contains("finish_reason= relay vendor "), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -4472,7 +4758,8 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
                         "input_tokens_details":{"cached_tokens":5},
                         "output_tokens":3,
                         "total_tokens":20
-                    }
+                    },
+                    "output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
                 }
             }),
         )),
@@ -4491,13 +4778,153 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=unreported"), "{log}");
+    assert!(log.contains("finish_reason=stop"), "{log}");
     assert!(log.contains("usage_in=17 usage_out=3"), "{log}");
     assert!(log.contains("usage_cache=5/17(29.4%)"), "{log}");
     assert!(log.contains("usage_total=20"), "{log}");
     assert!(!log.contains("usage=unreported"), "{log}");
-    assert!(!log.contains("finish_reason=stop"), "{log}");
     let _ = std::fs::remove_file(&log_file);
+}
+
+#[tokio::test]
+async fn direct_sse_console_closeout_infers_tool_calls_from_completed_function_call() {
+    let log = direct_sse_console_completed_function_call_log(None).await;
+    assert!(log.contains("finish_reason=tool_calls"), "{log}");
+}
+
+#[tokio::test]
+async fn direct_sse_console_closeout_preserves_explicit_content_filter() {
+    let log = direct_sse_console_completed_function_call_log(Some("content_filter")).await;
+    assert!(log.contains("finish_reason=content_filter"), "{log}");
+}
+
+#[tokio::test]
+async fn direct_sse_console_closeout_preserves_explicit_reason_whitespace() {
+    let log = direct_sse_console_completed_function_call_log(Some(" outer vendor reason ")).await;
+    assert_direct_console_preserves_exact_reason(&log, "req-direct-console-sse-completed-tool");
+}
+
+#[test]
+fn direct_sse_console_conflicting_completed_status_keeps_incomplete_closeout() {
+    let log_file = test_v3_console_log_file("direct-console-sse-conflicting-status");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-sse-conflicting-status",
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5","stream":true}),
+    );
+    let event = json!({
+        "type":"response.completed",
+        "response":{"status":"incomplete","output":[]}
+    });
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(Vec::<
+            Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>,
+        >::new()))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            finish_reason: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+            event,
+        )),
+    };
+    emit_v3_direct_frame_console_lines(&context, &frame, Instant::now())
+        .unwrap()
+        .complete();
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(!log.contains("responseStatus=completed"), "{log}");
+    assert!(!log.contains("finish_reason=stop"), "{log}");
+    assert!(log.contains("responseStatus=incomplete"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+}
+
+async fn direct_sse_console_completed_function_call_log(finish_reason: Option<&str>) -> String {
+    let log_file = test_v3_console_log_file(if finish_reason.is_some() {
+        "direct-console-sse-tool-explicit-reason"
+    } else {
+        "direct-console-sse-tool-missing-reason"
+    });
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-console-sse-completed-tool",
+        &test_direct_console_headers(),
+        &json!({"model":"gpt-5.5","stream":true}),
+    );
+    let mut terminal = json!({
+        "type":"response.completed",
+        "response":{
+            "id":"resp_direct_completed_tool",
+            "status":"completed",
+            "output":[{
+                "type":"function_call",
+                "status":"completed",
+                "id":"fc_exact",
+                "call_id":"call_exact",
+                "name":"lookup",
+                "arguments":"{\"query\":\"exact\"}"
+            }]
+        }
+    });
+    if let Some(reason) = finish_reason {
+        terminal["response"]["finish_reason"] = json!(reason);
+    }
+    let provider_bytes = format!("event: response.completed\ndata: {terminal}\n\n").into_bytes();
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            provider_bytes.clone(),
+        )]))),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+        observability: Some(V3RuntimeObservability {
+            transport: "sse".to_string(),
+            response_status: Some("streaming".to_string()),
+            finish_reason: None,
+            ..test_direct_observability(Vec::new())
+        }),
+        stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+            terminal,
+        )),
+    };
+    let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+    let response = responses_direct_output_response_with_console(frame, finalizer, None);
+    let client_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(client_bytes.as_ref(), provider_bytes.as_slice());
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("event=completed"), "{log}");
+    assert!(log.contains("responseStatus=completed"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+    log
 }
 
 #[tokio::test]
@@ -4881,7 +5308,7 @@ fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
 
 #[test]
 fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-recovered-provider-snapshot-{}",
         std::process::id()
@@ -5217,6 +5644,9 @@ fn error_projection_appends_human_console_failure_line() {
     });
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
     let state = V3ListenerState {
+        active_keys: None,
+        active_key_control_revoked: Default::default(),
+        responses_handoff_observer: Default::default(),
         server,
         manifest_version: manifest.version,
         manifest: Arc::clone(&manifest),
@@ -5402,7 +5832,7 @@ fn relay_terminal_projection_uses_typed_http200_body_failure_source() {
 /// request. Nothing is fabricated from the request id alone.
 #[tokio::test]
 async fn provider_attempt_failure_records_raw_artifact_ref_only_when_the_sample_dir_exists() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let home = std::env::temp_dir().join(format!(
         "v3-obs-raw-artifact-{}-{}",
         std::process::id(),
@@ -5563,7 +5993,7 @@ async fn responses_relay_json_error_returns_typed_no_response() {
 
 #[tokio::test]
 async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-external-http-{}",
         std::process::id()
@@ -5573,7 +6003,7 @@ async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
-    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let raw_body = br#"{"error":{"type":"rate_limit_error","message":"later"}}"#.to_vec();
     let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
@@ -5638,7 +6068,7 @@ async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
 
 #[tokio::test]
 async fn provider_terminal_external_http_records_body_read_failure_without_erasing_the_status() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-body-read-failure-{}",
         std::process::id()
@@ -5648,7 +6078,7 @@ async fn provider_terminal_external_http_records_body_read_failure_without_erasi
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
-    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         503,
         vec![("content-type".to_string(), b"application/json".to_vec())],
@@ -5698,7 +6128,7 @@ async fn provider_terminal_external_http_records_body_read_failure_without_erasi
 
 #[tokio::test]
 async fn provider_terminal_no_response_breaks_streaming_client_transport() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.lock().await;
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-no-response-{}",
         std::process::id()
@@ -5708,7 +6138,7 @@ async fn provider_terminal_no_response_breaks_streaming_client_transport() {
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
-    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let response = provider_terminal_response(
         &state,
         None,

@@ -7,9 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use routecodex_v3_error::{V3Error01SourceRaised, V3ExternalHttpWitness};
 use routecodex_v3_provider_responses::{
     V3ProviderBusinessRecoveryAcquisition, V3ProviderHealthProbePermit, V3ProviderHealthStore,
 };
+use routecodex_v3_target::{V3ActiveKeyIdentity, V3Target10ConcreteProviderSelected};
 
 const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
 const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
@@ -84,7 +86,7 @@ impl Default for V3AttemptStoreLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum V3AttemptStoreError {
+pub enum V3AttemptStoreError {
     ResidenceDeadlineExceeded(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
@@ -115,10 +117,21 @@ pub(crate) struct V3AttemptBudget {
 /// Provider identities from protocol payloads.
 #[derive(Clone)]
 pub struct V3RequestExecutionControl {
+    failure: Arc<Mutex<Option<V3RequestFailure>>>,
     attempt_budget: V3AttemptBudget,
     refill_excluded_candidates: Arc<Mutex<BTreeSet<String>>>,
     business_recovery_trial: Arc<Mutex<Option<V3BusinessRecoveryTrialGuard>>>,
+    compaction_generation: Arc<std::sync::OnceLock<u64>>,
     pub(crate) image_history: Option<crate::image_history::V3ImageHistoryView>,
+}
+
+enum V3RequestFailure {
+    Dispatched(
+        V3ActiveKeyIdentity,
+        V3Error01SourceRaised,
+        Option<V3ExternalHttpWitness>,
+    ),
+    Local(V3Error01SourceRaised),
 }
 
 struct V3BusinessRecoveryTrialGuard {
@@ -139,6 +152,49 @@ impl fmt::Debug for V3RequestExecutionControl {
 }
 
 impl V3RequestExecutionControl {
+    pub(crate) fn begin_actual_send(&self) {
+        self.failure.lock().expect("request failure custody").take();
+    }
+
+    pub(crate) fn record_failure(
+        &self,
+        selected: &V3Target10ConcreteProviderSelected,
+        source: &V3Error01SourceRaised,
+        witness: Option<&V3ExternalHttpWitness>,
+        dispatched: bool,
+    ) {
+        *self.failure.lock().expect("request failure custody") = Some(if dispatched {
+            V3RequestFailure::Dispatched(
+                selected.candidate.active_key_identity(),
+                source.clone(),
+                witness.cloned(),
+            )
+        } else {
+            V3RequestFailure::Local(source.clone())
+        });
+    }
+
+    pub(crate) fn take_failure_for_exhaustion(
+        &self,
+        local: Option<V3Error01SourceRaised>,
+    ) -> (
+        Option<V3ActiveKeyIdentity>,
+        Option<V3Error01SourceRaised>,
+        Option<V3ExternalHttpWitness>,
+    ) {
+        match (
+            local,
+            self.failure.lock().expect("request failure custody").take(),
+        ) {
+            (Some(source), _) | (None, Some(V3RequestFailure::Local(source))) => {
+                (None, Some(source), None)
+            }
+            (None, Some(V3RequestFailure::Dispatched(identity, source, witness))) => {
+                (Some(identity), Some(source), witness)
+            }
+            (None, None) => (None, None, None),
+        }
+    }
     pub(crate) fn from_manifest(
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
         server_id: &str,
@@ -147,8 +203,14 @@ impl V3RequestExecutionControl {
             attempt_budget: V3AttemptBudget::from_manifest(manifest, server_id)?,
             refill_excluded_candidates: Arc::default(),
             business_recovery_trial: Arc::new(Mutex::new(None)),
+            failure: Arc::default(),
+            compaction_generation: Arc::default(),
             image_history: None,
         })
+    }
+
+    pub(crate) fn retain_compaction_generation(&self, observed: Option<u64>) -> Option<u64> {
+        observed.map(|generation| *self.compaction_generation.get_or_init(|| generation))
     }
 
     pub(crate) fn acquire_business_recovery_trial(
@@ -257,6 +319,22 @@ impl V3RequestExecutionControl {
         Ok(true)
     }
 
+    pub(crate) fn cancel_business_recovery_trial(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+    ) -> Result<(), V3AttemptStoreError> {
+        drop(self.take_matching_business_recovery_trial(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        )?);
+        Ok(())
+    }
+
     fn take_matching_business_recovery_trial(
         &self,
         provider_id: &str,
@@ -322,7 +400,7 @@ impl V3RequestExecutionControl {
         self.attempt_budget
             .inner
             .refill_used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 (current < max_consecutive_refills).then_some(current + 1)
             })
             .is_ok()
@@ -474,7 +552,7 @@ impl V3AttemptBudget {
         let previous = self
             .inner
             .transport_attempts
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| {
@@ -544,7 +622,7 @@ fn reserve_bounded(
     label: &str,
 ) -> Result<(), V3AttemptStoreError> {
     counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current.checked_add(bytes).filter(|next| *next <= limit)
         })
         .map(|_| ())
@@ -720,10 +798,13 @@ impl V3CommittedClientSseStream {
     }
 }
 
+type V3CommittedSseTerminalCallback = Box<dyn FnOnce(V3CommittedSseTerminal) + Send>;
+type V3CommittedSseFrameCallback = Box<dyn Fn(&[u8]) + Send + Sync>;
+
 struct V3ObservedCommittedSseStream {
     source: V3CommittedClientSseStream,
-    on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
-    on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
+    on_frame: V3CommittedSseFrameCallback,
+    on_terminal: Option<V3CommittedSseTerminalCallback>,
     /// Whether the protocol terminal frame has been yielded to the client.
     /// Drop uses this to preserve Completed versus Dropped semantics.
     terminal_frame_consumed: bool,

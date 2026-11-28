@@ -149,49 +149,159 @@ pub(crate) async fn fail_managed_runtime_with_hooks_cleanup(
     hooks_sidecar: V3HooksSidecarSupervisor,
     primary_error: V3LifecycleError,
 ) -> Result<(), V3LifecycleError> {
-    let codex_sample_persist_detail = if let Some(handle) = handle {
-        match tokio::time::timeout(Duration::from_secs(2), handle.shutdown()).await {
-            Ok(failures) if failures.is_empty() => None,
-            Ok(failures) => Some(format!(
-                "codex sample persistence shutdown failed: {}",
-                failures
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )),
-            Err(error) => Some(format!(
-                "codex sample persistence shutdown timed out: {error}"
-            )),
-        }
-    } else {
-        None
-    };
-    let hooks_cleanup_detail = hooks_sidecar
-        .stop()
-        .await
-        .err()
-        .map(|error| format!("hooks sidecar cleanup failed: {error}"));
-    let hooks_record_detail = hooks_sidecar_cleanup_incomplete_detail(instance_dir);
-    let mut cleanup_detail = match hooks_cleanup_detail.as_deref() {
-        Some(cleanup) => cleanup.to_string(),
-        None => hooks_record_detail.unwrap_or_else(|| "managed runtime failure".to_string()),
-    };
-    if let Some(sample_persist_detail) = codex_sample_persist_detail {
-        cleanup_detail = append_status_detail(Some(&cleanup_detail), sample_persist_detail);
-    }
-    let detail = append_status_detail(Some(&primary_error.to_string()), cleanup_detail);
-    if let Err(status_error) = write_status(
+    fail_published_runtime(
         instance_dir,
         instance_id,
-        V3ManagedRunState::Failed,
-        Some(detail),
-    ) {
-        eprintln!(
-            "managed runtime failure status write failed after {primary_error}: {status_error}"
-        );
+        handle,
+        Some(hooks_sidecar),
+        None,
+        primary_error,
+    )
+    .await
+}
+
+pub(crate) async fn fail_published_runtime(
+    instance_dir: &Path,
+    instance_id: &str,
+    handle: Option<V3ServerAggregateHandle>,
+    hooks_sidecar: Option<V3HooksSidecarSupervisor>,
+    startup_socket: Option<(&Path, &V3ManagedInstanceDeclaration, &str)>,
+    primary_error: V3LifecycleError,
+) -> Result<(), V3LifecycleError> {
+    let mut detail = primary_error.to_string();
+    let mut controls = None;
+    if let Some(handle) = handle {
+        let (report, drain) = close_failed_aggregate(handle).await;
+        if !report.is_empty() {
+            detail = append_status_detail(Some(&detail), report.to_string());
+        }
+        if let Some(drain) = drain {
+            detail = append_status_detail(Some(&detail), drain);
+        }
+        controls = Some(report);
     }
+    if let Some(sidecar) = hooks_sidecar {
+        let cleanup = sidecar
+            .stop()
+            .await
+            .err()
+            .map(|error| format!("hooks sidecar cleanup failed: {error}"))
+            .or_else(|| hooks_sidecar_cleanup_incomplete_detail(instance_dir))
+            .unwrap_or_else(|| "managed runtime failure".to_string());
+        detail = append_status_detail(Some(&detail), cleanup);
+    }
+    publish_failed_outcome(
+        instance_dir,
+        instance_id,
+        &detail,
+        controls.as_ref(),
+        startup_socket,
+        "runtime",
+    );
     Err(primary_error)
+}
+
+pub(crate) fn publish_failed_outcome(
+    instance_dir: &Path,
+    instance_id: &str,
+    detail: &str,
+    controls: Option<&routecodex_v3_server::V3ServerCloseReport>,
+    startup_socket: Option<(&Path, &V3ManagedInstanceDeclaration, &str)>,
+    phase: &str,
+) {
+    let publish = |detail: &str| {
+        write_status(
+            instance_dir,
+            instance_id,
+            V3ManagedRunState::Failed,
+            Some(detail.to_owned()),
+        )
+        .inspect_err(|error| {
+            eprintln!("managed {phase} failure status write failed after {detail}: {error}")
+        })
+    };
+    // A successor can exit with Starting still durable. Formal restart needs
+    // the write-ahead artifact and independent generation even for resolved leaves.
+    if publish(detail).is_ok() {
+        if let Some((path, declaration, nonce)) = startup_socket {
+            if let Err(error) = settle_terminal_restart_plan(instance_dir, declaration, nonce)
+                .and_then(|()| close_failed_startup_control_files(instance_dir, path))
+            {
+                let _ = publish(&append_status_detail(
+                    Some(detail),
+                    format!("managed control cleanup failed: {error}"),
+                ));
+                return;
+            }
+        }
+        // Even resolved endpoints still witness the failed attempt while a
+        // checkpoint awaits disposition by verified exited-owner recovery.
+        let checkpoint_absent = fs::symlink_metadata(instance_dir.join(PROVIDER_HANDOFF_FILE))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+        if let Some(error) = controls
+            .filter(|report| checkpoint_absent || report.pending_controls.is_some())
+            .and_then(|report| terminal_control_settlement_error(instance_dir, instance_id, report))
+        {
+            let _ = publish(&append_status_detail(Some(detail), error));
+        }
+        if startup_socket.is_some() {
+            if let Err(error) = remove_settled_pid_cache(instance_dir) {
+                let _ = publish(&append_status_detail(
+                    Some(detail),
+                    format!("managed cache cleanup failed: {error}"),
+                ));
+            }
+        }
+    }
+}
+
+pub(crate) async fn close_failed_aggregate(
+    mut handle: V3ServerAggregateHandle,
+) -> (routecodex_v3_server::V3ServerCloseReport, Option<String>) {
+    let report = handle.close_active_key_controls().await;
+    let drain = match tokio::time::timeout(Duration::from_secs(2), handle.shutdown()).await {
+        Ok(report) if !report.is_empty() => Some(report.to_string()),
+        Ok(_) => None,
+        Err(_) => Some("managed failure persistence shutdown timed out".to_string()),
+    };
+    (report, drain)
+}
+
+fn settle_terminal_controls(
+    instance_dir: &Path,
+    instance_id: &str,
+    report: &routecodex_v3_server::V3ServerCloseReport,
+) -> Option<String> {
+    let detail = (!report.is_empty()).then(|| report.to_string());
+    terminal_control_settlement_error(instance_dir, instance_id, report)
+        .map(|error| append_status_detail(detail.as_deref(), error))
+        .or(detail)
+}
+
+fn terminal_control_settlement_error(
+    instance_dir: &Path,
+    instance_id: &str,
+    report: &routecodex_v3_server::V3ServerCloseReport,
+) -> Option<String> {
+    let result = (|| -> Result<(), V3LifecycleError> {
+        if !instance_dir.join(FRONT_HANDOFF_FILE).try_exists()? {
+            return Ok(());
+        }
+        let cache: V3ManagedPidCache = read_json(&instance_dir.join("pid.cache"))?;
+        if let Some(prior) =
+            read_live_retained_front_control_handoff(instance_dir, instance_id, &cache.start_nonce)?
+        {
+            persist_retained_front_control_handoff(
+                instance_dir,
+                &prior.declaration,
+                report.pending_controls.clone(),
+            )?;
+        }
+        Ok(())
+    })();
+    result.err().map(|error| {
+        format!("active-key terminal custody retained after disposition write failed: {error}")
+    })
 }
 
 pub(crate) fn observe_status_if_changed<F>(
@@ -213,44 +323,49 @@ pub(crate) fn observe_status_if_changed<F>(
 
 pub(crate) async fn shutdown_managed_runtime(
     instance_dir: &Path,
-    instance_id: &str,
+    declaration: &V3ManagedInstanceDeclaration,
+    start_nonce: &str,
     socket_path: &Path,
     handle: V3ServerAggregateHandle,
     hooks_sidecar: V3HooksSidecarSupervisor,
 ) -> Result<(), V3LifecycleError> {
+    let instance_id = &declaration.instance_id;
     write_status(instance_dir, instance_id, V3ManagedRunState::Stopping, None)?;
-    let codex_sample_persist_failures = handle.shutdown().await;
+    let server_close = handle.shutdown().await;
+    let close_detail = settle_terminal_controls(instance_dir, instance_id, &server_close);
     let hooks_cleanup_detail = hooks_sidecar
         .stop()
         .await
         .err()
         .map(|error| format!("hooks sidecar shutdown failed: {error}"));
-    let detail = if codex_sample_persist_failures.is_empty() {
-        hooks_cleanup_detail
-    } else {
-        let failure_detail = format!(
-            "codex sample persistence shutdown failed: {}",
-            codex_sample_persist_failures
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        );
-        Some(append_status_detail(
-            hooks_cleanup_detail.as_deref(),
-            failure_detail,
-        ))
-    };
+    let detail = close_detail
+        .map(|close| append_status_detail(hooks_cleanup_detail.as_deref(), close))
+        .or(hooks_cleanup_detail);
     write_status(
         instance_dir,
         instance_id,
         V3ManagedRunState::Stopped,
-        detail,
+        detail.clone(),
     )?;
-    let _ = fs::remove_file(instance_dir.join("pid.cache"));
-    let _ = fs::remove_file(instance_dir.join("control.json"));
-    let _ = fs::remove_file(socket_path);
-    Ok(())
+    settle_terminal_restart_plan(instance_dir, declaration, start_nonce)
+        .and_then(|()| close_failed_startup_control_files(instance_dir, socket_path))
+        .and_then(|()| remove_settled_pid_cache(instance_dir))
+        .inspect_err(|error| {
+            let detail = append_status_detail(
+                detail.as_deref(),
+                format!("managed terminal cleanup failed: {error}"),
+            );
+            if let Err(status_error) = write_status(
+                instance_dir,
+                instance_id,
+                V3ManagedRunState::Stopped,
+                Some(detail),
+            ) {
+                eprintln!(
+                    "managed stopped cleanup status write failed after {error}: {status_error}"
+                );
+            }
+        })
 }
 
 async fn wait_for_control_peer_before_exec(stream: &UnixStream) -> Result<(), V3LifecycleError> {
@@ -314,7 +429,7 @@ async fn observe_managed_shutdown(
             instance_id: declaration.instance_id.clone(),
             accepted: valid_status,
             state: V3ManagedRunState::Stopping,
-            message: "shutdown pending; persistence and writer exit must finish before completion"
+            message: "shutdown is still pending; persistence and writer exit must finish before completion"
                 .into(),
         };
         // A slow observer must not stop the owned shutdown from progressing.
@@ -339,7 +454,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
     let target_dir = instances_root.join(&declaration.instance_id);
     V3HooksSidecarSupervisor::ensure_exec_target_available(instance_dir, &target_dir)?;
     let _transfer = bind_previous_release_restart_transfer(instance_dir, &restart_plan)?;
-    let preparation = tokio::select! {
+    let mut preparation = tokio::select! {
         preparation = handle.prepare_exec_attempt() => {
             preparation.map_err(V3LifecycleError::Validation)?
         }
@@ -347,7 +462,22 @@ pub(crate) async fn restart_managed_runtime_in_place(
             return cancellation;
         }
     };
-    let front_path = instance_dir.join(FRONT_HANDOFF_FILE);
+    let exec_owner = serde_json::to_string(&ExecRestartOwner {
+        instance_id: restart_plan.control_instance_id.clone(),
+        start_nonce: restart_plan.control_start_nonce.clone(),
+        active_key_controls: None,
+    })?;
+    let controls = preparation
+        .active_key_control_handoff
+        .take()
+        .unwrap_or_default();
+    let source_front = instance_dir.join(FRONT_HANDOFF_FILE);
+    let prior_front = read_live_retained_front_control_handoff(
+        instance_dir,
+        &restart_plan.control_instance_id,
+        &restart_plan.control_start_nonce,
+    )?;
+    let front_path = target_dir.join(FRONT_HANDOFF_FILE);
     let provider_path = instance_dir.join(PROVIDER_HANDOFF_FILE);
     ensure_private_dir(&target_dir)?;
     let staged_declaration = target_dir.join(EXEC_RESTART_DECLARATION_FILE);
@@ -357,7 +487,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
             "restart target declaration path is not a file".into(),
         ));
     }
-    for path in [&front_path, &provider_path, &staged_declaration] {
+    for path in [&provider_path, &staged_declaration] {
         if path.try_exists()? {
             return Err(V3LifecycleError::Validation(format!(
                 "restart handoff already exists; original owner retained: {}",
@@ -380,7 +510,15 @@ pub(crate) async fn restart_managed_runtime_in_place(
     let attempt = (|| -> Result<(), V3LifecycleError> {
         write_json_atomic(&staged_declaration, declaration)?;
         created.push(staged_declaration.clone());
-        write_json_atomic(&front_path, &preparation.front_checkpoints)?;
+        write_json_atomic(
+            &front_path,
+            &ManagedFrontControlHandoff {
+                declaration: declaration.clone(),
+                origin: read_json(&instance_dir.join("pid.cache"))?,
+                checkpoints: std::mem::take(&mut preparation.front_checkpoints),
+                controls,
+            },
+        )?;
         created.push(front_path.clone());
         write_json_atomic(
             &provider_path,
@@ -389,17 +527,21 @@ pub(crate) async fn restart_managed_runtime_in_place(
         created.push(provider_path.clone());
         Ok(())
     })();
+    let reject = |error| {
+        cleanup_rejected_restart_handoff(
+            created,
+            prior_front
+                .as_ref()
+                .filter(|_| source_front == front_path)
+                .map(|prior| (front_path.as_path(), prior)),
+            error,
+        )
+    };
     if let Err(error) = attempt {
-        return Err(cleanup_rejected_restart_handoff(created, error));
+        return Err(reject(error));
     }
     let mut command = Command::new(&restart_plan.executable_path);
-    command.env(
-        EXEC_RESTART_OWNER_ENV,
-        serde_json::to_string(&ExecRestartOwner {
-            instance_id: restart_plan.control_instance_id.clone(),
-            start_nonce: restart_plan.control_start_nonce.clone(),
-        })?,
-    );
+    command.env(EXEC_RESTART_OWNER_ENV, exec_owner);
     command
         .arg("server")
         .arg("run-managed-child")
@@ -422,38 +564,35 @@ pub(crate) async fn restart_managed_runtime_in_place(
     let mut peer_byte = [0_u8; 1];
     match stream.try_read(&mut peer_byte) {
         Ok(0) => {
-            return Err(cleanup_rejected_restart_handoff(
-                created,
-                V3LifecycleError::Validation(
-                    "restart control client disconnected before exec; original owner retained"
-                        .into(),
-                ),
-            ))
+            return Err(reject(V3LifecycleError::Validation(
+                "restart control client disconnected before exec; original owner retained".into(),
+            )))
         }
         Ok(_) => {
-            return Err(cleanup_rejected_restart_handoff(
-                created,
-                V3LifecycleError::Validation("unexpected restart control input before exec".into()),
-            ))
+            return Err(reject(V3LifecycleError::Validation(
+                "unexpected restart control input before exec".into(),
+            )))
         }
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-        Err(error) => return Err(cleanup_rejected_restart_handoff(created, error.into())),
+        Err(error) => return Err(reject(error.into())),
     }
     let error = command.exec();
     drop(preparation);
-    Err(cleanup_rejected_restart_handoff(
-        created,
-        V3LifecycleError::Io(error),
-    ))
+    Err(reject(V3LifecycleError::Io(error)))
 }
 
 fn cleanup_rejected_restart_handoff(
     created: Vec<PathBuf>,
+    restore_front: Option<(&Path, &ManagedFrontControlHandoff)>,
     error: V3LifecycleError,
 ) -> V3LifecycleError {
     let mut detail = format!("exec restart rejected; original owner retained: {error}");
     for path in created {
-        if let Err(cleanup_error) = fs::remove_file(&path) {
+        let cleanup = match restore_front {
+            Some((front, previous)) if front == path => write_json_atomic(&path, previous),
+            _ => fs::remove_file(&path).map_err(V3LifecycleError::from),
+        };
+        if let Err(cleanup_error) = cleanup {
             detail.push_str(&format!(
                 "; retained handoff {}: {cleanup_error}",
                 path.display()
@@ -563,7 +702,8 @@ pub(crate) async fn run_managed_control_loop(
         observe_managed_shutdown(
             shutdown_managed_runtime(
                 instance_dir,
-                &declaration.instance_id,
+                declaration,
+                &start_nonce,
                 socket_path,
                 handle,
                 hooks_sidecar,
@@ -741,7 +881,10 @@ pub(crate) async fn run_managed_control_loop(
             None
         };
         let release_ports = if valid_identity {
-            match control_release_ports(&request, declaration) {
+            let retained_ports = handle
+                .iter()
+                .flat_map(V3ServerAggregateHandle::retained_active_key_cleanup_ports);
+            match control_release_ports(&request, declaration, retained_ports) {
                 Ok(ports) => ports,
                 Err(message) => {
                     let response = ControlResponse {
@@ -796,7 +939,109 @@ pub(crate) async fn run_managed_control_loop(
             }
             continue;
         }
-        let should_release_ports = valid && request.operation == ControlOperation::ReleasePorts;
+        if let Some(release_ports) = release_ports {
+            let Some(aggregate_handle) = handle.as_mut() else {
+                return fail_managed_runtime_with_hooks_cleanup(
+                    instance_dir,
+                    &declaration.instance_id,
+                    None,
+                    hooks_sidecar,
+                    V3LifecycleError::Validation(
+                        "managed runtime handle was already consumed".to_string(),
+                    ),
+                )
+                .await;
+            };
+            let report = aggregate_handle
+                .shutdown_listener_ports(&release_ports)
+                .await;
+            let custody_error = read_live_retained_front_control_handoff(
+                instance_dir,
+                &declaration.instance_id,
+                &start_nonce,
+            )
+            .and_then(|_| {
+                persist_retained_front_control_handoff(
+                    instance_dir,
+                    declaration,
+                    aggregate_handle.exact_active_key_custody(),
+                )
+            })
+            .err();
+            let released_set = report.released_ports.into_iter().collect();
+            let released = format_u16_set(&released_set);
+            let cleanup_complete =
+                report.control_cleanup_failures.is_empty() && custody_error.is_none();
+            let final_listener = aggregate_handle.listener_release_is_complete();
+            let state = if final_listener {
+                V3ManagedRunState::Stopping
+            } else {
+                V3ManagedRunState::Running
+            };
+            let mut message = if final_listener {
+                format!("released final listener ports {released}; managed foreground exiting")
+            } else {
+                format!("released listener ports {released}")
+            };
+            if !report.control_cleanup_failures.is_empty() {
+                let pending = report
+                    .control_cleanup_failures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                message.push_str(&format!("; pending control cleanup: {pending}"));
+            }
+            if let Some(error) = custody_error {
+                message.push_str(&format!(
+                    "; active-key control custody persistence failed: {error}"
+                ));
+            }
+            let status_result = (|| {
+                let previous = if final_listener {
+                    None
+                } else {
+                    read_live_status_detail(instance_dir, &declaration.instance_id)?
+                };
+                write_status(
+                    instance_dir,
+                    &declaration.instance_id,
+                    state.clone(),
+                    Some(append_status_detail(previous.as_deref(), message.clone())),
+                )
+            })();
+            if let Err(error) = status_result {
+                if cleanup_complete {
+                    return fail_managed_runtime_with_hooks_cleanup(
+                        instance_dir,
+                        &declaration.instance_id,
+                        handle.take(),
+                        hooks_sidecar,
+                        error,
+                    )
+                    .await;
+                }
+                message.push_str(&format!("; managed release status write failed: {error}"));
+            }
+            let response = ControlResponse {
+                schema_version: SCHEMA_VERSION,
+                instance_id: declaration.instance_id.clone(),
+                accepted: cleanup_complete,
+                state,
+                message,
+            };
+            if let Err(error) = write_control_response(&mut stream, &response).await {
+                eprintln!("managed ReleasePorts response write failed: {error}");
+            }
+            if final_listener {
+                return shutdown(
+                    handle.take().expect("managed release owns its handle"),
+                    hooks_sidecar,
+                )
+                .await;
+            }
+            continue;
+        }
         let state = if should_stop {
             V3ManagedRunState::Stopping
         } else if should_restart {
@@ -833,102 +1078,6 @@ pub(crate) async fn run_managed_control_loop(
                 .await;
             };
             return shutdown(handle, hooks_sidecar).await;
-        }
-        if should_release_ports {
-            let Some(release_ports) = release_ports else {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    V3LifecycleError::Validation(
-                        "release-ports control request did not carry a port set".to_string(),
-                    ),
-                )
-                .await;
-            };
-            let Some(aggregate_handle) = handle.as_mut() else {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    V3LifecycleError::Validation(
-                        "managed runtime handle was already consumed".to_string(),
-                    ),
-                )
-                .await;
-            };
-            let released = aggregate_handle
-                .shutdown_listener_ports(&release_ports)
-                .await;
-            let released_set: BTreeSet<u16> = released.into_iter().collect();
-            if !aggregate_handle.has_active_listener() {
-                if let Err(error) = write_status(
-                    instance_dir,
-                    &declaration.instance_id,
-                    V3ManagedRunState::Stopping,
-                    Some(format!(
-                        "released final listener ports {}; managed foreground exiting",
-                        format_u16_set(&released_set)
-                    )),
-                ) {
-                    return fail_managed_runtime_with_hooks_cleanup(
-                        instance_dir,
-                        &declaration.instance_id,
-                        handle.take(),
-                        hooks_sidecar,
-                        error,
-                    )
-                    .await;
-                }
-                let Some(handle) = handle.take() else {
-                    return fail_managed_runtime_with_hooks_cleanup(
-                        instance_dir,
-                        &declaration.instance_id,
-                        None,
-                        hooks_sidecar,
-                        V3LifecycleError::Validation(
-                            "managed runtime handle was already consumed".to_string(),
-                        ),
-                    )
-                    .await;
-                };
-                return shutdown(handle, hooks_sidecar).await;
-            }
-            let current_detail =
-                match read_live_status_detail(instance_dir, &declaration.instance_id) {
-                    Ok(detail) => detail,
-                    Err(error) => {
-                        return fail_managed_runtime_with_hooks_cleanup(
-                            instance_dir,
-                            &declaration.instance_id,
-                            handle.take(),
-                            hooks_sidecar,
-                            error,
-                        )
-                        .await;
-                    }
-                };
-            if let Err(error) = write_status(
-                instance_dir,
-                &declaration.instance_id,
-                V3ManagedRunState::Running,
-                Some(append_status_detail(
-                    current_detail.as_deref(),
-                    format!("released listener ports {}", format_u16_set(&released_set)),
-                )),
-            ) {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    error,
-                )
-                .await;
-            }
-            continue;
         }
     }
 }

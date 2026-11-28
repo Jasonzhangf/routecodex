@@ -1,4 +1,5 @@
 use crate::health::V3ProviderHealthStore;
+use crate::provider_identity::V3ProviderKeyRef;
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -162,19 +163,17 @@ impl V3ProviderHealthProbePermit {
 pub trait V3ProviderSchedulingReader {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
+        key_ref: V3ProviderKeyRef<'_>,
         interface_id: &str,
-        auth_alias: &str,
-        model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
         let _ = interface_id;
         self.scheduling_projection(
-            provider_id,
-            auth_alias,
-            model_id,
+            key_ref.provider_id,
+            key_ref.auth_alias,
+            key_ref.model_id,
             priority,
             base_weight,
             now_ms,

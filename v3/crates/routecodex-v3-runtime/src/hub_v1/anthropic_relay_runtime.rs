@@ -1,16 +1,12 @@
-use super::relay_runtime_shared::{
-    handle_provider_failure_with_response_code, provider_response_governance_failure,
-};
+use super::relay_runtime_shared::provider_response_governance_failure;
 use super::*;
 use crate::operation_runner::plan_execution::{
-    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
-    V3PlanExecutionTargetSource,
+    run_v3_plan_execution_operator_with_probes_active_keys, V3PlanExecutionModePolicy,
+    V3PlanExecutionStop, V3PlanExecutionTargetSource,
 };
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 mod response_closeout;
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    project_v3_client_disconnect, provider_runtime_failure_stage, v3_relay_provider_policy_now_epoch_ms,
     v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy,
@@ -19,17 +15,13 @@ use futures_util::StreamExt;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use routecodex_v3_provider_responses::{
-    build_v3_anthropic_provider_request_header, build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    is_v3_anthropic_provider_request_header_name, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody,
-    V3ProviderSseStream, V3ResponsesProviderTarget,
+    build_v3_anthropic_provider_request_header,
+    is_v3_anthropic_provider_request_header_name, ResponsesTransport, V3ProviderError, V3ProviderResponseBody,
+    V3ProviderSseStream,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_02_from_fields,
@@ -38,8 +30,7 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3AnthropicRelayRuntimeInput {
@@ -163,6 +154,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         true,
         Some(handoff),
+        None,
     )
     .await?;
     if output.status < 400 && output.terminal_disposition.is_none() {
@@ -416,6 +408,29 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         true,
         None,
+        None,
+    )
+    .await
+}
+
+pub async fn execute_v3_anthropic_relay_runtime_with_active_keys(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
+) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    execute_v3_anthropic_relay_runtime_inner_with_refill(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        client_headers,
+        V3HubRelayResponseHookProfile::empty(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        true,
+        None,
+        active_keys,
     )
     .await
 }
@@ -438,6 +453,7 @@ async fn execute_v3_anthropic_relay_runtime_inner_with_refill<T: ResponsesTransp
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    active_keys: Option<Arc<routecodex_v3_target::V3ActiveKeySelectionState>>,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     let request_execution_control = match initial_handoff.as_ref() {
         Some(handoff) => handoff.request_execution_control.clone(),
@@ -449,6 +465,11 @@ async fn execute_v3_anthropic_relay_runtime_inner_with_refill<T: ResponsesTransp
     let max_refills =
         super::resp_chat_process_03_governed::v3_chat_process_refill_max_consecutive();
     let mut carrier = super::relay_runtime_core::V3RelayRefillCarrier {
+        active_keys: active_keys.or_else(|| {
+            initial_handoff
+                .as_ref()
+                .and_then(|handoff| handoff.active_keys.clone())
+        }),
         request_execution_control,
         accumulated_items: Vec::new(),
         accumulated_usage: None,
@@ -538,13 +559,21 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
     client_headers: Vec<V3AnthropicRelayClientHeader>,
-    mut response_hook_profile: V3HubRelayResponseHookProfile,
+    response_hook_profile: V3HubRelayResponseHookProfile,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
     mut refill: Option<&mut super::relay_runtime_core::V3RelayRefillCarrier>,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    let active_keys = refill
+        .as_ref()
+        .and_then(|carrier| carrier.active_keys.clone())
+        .or_else(|| {
+            initial_handoff
+                .as_ref()
+                .and_then(|handoff| handoff.active_keys.clone())
+        });
     let request_execution_control = match refill.as_ref() {
         Some(carrier) => carrier.request_execution_control.clone(),
         None => match initial_handoff.as_ref() {
@@ -568,6 +597,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     } else {
         V3HubTransportIntent::Json
     };
+    let source_estimated_turns = crate::nodes::estimate_history_turns(&input.payload, "anthropic");
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Anthropic,
@@ -612,6 +642,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             entry_kind: "anthropic".to_string(),
             endpoint_path: "/v1/messages".to_string(),
             requested_model: None,
+            source_estimated_turns: Some(source_estimated_turns),
+            is_compaction: false,
             deterministic_sample,
         },
     };
@@ -637,20 +669,23 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let (planned_request, initial_plan) =
         match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
             attempt_budget.residence_deadline(),
-            run_v3_plan_execution_operator_with_probes(
+            run_v3_plan_execution_operator_with_probes_active_keys(
                 attempt_budget.clone(),
                 resolved_request,
                 manifest,
                 target_source,
                 &input.failure_session_scope,
                 &provider_health,
+                active_keys.clone(),
                 &failed_candidates,
                 &request_local_busy_candidates,
                 v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3AnthropicRelayRuntimeError::Target)?,
                 deterministic_sample,
                 allow_exhaustion_rescue_probe,
-                retry_selected.take(),
+                retry_selected
+                    .take()
+                    .map(crate::operation_runner::plan_execution::V3PreferredSelection::Fresh),
                 V3PlanExecutionModePolicy::RelayOnly {
                     entry_protocol: V3HubEntryProtocol::Anthropic,
                 },
@@ -683,9 +718,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         exhaustion.attempted_candidates
                     ),
                 );
+                let (_, source, witness) =
+                    request_execution_control.take_failure_for_exhaustion(source);
                 return Ok(provider_failure_output(
                     super::relay_runtime_shared::terminalize_provider_failure_with_source(
-                        failure, source, None,
+                        failure, source, witness,
                     ),
                     trace,
                     Vec::new(),
@@ -719,6 +756,27 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqExecution05Planned");
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
+    let mut active_episode = None::<routecodex_v3_target::V3ActiveKeyEpisode>;
+    let mut active_attempt_dispatched;
+    macro_rules! active_failure {
+        ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr $(,)?) => {
+            active_failure!($context, $selected, $failure, $state, $retry, $events, None)
+        };
+        ($context:expr, $selected:expr, $failure:expr, $state:expr, $retry:expr, $events:expr, $code:expr $(,)?) => {
+            super::relay_runtime_shared::handle_provider_failure_with_response_code_and_active_keys(
+                $context,
+                $selected,
+                $failure,
+                $state,
+                $retry,
+                $events,
+                $code,
+                active_keys.as_deref(),
+                active_episode.as_mut(),
+                active_attempt_dispatched,
+            )
+        };
+    }
     let failure_context = V3RelayProviderFailurePolicyContext {
         recovery_control: Some(&request_execution_control),
         manifest,
@@ -731,21 +789,26 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     // 统一 relay timing（与 relay_runtime_core 同语义）：只写入 typed
     // observability，不进入 payload。
     loop {
-        last_external_http = None;
-        let preferred_selected = retry_selected.take();
+        let preferred_selected = retry_selected.take().map(|s| {
+            crate::operation_runner::plan_execution::V3PreferredSelection::pending(
+                s,
+                active_episode.as_ref(),
+            )
+        });
         let selected = if let Some(selected) = initial_selected.take() {
             selected
         } else {
             let target_resolution =
                 crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
-                    run_v3_plan_execution_operator_with_probes(
+                    run_v3_plan_execution_operator_with_probes_active_keys(
                         attempt_budget.clone(),
                         (*req05.previous.previous.previous.payload.0).clone(),
                         manifest,
                         V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
                         &input.failure_session_scope,
                         &provider_health,
+                        active_keys.clone(),
                         &failed_candidates,
                         &request_local_busy_candidates,
                         v3_relay_provider_policy_now_epoch_ms()
@@ -791,11 +854,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         "selected_target_exhausted",
                         format!("selected target exhausted after {attempted_candidates:?}"),
                     );
+                    let (_, source, witness) =
+                        request_execution_control.take_failure_for_exhaustion(source);
                     return Ok(provider_failure_output(
                         super::relay_runtime_shared::terminalize_provider_failure_with_source(
-                            failure,
-                            source,
-                            last_external_http.clone(),
+                            failure, source, witness,
                         ),
                         trace,
                         std::mem::take(&mut provider_failure_events),
@@ -803,6 +866,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         };
+        if active_episode.as_ref().map(|episode| &episode.selection)
+            != selected.active_selection.as_ref()
+        {
+            active_episode = selected
+                .active_selection
+                .clone()
+                .map(routecodex_v3_target::V3ActiveKeyEpisode::new);
+        }
+        active_attempt_dispatched = false;
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
@@ -826,7 +898,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         trace.push("V3HubReqTarget06Resolved");
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
-                let terminal_failure = handle_provider_failure(
+                let terminal_failure = active_failure!(
                     &failure_context,
                     selected,
                     provider_request_failure($stage, $kind, $error),
@@ -932,17 +1004,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 ),
             };
         let provider_request_snapshot = transport_request.provider_request_projection();
-        if !provider_health
-            .acquire_business_recovery_trial(
-                &request_execution_control,
+        if selected.route.estimated_history_turns.is_some()
+            && provider_health.provider_blocked_until_compact(
+                &failure_context.failure_session_scope,
                 &selected_target_provider_id,
-                &selected_target_interface_id,
-                &selected_target_auth_alias,
-                &selected_target_model_id,
-                v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(V3AnthropicRelayRuntimeError::ExecutionControlRequest)?,
             )
-            .map_err(V3AnthropicRelayRuntimeError::ExecutionControlRequest)?
         {
             failed_candidates.insert(
                 crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
@@ -951,12 +1017,31 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             );
             continue;
         }
+        if !crate::provider_failure_runtime_policy::prepare_selected_dispatch(
+            &selected,
+            Some(&retained_expanded),
+            active_keys.as_deref(),
+            active_episode.as_mut(),
+            &request_execution_control,
+            &provider_health,
+            &input.failure_session_scope,
+            &mut failed_candidates,
+            v3_relay_provider_policy_now_epoch_ms()
+                .map_err(V3AnthropicRelayRuntimeError::Target)?,
+        )
+        .map_err(V3AnthropicRelayRuntimeError::Target)?
+        {
+            continue;
+        }
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
         let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
         })?;
+        last_external_http = None;
+        request_execution_control.begin_actual_send();
+        active_attempt_dispatched = true;
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
@@ -1013,7 +1098,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     ),
                 );
                 let _ = runtime_timing.finish_external();
-                if let Some(failure) = handle_provider_failure(
+                if let Some(failure) = active_failure!(
                     &failure_context,
                     selected,
                     failure,
@@ -1051,7 +1136,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
                 failure.failed_attempt_evidence = failed_attempt_evidence;
                 let _ = runtime_timing.finish_external();
-                if let Some(failure) = handle_provider_failure(
+                if let Some(failure) = active_failure!(
                     &failure_context,
                     selected,
                     failure,
@@ -1128,7 +1213,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     Ok(chunks) => chunks,
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
-                        let terminal_failure = handle_provider_failure(
+                        let terminal_failure = active_failure!(
                             &failure_context,
                             selected,
                             failure.clone(),
@@ -1188,7 +1273,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         trace.as_mut(),
                         // anthropic 整流缓冲：两种客户端传输都由这一份完整
                         // client_response 派生，因此 SSE 出口同样可以发布 round。
-                        refill.as_mut().map(|carrier| &mut **carrier),
+                        refill.as_deref_mut(),
                         move |finalized| {
                             project_v3_anthropic_client_response_for_provider(
                                 finalized,
@@ -1250,7 +1335,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     )
                                 };
                             failure.provider_status = Some(provider_status);
-                            if let Some(failure) = handle_provider_failure_with_response_code(
+                            if let Some(failure) = active_failure!(
                                 &failure_context,
                                 selected,
                                 failure,
@@ -1296,6 +1381,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_auth_alias,
                     &selected_target_model_id,
                 )?;
+                if let (Some(keys), Some(episode)) =
+                    (active_keys.as_deref(), active_episode.as_mut())
+                {
+                    keys.accepted_success(episode)
+                        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))?;
+                }
                 let mut observability =
                     crate::hub_v1::relay_runtime_shared::build_v3_relay_observability(
                         "anthropic",
@@ -1347,7 +1438,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             },
                             &selected_target_provider_id,
                         );
-                        if let Some(failure) = handle_provider_failure(
+                        if let Some(failure) = active_failure!(
                             &failure_context,
                             selected,
                             failure,
@@ -1387,7 +1478,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     },
                                     &selected_target_provider_id,
                                 );
-                                if let Some(failure) = handle_provider_failure(
+                                if let Some(failure) = active_failure!(
                                     &failure_context,
                                     selected,
                                     failure,
@@ -1437,7 +1528,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &input.request_id,
                     &response_hook_profile,
                     trace.as_mut(),
-                    refill.as_mut().map(|carrier| &mut **carrier),
+                    refill.as_deref_mut(),
                     move |finalized| {
                         if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
                             project_v3_anthropic_client_response_for_provider(
@@ -1500,7 +1591,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 )
                             };
                         failure.provider_status = Some(provider_status);
-                        if let Some(failure) = handle_provider_failure_with_response_code(
+                        if let Some(failure) = active_failure!(
                             &failure_context,
                             selected,
                             failure,
@@ -1546,6 +1637,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_auth_alias,
                     &selected_target_model_id,
                 )?;
+                if let (Some(keys), Some(episode)) =
+                    (active_keys.as_deref(), active_episode.as_mut())
+                {
+                    keys.accepted_success(episode)
+                        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))?;
+                }
                 let mut observability =
                     crate::hub_v1::relay_runtime_shared::build_v3_relay_observability(
                         "anthropic",
@@ -1669,6 +1766,7 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
             }
         }),
         source_stage: failure.source_stage,
+        attempt_source: failure.attempt_source,
         terminal_projection: failure.terminal_projection,
         terminal_disposition: failure.terminal_disposition,
         error_operator_fault: failure.error_operator_fault,

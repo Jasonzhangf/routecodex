@@ -70,6 +70,12 @@ Out of scope：
 
 ## 6. 测试计划
 
+- `issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_400`:
+  public `/v1/responses` explicit Relay preserves the submitted orphan item on the first
+  sole Provider attempt. Missing parent history alone cannot reject locally. The complete
+  marked actual final Provider HTTP 400 follows the existing typed Error chain and v9
+  final-error projection rule. Native protocol identity checks remain separately covered.
+
 - controlled Relay JSON/SSE E2E with node trace Req01-Req09 + Resp01-Resp06。
 - local continuation two-turn E2E。
 - servertool roundtrip E2E。
