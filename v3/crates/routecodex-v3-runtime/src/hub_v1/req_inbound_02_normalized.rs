@@ -562,15 +562,35 @@ fn merge_responses_chat_histories(
     for message in &mut sanitized_source {
         strip_client_history_provenance_fields_from_message(message);
     }
+    let all_decoded_are_legacy_tool_outputs =
+        decoded.iter().enumerate().all(|(dec_idx, message)| {
+            message["role"] == "tool"
+                || is_decoder_proven_named_tool_output(
+                    message,
+                    decoded_provenance.message_entries.get(dec_idx),
+                )
+        });
     if sanitized_source.len() == decoded.len() {
         let mut merged = Vec::with_capacity(sanitized_source.len());
         let mut all_matched = true;
         for (src, dec) in sanitized_source.iter().zip(decoded) {
-            let incompatible_receipt_item_id = (tool_output_name(src).is_some()
+            let is_named_or_search_receipt = tool_output_name(src).is_some()
                 || tool_output_name(dec).is_some()
                 || is_tool_search_output(src)
-                || is_tool_search_output(dec))
-                && tool_output_item_id(src) != tool_output_item_id(dec);
+                || is_tool_search_output(dec);
+            let is_ordinary_tool_receipt = src["role"] == "tool" || dec["role"] == "tool";
+            let incompatible_receipt_item_id = if is_named_or_search_receipt {
+                tool_output_item_id(src) != tool_output_item_id(dec)
+            } else if is_ordinary_tool_receipt && all_decoded_are_legacy_tool_outputs {
+                tool_output_item_id(src).is_some()
+                    && tool_output_item_id(src) != tool_output_item_id(dec)
+            } else if is_ordinary_tool_receipt {
+                tool_output_item_id(src).is_some()
+                    && tool_output_item_id(dec).is_some()
+                    && tool_output_item_id(src) != tool_output_item_id(dec)
+            } else {
+                false
+            };
             if incompatible_receipt_item_id {
                 all_matched = false;
                 break;
@@ -588,14 +608,6 @@ fn merge_responses_chat_histories(
     }
     // Legacy public hook callers supply preceding Chat calls and current Responses
     // results. Decode the results first; Req04 still owns id/kind pairing.
-    let all_decoded_are_legacy_tool_outputs =
-        decoded.iter().enumerate().all(|(dec_idx, message)| {
-            message["role"] == "tool"
-                || is_decoder_proven_named_tool_output(
-                    message,
-                    decoded_provenance.message_entries.get(dec_idx),
-                )
-        });
     if all_decoded_are_legacy_tool_outputs {
         let original_source_len = sanitized_source.len();
         let mut source_reserved = vec![false; original_source_len];
@@ -646,11 +658,9 @@ fn merge_responses_chat_histories(
                         && merge_equivalent_chat_value(&merged[idx], result).is_some()
                 })
             } else {
-                (0..original_source_len)
-                    .find(|&idx| {
-                        is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
-                    })
-                    .or_else(|| (0..original_source_len).find(|&idx| is_unreserved_candidate(idx)))
+                (0..original_source_len).find(|&idx| {
+                    is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
+                })
             };
             if let Some(pos) = matched_pos {
                 source_reserved[pos] = true;
@@ -2336,6 +2346,83 @@ mod tests {
         );
         let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(non_tso_conflict)
             .expect_err("non-tool-search conflicting outputs on same call_id must still fail");
+        assert!(
+            err.contains("conflicting tool output representations"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dual_history_idless_function_output_with_existing_explicit_fco_preserves_both_without_conflict(
+    ) {
+        for incoming_output in ["second-output", "first-output"] {
+            let raw = raw_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": [{
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "second-output",
+                        "routecodex_chat_extension": {
+                            "responses_item_id": "fco_2"
+                        }
+                    }],
+                    "input": [{
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": incoming_output
+                    }]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+
+            let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+                .expect(
+                    "ID-less function_call_output with existing explicit fco_2 must preserve both",
+                );
+            let messages = normalized.previous.payload.0["messages"]
+                .as_array()
+                .expect("canonical Chat messages");
+            assert_eq!(messages.len(), 2, "{messages:#?}");
+            assert_eq!(
+                messages[0]["routecodex_chat_extension"]["responses_item_id"],
+                json!("fco_2")
+            );
+            assert_eq!(messages[0]["content"], json!("second-output"));
+            assert!(messages[1]["routecodex_chat_extension"]
+                .get("responses_item_id")
+                .is_none());
+            assert_eq!(messages[1]["content"], json!(incoming_output));
+        }
+
+        // Genuine twins sharing the same explicit item_id with conflicting outputs must still fail.
+        let same_item_id_conflict = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_item_id": "fco_2"
+                    }
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "id": "fco_2",
+                    "call_id": "call_1",
+                    "output": "first-output"
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let err =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(same_item_id_conflict)
+                .expect_err("same explicit item_id with conflicting outputs must still fail");
         assert!(
             err.contains("conflicting tool output representations"),
             "unexpected error: {err}"
