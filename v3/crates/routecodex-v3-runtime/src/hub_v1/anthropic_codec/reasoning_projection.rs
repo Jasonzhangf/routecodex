@@ -231,7 +231,7 @@ fn restore_anthropic_reasoning_extension(
     block: &mut Map<String, Value>,
 ) {
     for (key, value) in extension {
-        if key != "type" {
+        if !matches!(key.as_str(), "type" | "signature" | "data") {
             block.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }

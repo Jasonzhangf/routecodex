@@ -1128,3 +1128,51 @@ fn responses_non_string_encrypted_content_remains_explicit() {
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn responses_anthropic_reasoning_extension_ignores_injected_signature_and_data() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "visible reasoning"}],
+                "encrypted_content": null,
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "redacted_thinking",
+                        "signature": "",
+                        "data": "stale-data",
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                }
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            }
+        ]
+    }))
+    .expect("representable reasoning with null ciphertext must normalize cleanly");
+
+    let encoded =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("anthropic request encoding must succeed");
+    let block = encoded["messages"][0]["content"][0]
+        .as_object()
+        .expect("projected thinking block");
+    assert_eq!(block.get("type").and_then(Value::as_str), Some("thinking"));
+    assert_eq!(
+        block.get("thinking").and_then(Value::as_str),
+        Some("visible reasoning")
+    );
+    assert_eq!(
+        block.get("cache_control"),
+        Some(&json!({"type": "ephemeral"}))
+    );
+    assert!(!block.contains_key("signature"));
+    assert!(!block.contains_key("data"));
+}

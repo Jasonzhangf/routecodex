@@ -7399,10 +7399,7 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([
-        {"type":"web_search"},
-        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
-    ]);
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
 
     // Turn 1: the provider answers with reasoning (carrying `cache_control`)
     // and a native tool call.
@@ -7586,13 +7583,22 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
-    let manifest = responses_relay_provider_protocol_manifest(
+    let mut manifest = responses_relay_provider_protocol_manifest(
         free_port(),
         free_port(),
         provider_base_url.trim_end_matches("/v1"),
         "anthropic",
         None,
     );
+    manifest
+        .providers
+        .get_mut("test")
+        .unwrap()
+        .models
+        .get_mut("test")
+        .unwrap()
+        .capabilities
+        .push("web_search".to_string());
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder()
@@ -7634,10 +7640,13 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         .unwrap()
         .unwrap();
     assert!(
-        first_capture.body["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == declared_tool)),
-        "declared tool name must reach the first provider attempt: {}",
+        first_capture.body["tools"].as_array().is_some_and(|tools| {
+            tools.iter().any(|tool| tool["name"] == declared_tool)
+                && tools.iter().any(|tool| {
+                    tool["type"] == "web_search_20250305" && tool["name"] == "web_search"
+                })
+        }),
+        "both hosted web_search and declared lookup tool must reach the first provider attempt: {}",
         first_capture.body
     );
 
@@ -7660,6 +7669,8 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 "routecodex_chat_extension":{
                     "anthropic_reasoning":{
                         "type":"redacted_thinking",
+                        "signature":"",
+                        "data":"stale-extension-data",
                         "cache_control":{"type":"ephemeral"}
                     }
                 }
@@ -7700,6 +7711,19 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 .await
                 .unwrap()
                 .unwrap();
+            assert!(
+                capture.body["tools"]
+                    .as_array()
+                    .is_some_and(|tools| {
+                        tools.iter().any(|tool| tool["name"] == declared_tool)
+                            && tools.iter().any(|tool| {
+                                tool["type"] == "web_search_20250305"
+                                    && tool["name"] == "web_search"
+                            })
+                    }),
+                "{label}: both hosted web_search and declared lookup tool must survive followup: {}",
+                capture.body
+            );
             let history = capture.body["messages"]
                 .as_array()
                 .unwrap_or_else(|| panic!("{label}: missing provider messages: {}", capture.body));
@@ -7742,6 +7766,11 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 assert!(
                     replayed_reasoning.get("signature").is_none(),
                     "{label}: empty or null ciphertext must not emit an empty signature field: {}",
+                    capture.body
+                );
+                assert!(
+                    replayed_reasoning.get("data").is_none(),
+                    "{label}: extension replay must not inject data onto a thinking block: {}",
                     capture.body
                 );
             } else {
@@ -7816,10 +7845,7 @@ async fn responses_client_anthropic_redacted_reasoning_association_survives_two_
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([
-        {"type":"web_search"},
-        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
-    ]);
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
 
     let first = client
         .post(format!("{base}/v1/responses"))
@@ -8006,10 +8032,7 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([
-        {"type":"web_search"},
-        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
-    ]);
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
 
     for order in ["plain-first", "extended-first"] {
         let first = client
