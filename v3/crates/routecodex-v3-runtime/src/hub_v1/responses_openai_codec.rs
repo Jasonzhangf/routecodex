@@ -953,7 +953,14 @@ fn retain_anthropic_reasoning_block_association(
         "reasoning_content".to_string(),
         Value::String(reasoning_content.to_string()),
     );
-    if let Some(encrypted_content) = item.get("encrypted_content") {
+    let downgraded_redacted_thinking = anthropic_reasoning
+        .and_then(|extension| extension.get("type"))
+        .and_then(Value::as_str)
+        == Some("redacted_thinking")
+        && !has_encrypted_content;
+    if let Some(encrypted_content) = item.get("encrypted_content").filter(|value| {
+        !downgraded_redacted_thinking || value.as_str().is_none_or(|raw| !raw.is_empty())
+    }) {
         block.insert("encrypted_content".to_string(), encrypted_content.clone());
     }
     if let Some(anthropic_reasoning) = anthropic_reasoning {

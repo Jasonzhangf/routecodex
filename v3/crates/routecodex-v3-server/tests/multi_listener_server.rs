@@ -6772,6 +6772,13 @@ fn execute_reasoning_lookup_tool(call: &Value) -> String {
     (limit * 14).to_string()
 }
 
+fn reasoning_lookup_hosted_web_search_declaration() -> Value {
+    json!({
+        "type": "web_search_20250305",
+        "name": "web_search"
+    })
+}
+
 fn reasoning_lookup_tool_declaration() -> Value {
     json!({
         "name":REASONING_LOOKUP_TOOL,
@@ -6786,24 +6793,22 @@ fn reasoning_lookup_tool_declaration() -> Value {
     })
 }
 
+fn reasoning_lookup_expected_tools() -> Vec<Value> {
+    vec![
+        reasoning_lookup_hosted_web_search_declaration(),
+        reasoning_lookup_tool_declaration(),
+    ]
+}
+
 fn validate_reasoning_lookup_tool_declaration(body: &Value) -> Result<(), String> {
     let tools = body["tools"]
         .as_array()
         .ok_or_else(|| format!("missing provider tool declarations: {body}"))?;
-    let mut matching_tools = tools
-        .iter()
-        .filter(|tool| tool["name"] == REASONING_LOOKUP_TOOL);
-    let tool_declaration = matching_tools
-        .next()
-        .ok_or_else(|| format!("missing reasoning lookup tool declaration: {body}"))?;
-    if matching_tools.next().is_some() {
+    let expected_tools = reasoning_lookup_expected_tools();
+    if tools != expected_tools.as_slice() {
         return Err(format!(
-            "unexpected duplicate reasoning lookup tool declaration: {body}"
+            "reasoning lookup tool declarations changed (expected exact hosted web_search + lookup): {body}"
         ));
-    }
-    let expected_tool = reasoning_lookup_tool_declaration();
-    if tool_declaration != &expected_tool {
-        return Err(format!("reasoning lookup tool declaration changed: {body}"));
     }
     Ok(())
 }
@@ -6963,14 +6968,14 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
         {"role":"user","content":[tool_result.clone()]}
-    ],"tools":[reasoning_lookup_tool_declaration()]});
+    ],"tools":reasoning_lookup_expected_tools()});
     assert!(validate_reasoning_lookup_followup(&valid).is_ok());
 
     let reversed = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_result.clone()]},
         {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]}
-    ],"tools":[reasoning_lookup_tool_declaration()]});
+    ],"tools":reasoning_lookup_expected_tools()});
     assert!(validate_reasoning_lookup_followup(&reversed)
         .unwrap_err()
         .contains("must immediately follow"));
@@ -6979,7 +6984,7 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_use.clone()]},
         {"role":"assistant","content":[tool_result.clone()]}
-    ],"tools":[reasoning_lookup_tool_declaration()]});
+    ],"tools":reasoning_lookup_expected_tools()});
     assert!(validate_reasoning_lookup_followup(&wrong_roles)
         .unwrap_err()
         .contains("assistant message"));
@@ -6989,7 +6994,7 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
         {"role":"user","content":[{"type":"text","text":"intervening"}]},
         {"role":"user","content":[tool_result.clone()]}
-    ],"tools":[reasoning_lookup_tool_declaration()]});
+    ],"tools":reasoning_lookup_expected_tools()});
     assert!(validate_reasoning_lookup_followup(&intervening_message)
         .unwrap_err()
         .contains("must immediately follow"));
@@ -6998,19 +7003,33 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
         {"role":"user","content":[{"type":"text","text":"before result"},tool_result.clone()]}
-    ],"tools":[reasoning_lookup_tool_declaration()]});
+    ],"tools":reasoning_lookup_expected_tools()});
     assert!(validate_reasoning_lookup_followup(&text_before_result)
         .unwrap_err()
         .contains("must start its user message content"));
 
     let missing_declaration = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
-        {"role":"assistant","content":[tool_use]},
-        {"role":"user","content":[tool_result]}
+        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"user","content":[tool_result.clone()]}
     ]});
     assert!(validate_reasoning_lookup_followup(&missing_declaration)
         .unwrap_err()
         .contains("tool declarations"));
+
+    let malformed_hosted_envelope = json!({"messages":[
+        {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use]},
+        {"role":"user","content":[tool_result]}
+    ],"tools":[
+        {"type":"web_search_20250305","name":"web_search","input_schema":{}},
+        reasoning_lookup_tool_declaration()
+    ]});
+    assert!(
+        validate_reasoning_lookup_followup(&malformed_hosted_envelope)
+            .unwrap_err()
+            .contains("hosted web_search + lookup")
+    );
 }
 
 #[tokio::test]
@@ -7026,7 +7045,7 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
         .json(
-            &json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+            &json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
                 {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
             ]}),
         )
@@ -7080,7 +7099,7 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
     let misplaced_thinking = client
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
-        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
             {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
             {"role":"assistant","content":[{
                 "type":"tool_use",
@@ -7101,7 +7120,7 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
     let extra_thinking = client
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
-        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
             {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
             {"role":"assistant","content":[
                 {"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},
@@ -7119,7 +7138,7 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
     let missing_assistant_text = client
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
-        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
             {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
             {"role":"assistant","content":[
                 {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}},
@@ -7163,6 +7182,20 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_declaration
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let malformed_hosted = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[
+            {"type":"web_search_20250305","name":"web_search","input_schema":{}},
+            reasoning_lookup_tool_declaration()
+        ],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(malformed_hosted.status(), StatusCode::BAD_REQUEST);
     shutdown.send(()).unwrap();
 }
 
@@ -7178,7 +7211,7 @@ async fn controlled_reasoning_lookup_fixture_rejects_missing_opening_message() {
     let invalid = client
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
-        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[]}))
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[]}))
         .send()
         .await
         .unwrap();
@@ -7639,14 +7672,10 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         .await
         .unwrap()
         .unwrap();
-    assert!(
-        first_capture.body["tools"].as_array().is_some_and(|tools| {
-            tools.iter().any(|tool| tool["name"] == declared_tool)
-                && tools.iter().any(|tool| {
-                    tool["type"] == "web_search_20250305" && tool["name"] == "web_search"
-                })
-        }),
-        "both hosted web_search and declared lookup tool must reach the first provider attempt: {}",
+    assert_eq!(
+        first_capture.body["tools"],
+        json!(reasoning_lookup_expected_tools()),
+        "both exact hosted web_search and declared lookup tool must reach the first provider attempt: {}",
         first_capture.body
     );
 
@@ -7711,17 +7740,10 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 .await
                 .unwrap()
                 .unwrap();
-            assert!(
-                capture.body["tools"]
-                    .as_array()
-                    .is_some_and(|tools| {
-                        tools.iter().any(|tool| tool["name"] == declared_tool)
-                            && tools.iter().any(|tool| {
-                                tool["type"] == "web_search_20250305"
-                                    && tool["name"] == "web_search"
-                            })
-                    }),
-                "{label}: both hosted web_search and declared lookup tool must survive followup: {}",
+            assert_eq!(
+                capture.body["tools"],
+                json!(reasoning_lookup_expected_tools()),
+                "{label}: both exact hosted web_search and declared lookup tool must survive followup: {}",
                 capture.body
             );
             let history = capture.body["messages"]
