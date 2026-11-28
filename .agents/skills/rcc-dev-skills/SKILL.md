@@ -37,7 +37,7 @@ description: "RouteCodex V3 开发与排障：定位首次偏离和唯一 owner�
    - 证据仍不足时保持 bug `open`，由 issue owner 继续复现、缩小请求或沿合同记录具体阻塞和恢复信号。切换 Provider、换 key、路由 fallback、重启后偶发成功和其他绕行都不满足该 issue 的根因与修复验收。
 5. 功能/修复使用真实 HTTP、WebSocket、CLI 或公开 consumer 验收，记录稳定测试 ID 与实际命令。受控上游可以使用，但源码字符串检查和未经过公开入口的 mock 不能替代行为证据。Provider 错误与业务响应的回归要求沿项目合同。
 6. 按映射运行受影响测试和 `npm run verify:v3-architecture-ci`。umbrella 已覆盖的子 gate 不再单跑；未覆盖的必需项仍执行，新输入只使受影响证据失效。
-7. 运行时变更在本地 gate 通过后，新 worktree 若缺少 `node_modules` 先软链主仓依赖再提交并合并到最新 `main`；随后沿[运行验收](references/50-rcc-config-ssot.md)完成 `npm run build:v3`、`npm run install:v3`、配置检查、正式 `rccv3 restart`、各 listener health 和同入口回放，不等待人工二次催促；PR CI 可并行，不以其等待阻止候选验收。原失败样本必须覆盖；真实客户端工具须证明完整身份、参数、执行结果及后续配对，200 或 `requires_action` 不算工具成功。
+7. 运行时变更在本地 gate 通过后沿[运行验收](references/50-rcc-config-ssot.md)完成 build、install、配置检查、正式 restart、各 listener health 和同入口回放；PR CI 可并行，不以其等待阻止候选验收。原失败样本必须覆盖；真实客户端工具须证明完整身份、参数、执行结果及后续配对，200 或 `requires_action` 不算工具成功。
 
 ## Defect Lifecycle
 
