@@ -711,8 +711,8 @@ fn merge_responses_chat_histories(
     )
 }
 
-fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value> {
-    match (source, decoded) {
+fn merge_equivalent_chat_value(source_val: &Value, decoded_val: &Value) -> Option<Value> {
+    match (source_val, decoded_val) {
         (Value::Object(source), Value::Object(decoded)) => {
             let empty_assistant_content = |object: &serde_json::Map<String, Value>| {
                 object.get("role").is_some_and(|role| role == "assistant")
@@ -730,11 +730,33 @@ fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value>
                         reasoning.is_null() || reasoning.as_str() == Some("")
                     })
             };
+            let is_tool_receipt = |object: &serde_json::Map<String, Value>, value: &Value| {
+                object.get("role").is_some_and(|role| role == "tool")
+                    || tool_output_name(value).is_some()
+                    || is_tool_search_output(value)
+            };
+            let matching_receipt_item_id = (is_tool_receipt(source, source_val)
+                || is_tool_receipt(decoded, decoded_val))
+                && tool_output_item_id(source_val).is_some()
+                && tool_output_item_id(source_val) == tool_output_item_id(decoded_val)
+                && (!source.contains_key("id")
+                    || source
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .is_some_and(|id| Some(id) == tool_output_item_id(decoded_val)))
+                && (!decoded.contains_key("id")
+                    || decoded
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .is_some_and(|id| Some(id) == tool_output_item_id(source_val)));
             let semantic_keys = |object: &serde_json::Map<String, Value>| {
                 object
                     .keys()
                     .filter(|key| {
                         key.as_str() != "routecodex_chat_extension"
+                            && !(key.as_str() == "id" && matching_receipt_item_id)
                             && !(key.as_str() == "content" && empty_assistant_content(object))
                             && !(key.as_str() == "reasoning_content"
                                 && empty_assistant_reasoning(object))
@@ -769,6 +791,8 @@ fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value>
                         }
                     }
                     merged.insert(key.clone(), Value::Object(fields));
+                } else if key == "id" && matching_receipt_item_id && !source.contains_key("id") {
+                    merged.insert(key.clone(), value.clone());
                 } else if key == "content"
                     && empty_assistant_content(source)
                     && empty_assistant_content(decoded)
@@ -811,7 +835,7 @@ fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value>
             .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded))
             .collect::<Option<Vec<_>>>()
             .map(Value::Array),
-        _ if source == decoded => Some(source.clone()),
+        _ if source_val == decoded_val => Some(source_val.clone()),
         _ => None,
     }
 }

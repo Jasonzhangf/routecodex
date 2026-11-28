@@ -357,17 +357,23 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
     } else {
         raw_responses_tool_output_type
     };
-    let call_id = row
-        .get("tool_call_id")
-        .or_else(|| row.get("call_id"))
-        .or_else(|| row.get("id"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
     let extension = row
         .get("routecodex_chat_extension")
         .and_then(Value::as_object);
     let named_output = extension.and_then(|fields| fields.get("responses_tool_output_name"));
+    let call_id = row
+        .get("tool_call_id")
+        .or_else(|| row.get("call_id"))
+        .or_else(|| {
+            if named_output.is_none() {
+                row.get("id")
+            } else {
+                None
+            }
+        })
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if call_id.is_none() && named_output.is_none() {
         return Ok(None);
     }

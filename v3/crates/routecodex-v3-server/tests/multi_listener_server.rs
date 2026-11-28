@@ -10373,6 +10373,188 @@ async fn issue4a0b3aa_r27_dual_top_level_legacy_id_and_whitespace_suffixed_nativ
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r28_dual_matching_top_level_legacy_id_and_native_id_merges_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r28_dual_matching_top_level_fco2",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var(
+        "V3_P6_TEST_KEY",
+        "issue4a0b3aa-r28-matching-top-level-id-key",
+    );
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "id": "fco_2",
+                "content": "second-output"
+            }],
+            "input": [{
+                "type": "function_call_output",
+                "id": "fco_2",
+                "call_id": "call_1",
+                "output": "second-output"
+            }]
+        }))
+        .send()
+        .await
+        .expect("matching top-level legacy fco_2 and native fco_2 must merge cleanly");
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history r28 matching top-level id capture timeout")
+        .expect("dual-history r28 matching top-level id capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        input.len(),
+        1,
+        "matching top-level fco_2 and native fco_2 must merge into one provider receipt: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[0],
+        json!({
+            "type": "function_call_output",
+            "id": "fco_2",
+            "call_id": "call_1",
+            "output": "second-output"
+        })
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r28_dual_named_top_level_legacy_id_and_idless_native_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r28_dual_named_top_level_fco2",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r28-named-top-level-id-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    for incoming_output in ["first-output", "second-output"] {
+        let res = client
+            .post(&resp_endpoint)
+            .json(&json!({
+                "model": "test",
+                "stream": false,
+                "messages": [{
+                    "role": "user",
+                    "id": "fco_2",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_name": "send_message_to_thread",
+                        "responses_tool_output_namespace": "codex_tui"
+                    }
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "name": "send_message_to_thread",
+                    "namespace": "codex_tui",
+                    "output": incoming_output
+                }]
+            }))
+            .send()
+            .await
+            .expect("named legacy receipt with top-level id and ID-less native named receipt must succeed");
+        assert_eq!(res.status(), StatusCode::OK);
+        let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+            .await
+            .expect("dual-history r28 named top-level id capture timeout")
+            .expect("dual-history r28 named top-level id capture");
+        let input = capture.body["input"]
+            .as_array()
+            .expect("provider input array");
+        assert_eq!(
+            input.len(),
+            2,
+            "both named legacy fco_2 and ID-less native named receipt ({incoming_output}) must reach first provider: {}",
+            capture.body
+        );
+        assert!(
+            input[0].get("call_id").is_none(),
+            "named legacy receipt must not synthesize call_id from top-level id: {}",
+            capture.body
+        );
+        assert_eq!(
+            input[0],
+            json!({
+                "type": "function_call_output",
+                "id": "fco_2",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "second-output"
+            })
+        );
+        assert!(
+            input[1].get("id").is_none() && input[1].get("call_id").is_none(),
+            "ID-less native named receipt must stay ID-less without call_id: {}",
+            capture.body
+        );
+        assert_eq!(
+            input[1],
+            json!({
+                "type": "function_call_output",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": incoming_output
+            })
+        );
+    }
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
