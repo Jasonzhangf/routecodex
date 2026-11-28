@@ -2257,15 +2257,16 @@ fn validate_prunable_stopped_instance_dir(
         return None;
     }
     let status = read_json::<V3ManagedStatusRecord>(&path.join("status.json")).ok()?;
-    if status.state != V3ManagedRunState::Stopped {
+    if status.state != V3ManagedRunState::Stopped
+        || status
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("pending active-key control cleanup"))
+    {
         return None;
     }
-    let cache_path = path.join("pid.cache");
-    if cache_path.exists() {
-        let cache = read_json::<V3ManagedPidCache>(&cache_path).ok()?;
-        if !managed_generation_has_exited(&cache).unwrap_or(false) {
-            return None;
-        }
+    if !reap::is_settled_stopped_instance_dir(path, &declaration) {
+        return None;
     }
     let modified = metadata.modified().ok()?;
     if check_age
@@ -2504,5 +2505,62 @@ mod instance_prune_tests {
             "candidate locked after discovery must preserve its directory and artifacts"
         );
         drop(acquired_lock);
+    }
+
+    #[test]
+    fn prune_stale_stopped_instance_dirs_preserves_retained_custody_and_hooks_records() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let instances = dir.path().join("instances");
+        fs::create_dir_all(&instances).expect("create instances");
+
+        let mut dirs = Vec::new();
+        for (idx, id) in [
+            "v3-retained-custody",
+            "v3-hooks-live",
+            "v3-ordinary-settled",
+            "v3-newest-1",
+            "v3-newest-2",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let inst_dir = instances.join(id);
+            fs::create_dir_all(&inst_dir).expect("create stopped dir");
+            write_test_declaration(&inst_dir, id, "/tmp/config-custody.toml");
+            let detail = (id == "v3-retained-custody")
+                .then(|| "pending active-key control cleanup".to_string());
+            write_status(&inst_dir, id, V3ManagedRunState::Stopped, detail).expect("write status");
+            if id == "v3-retained-custody" {
+                fs::write(inst_dir.join("control.json"), b"{}").expect("write retained control");
+                fs::write(inst_dir.join(FRONT_HANDOFF_FILE), b"{}")
+                    .expect("write unresolved handoff");
+            }
+            if id == "v3-hooks-live" {
+                fs::write(
+                    inst_dir.join(HOOKS_SIDECAR_PROCESS_FILE),
+                    format!("{{\"pid\":{}}}", std::process::id()),
+                )
+                .expect("write hooks sidecar record");
+            }
+            backdate_dir(&inst_dir, 96 - idx as u64);
+            dirs.push(inst_dir);
+        }
+
+        prune_stale_stopped_instance_dirs(dir.path(), "v3-current", "/tmp/config-custody.toml");
+
+        assert!(
+            dirs[0].exists() && dirs[0].join("control.json").exists(),
+            "retained control custody stopped dir must survive pruning"
+        );
+        assert!(
+            dirs[1].exists() && dirs[1].join(HOOKS_SIDECAR_PROCESS_FILE).exists(),
+            "stopped dir with hooks sidecar record must survive pruning"
+        );
+        assert!(
+            !dirs[2].exists(),
+            "ordinary settled >24h stopped dir beyond 2 retained must still be pruned"
+        );
+        assert!(dirs[3].exists());
+        assert!(dirs[4].exists());
     }
 }
