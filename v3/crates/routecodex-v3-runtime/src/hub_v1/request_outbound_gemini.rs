@@ -62,6 +62,9 @@ fn project_gemini_compatible_fields_inner(
     if let Some(native_request) = native_request {
         restore_gemini_native_request(row, native_request, governed_tools.as_ref())?;
     }
+    // Validate/project root `store` and `routecodex_chat_extension.responses_request.store`
+    // after native Gemini fields are restored and before extension consumption strips them.
+    project_gemini_store_to_wire_map(row, drops)?;
     consume_gemini_routecodex_chat_extension(row, drops)?;
     Ok(())
 }
@@ -1207,11 +1210,10 @@ fn consume_gemini_routecodex_chat_extension(
         }
         return Ok(());
     };
-    let mut responses_request = responses_request.as_object().cloned().ok_or_else(|| {
+    let responses_request = responses_request.as_object().cloned().ok_or_else(|| {
         "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request"
             .to_string()
     })?;
-    consume_gemini_responses_store(&mut responses_request, drops)?;
     for (key, value) in &responses_request {
         drops.push(V3ProjectionDropRecord::new(
             "gemini",
@@ -1231,32 +1233,6 @@ fn consume_gemini_routecodex_chat_extension(
         ));
     }
     Ok(())
-}
-
-fn consume_gemini_responses_store(
-    row: &mut Map<String, Value>,
-    drops: &mut Vec<V3ProjectionDropRecord>,
-) -> Result<(), String> {
-    let Some(value) = row.remove("store") else {
-        return Ok(());
-    };
-    match value.as_bool() {
-        Some(false) => Ok(()),
-        Some(true) => {
-            drops.push(V3ProjectionDropRecord::new(
-                "gemini",
-                "$.routecodex_chat_extension.responses_request.store",
-                "unmapped_target_protocol_field_unrepresentable",
-                value,
-                "consume_gemini_responses_store",
-            ));
-            Ok(())
-        }
-        None => Err(
-            "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request.store"
-                .to_string(),
-        ),
-    }
 }
 
 fn project_gemini_reasoning_effort(

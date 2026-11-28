@@ -545,6 +545,88 @@ pub(crate) fn project_outbound_payload_for_target_protocol_with_drops(
     )
 }
 
+/// Remove an unsupported Gemini request `store` preference from Direct Gemini
+/// requests and record the complete source value. The governed source remains
+/// untouched for another declared target or refill.
+pub(crate) fn project_gemini_store_to_wire(
+    source: &mut Value,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
+    let Some(row) = source.as_object_mut() else {
+        return Ok(());
+    };
+    project_gemini_store_to_wire_map(row, drops)
+}
+
+pub(crate) fn project_gemini_store_to_wire_map(
+    row: &mut Map<String, Value>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
+    let root_store = row.get("store").cloned();
+    let extension_store = row
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_request"))
+        .and_then(Value::as_object)
+        .and_then(|responses_request| responses_request.get("store"))
+        .cloned();
+    for (path, value) in [
+        ("$.store", root_store.as_ref()),
+        (
+            "$.routecodex_chat_extension.responses_request.store",
+            extension_store.as_ref(),
+        ),
+    ] {
+        if value.is_some_and(|value| !value.is_boolean()) {
+            return Err(format!(
+                "MalformedOutboundField target_protocol=gemini path={path}"
+            ));
+        }
+    }
+    if matches!((root_store.as_ref(), extension_store.as_ref()), (Some(root), Some(extension)) if root != extension)
+    {
+        return Err("ConflictingOutboundFields target_protocol=gemini path=$.store".to_string());
+    }
+    let Some(value) = root_store.or(extension_store) else {
+        return Ok(());
+    };
+    let record_path = if row.contains_key("store") {
+        "$.store"
+    } else {
+        "$.routecodex_chat_extension.responses_request.store"
+    };
+    drops.push(V3ProjectionDropRecord::new(
+        "gemini",
+        record_path,
+        "unmapped_target_protocol_field_unrepresentable",
+        value,
+        "project_gemini_store_to_wire",
+    ));
+    row.remove("store");
+    let mut remove_extension = false;
+    if let Some(extension) = row
+        .get_mut("routecodex_chat_extension")
+        .and_then(Value::as_object_mut)
+    {
+        let mut remove_responses_request = false;
+        if let Some(responses_request) = extension
+            .get_mut("responses_request")
+            .and_then(Value::as_object_mut)
+        {
+            responses_request.remove("store");
+            remove_responses_request = responses_request.is_empty();
+        }
+        if remove_responses_request {
+            extension.remove("responses_request");
+        }
+        remove_extension = extension.is_empty();
+    }
+    if remove_extension {
+        row.remove("routecodex_chat_extension");
+    }
+    Ok(())
+}
+
 /// Responses 出站投影变体：保留客户端 `custom` 工具声明，交给显式配置的
 /// provider compat profile（`responses:custom-tool-function`）作为唯一 owner
 /// 完成 custom→function 投影。默认的 `apply_patch` 归一化若先行会消费掉

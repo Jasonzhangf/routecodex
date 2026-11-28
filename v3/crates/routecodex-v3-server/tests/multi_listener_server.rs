@@ -19159,3 +19159,214 @@ targets = [
     handle.shutdown().await;
     shutdown.send(()).unwrap();
 }
+
+fn a50622c_assert_gemini_store_records(
+    records: &[Value],
+    expected_path: Option<&str>,
+    expected_value: Option<bool>,
+) {
+    assert_eq!(
+        records.len(),
+        usize::from(expected_value.is_some()),
+        "{records:?}"
+    );
+    for record in records {
+        assert_eq!(record["target_protocol"], "gemini", "{record}");
+        assert_eq!(record["json_path"], expected_path.unwrap(), "{record}");
+        assert_eq!(
+            record["source_value"],
+            json!(expected_value.unwrap()),
+            "{record}"
+        );
+        assert_eq!(
+            record["canonical_value"],
+            json!(expected_value.unwrap()),
+            "{record}"
+        );
+        assert_eq!(
+            record["stage"], "outbound_target_protocol_projection",
+            "{record}"
+        );
+        assert_eq!(
+            record["reason"], "unmapped_target_protocol_field_unrepresentable",
+            "{record}"
+        );
+        assert!(
+            record["request_id"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty()),
+            "{record}"
+        );
+        assert!(
+            record["entry_port"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty()),
+            "{record}"
+        );
+        assert_eq!(
+            record["drop_site"], "project_gemini_store_to_wire",
+            "{record}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a50622c_gemini_store_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("a50622c-gemini-store");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (provider_url, mut captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "controlled-a50622c-gemini-store");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_url.trim_end_matches("/v1"),
+        "gemini",
+        None,
+    );
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec!["gemini".to_string()];
+    }
+    let drop_log = home_guard.path.join("projection-drops.jsonl");
+    manifest.debug.projection_drop_log_file = Some(drop_log.display().to_string());
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let endpoint = format!(
+        "http://{}/v1beta/models/client-test:generateContent",
+        handle.listeners[0].addr
+    );
+    for (marker, root_store, ext_store, expected_path, expected_value) in [
+        ("root-true", Some(true), None, Some("$.store"), Some(true)),
+        (
+            "root-false",
+            Some(false),
+            None,
+            Some("$.store"),
+            Some(false),
+        ),
+        ("absent", None, None, None, None),
+        (
+            "ext-true",
+            None,
+            Some(true),
+            Some("$.routecodex_chat_extension.responses_request.store"),
+            Some(true),
+        ),
+        (
+            "ext-false",
+            None,
+            Some(false),
+            Some("$.routecodex_chat_extension.responses_request.store"),
+            Some(false),
+        ),
+    ] {
+        let mut request = json!({
+            "contents": [{"role": "user", "parts": [{"text": "gemini store request"}]}],
+            "generationConfig": {"temperature": 0.2}
+        });
+        if let Some(store) = root_store {
+            request["store"] = json!(store);
+        }
+        if let Some(ext_store) = ext_store {
+            request["routecodex_chat_extension"] = json!({
+                "responses_request": { "store": ext_store }
+            });
+        }
+        let response = client
+            .post(&endpoint)
+            .header("accept", "application/json")
+            .json(&request)
+            .send()
+            .await;
+        let (status, body) = match response {
+            Ok(response) => (response.status(), response.text().await),
+            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Err(error)),
+        };
+        let first = captures.try_recv().ok();
+        let duplicate = captures.try_recv().ok();
+        let records: Vec<Value> = fs::read_to_string(&drop_log)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let _ = fs::remove_file(&drop_log);
+
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "store={marker} {body:?} first={first:?}"
+        );
+        let body = body.expect("client business response must finish");
+        let client_response: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            client_response["candidates"][0]["content"]["parts"][0]["text"],
+            "controlled gemini JSON",
+            "{body}"
+        );
+        let first = first.expect("Gemini provider must receive the first attempt");
+        assert!(
+            first.body.get("store").is_none(),
+            "store={marker} body={} records={records:?}",
+            first.body
+        );
+        assert!(
+            first.body.get("routecodex_chat_extension").is_none(),
+            "{}",
+            first.body
+        );
+        assert_eq!(
+            first
+                .body
+                .pointer("/contents/0/parts/0/text")
+                .and_then(Value::as_str),
+            Some("gemini store request"),
+            "{}",
+            first.body
+        );
+        assert!(duplicate.is_none(), "store={marker}");
+        a50622c_assert_gemini_store_records(&records, expected_path, expected_value);
+    }
+
+    // Malformed non-boolean or conflicting root/extension `store` must fail explicitly before hitting the provider.
+    for (label, invalid_payload) in [
+        (
+            "malformed",
+            json!({
+                "contents": [{"role": "user", "parts": [{"text": "bad store"}]}],
+                "store": "true"
+            }),
+        ),
+        (
+            "conflicting",
+            json!({
+                "contents": [{"role": "user", "parts": [{"text": "conflicting store"}]}],
+                "store": true,
+                "routecodex_chat_extension": {
+                    "responses_request": { "store": false }
+                }
+            }),
+        ),
+    ] {
+        let invalid = client
+            .post(&endpoint)
+            .header("accept", "application/json")
+            .json(&invalid_payload)
+            .send()
+            .await;
+        assert!(
+            invalid.as_ref().is_err() || !invalid.as_ref().unwrap().status().is_success(),
+            "{label} Gemini store must fail locally"
+        );
+        assert!(
+            captures.try_recv().is_err(),
+            "{label} Gemini store must not reach provider upstream"
+        );
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
