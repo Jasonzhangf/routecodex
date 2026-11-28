@@ -919,8 +919,7 @@ fn tool_output_item_id(message: &Value) -> Option<&str> {
         .pointer("/routecodex_chat_extension/responses_item_id")
         .or_else(|| message.get("id"))
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn tool_output_name(message: &Value) -> Option<&str> {

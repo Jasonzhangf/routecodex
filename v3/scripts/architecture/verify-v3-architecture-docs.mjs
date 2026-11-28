@@ -151,13 +151,63 @@ for (const [stepId, field] of [
   }
 }
 
+const explicitHistoryPairing = array(resourceMap.resources).find(
+  (entry) => entry?.resource_id === 'v3.operation_runner.explicit_history_pairing',
+);
+if (!explicitHistoryPairing) {
+  fail('v3-resource-operation-map.yml: missing v3.operation_runner.explicit_history_pairing');
+} else {
+  if (!String(explicitHistoryPairing.semantic_contract?.req04_orphan_rule ?? '').trim()) {
+    fail('v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing must declare semantic_contract.req04_orphan_rule');
+  }
+  for (const writer of [
+    'normalize_v3_operation_runner_request_losslessly',
+    'govern_v3_operation_runner_chat_request',
+    'govern_chat_request_at_req04',
+  ]) {
+    if (!array(explicitHistoryPairing.allowed_writers).includes(writer)) {
+      fail(`v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing allowed_writers missing ${writer}`);
+    }
+  }
+  for (const reader of [
+    'govern_v3_operation_runner_chat_request',
+    'project_v3_operation_runner_standard_provider_request',
+    'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
+  ]) {
+    if (!array(explicitHistoryPairing.allowed_readers).includes(reader)) {
+      fail(`v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing allowed_readers missing ${reader}`);
+    }
+  }
+}
+
+for (const [stepId, field] of [
+  ['v3-op-runner-req-04', 'produces'],
+  ['v3-op-runner-req-04', 'side_channel_writes'],
+  ['v3-op-runner-req-05', 'consumes'],
+  ['v3-op-runner-req-05', 'side_channel_reads'],
+  ['v3-hub-req-05', 'consumes'],
+  ['v3-hub-req-05', 'side_channel_reads'],
+]) {
+  const edge = allEdges.find((candidate) => candidate?.step_id === stepId);
+  if (!edge || !array(edge.resource_flow?.[field]).includes('v3.operation_runner.explicit_history_pairing')) {
+    fail(`v3-mainline-call-map.yml: ${stepId} resource_flow.${field} must declare v3.operation_runner.explicit_history_pairing`);
+  }
+}
+
 const requestDagPath = path.join(root, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
 if (fs.existsSync(requestDagPath)) {
   try {
     const requestDag = JSON.parse(fs.readFileSync(requestDagPath, 'utf8'));
     const nodesById = new Map(array(requestDag.nodes).map((node) => [node?.id, node]));
+    const governNode = nodesById.get('govern_chat_request');
     const projNode = nodesById.get('project_standard_provider_request');
     const compatNode = nodesById.get('adjust_provider_private_request');
+    if (!array(governNode?.resources?.writes).includes('v3.operation_runner.explicit_history_pairing')) {
+      fail('docs/architecture/dagpipe/v3.operation_runner.request.graph.json: govern_chat_request must write v3.operation_runner.explicit_history_pairing');
+    }
+    if (!array(projNode?.resources?.reads).includes('v3.operation_runner.explicit_history_pairing')) {
+      fail('docs/architecture/dagpipe/v3.operation_runner.request.graph.json: project_standard_provider_request must read v3.operation_runner.explicit_history_pairing');
+    }
     if (!array(projNode?.resources?.writes).includes('v3.operation_runner.attempt_projection_context')) {
       fail('docs/architecture/dagpipe/v3.operation_runner.request.graph.json: project_standard_provider_request must write v3.operation_runner.attempt_projection_context');
     }

@@ -66,6 +66,7 @@
     },
     {
       "id": "govern_chat_request",
+      "description": "Governs canonical Chat request tool/thinking history and updates v3.operation_runner.explicit_history_pairing (preserve_orphan_tool_output_literal for orphan Responses tool outputs).",
       "operator": "routecodex.v3.operation.govern_chat_request",
       "operator_version": "1",
       "inputs": ["execution-planned-request"],
@@ -75,12 +76,12 @@
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.operation_runner.execution_mode", "v3.operation_runner.explicit_history_pairing"],
-        "writes": ["v3.operation_runner.tool_thinking_turn_context"]
+        "writes": ["v3.operation_runner.tool_thinking_turn_context", "v3.operation_runner.explicit_history_pairing"]
       }
     },
     {
       "id": "project_standard_provider_request",
-      "description": "Projects canonical Chat into standard provider semantics and writes v3.operation_runner.attempt_projection_context (including orphan_tool_output_literals for Responses-entry Relay attempts).",
+      "description": "Projects canonical Chat into standard provider semantics, reads v3.operation_runner.explicit_history_pairing (including preserve_orphan_tool_output_literal), and writes v3.operation_runner.attempt_projection_context (including orphan_tool_output_literals for Responses-entry Relay attempts).",
       "operator": "routecodex.v3.operation.project_standard_provider_request",
       "operator_version": "1",
       "inputs": ["governed-request"],

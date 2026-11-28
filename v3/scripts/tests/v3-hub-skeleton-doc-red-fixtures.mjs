@@ -50,6 +50,34 @@ const fixtures = [
     to: 'allowed_readers: [normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]',
     diagnostic: /attempt_projection_context allowed_readers missing adjust_provider_private_request/,
   },
+  {
+    name: 'op-runner req-04 explicit_history_pairing write removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '      produces: [v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing]',
+    to: '      produces: [v3.operation_runner.tool_thinking_turn_context]',
+    diagnostic: /v3-op-runner-req-04 resource_flow\.produces must declare v3\.operation_runner\.explicit_history_pairing/,
+  },
+  {
+    name: 'op-runner req-05 explicit_history_pairing read removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '      consumes: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]',
+    to: '      consumes: [v3.request.normal_payload, v3.operation_runner.request_inverse_context]',
+    diagnostic: /v3-op-runner-req-05 resource_flow\.consumes must declare v3\.operation_runner\.explicit_history_pairing/,
+  },
+  {
+    name: 'explicit_history_pairing req04 writer removed',
+    file: 'docs/architecture/v3-resource-operation-map.yml',
+    from: 'allowed_writers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, govern_chat_request_at_req04]',
+    to: 'allowed_writers: [normalize_v3_operation_runner_request_losslessly]',
+    diagnostic: /explicit_history_pairing allowed_writers missing govern_v3_operation_runner_chat_request/,
+  },
+  {
+    name: 'explicit_history_pairing req-outbound-07 reader removed',
+    file: 'docs/architecture/v3-resource-operation-map.yml',
+    from: 'allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, build_v3_hub_req_outbound_07_from_v3_hub_req_target_06, govern_v3_operation_runner_chat_response]',
+    to: 'allowed_readers: [govern_v3_operation_runner_chat_request, govern_v3_operation_runner_chat_response]',
+    diagnostic: /explicit_history_pairing allowed_readers missing project_v3_operation_runner_standard_provider_request/,
+  },
 ];
 const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-data-red-'));
 const failures = [];

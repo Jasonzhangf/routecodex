@@ -10195,6 +10195,96 @@ async fn issue4a0b3aa_r25_explicit_whitespace_suffixed_call_id_preserved_verbati
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r26_dual_explicit_fco2_and_whitespace_suffixed_fco2_no_collision_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r26_dual_fco2_and_ws_fco2",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r26-verbatim-receipt-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    for incoming_output in ["second-output", "first-output"] {
+        let res = client
+            .post(&resp_endpoint)
+            .json(&json!({
+                "model": "test",
+                "stream": false,
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_item_id": "fco_2"
+                    }
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "id": "fco_2 ",
+                    "call_id": "call_1",
+                    "output": incoming_output
+                }]
+            }))
+            .send()
+            .await
+            .expect("distinct fco_2 and whitespace-suffixed 'fco_2 ' receipts must succeed without collision");
+        assert_eq!(res.status(), StatusCode::OK);
+        let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+            .await
+            .expect("dual-history r26 verbatim receipt capture timeout")
+            .expect("dual-history r26 verbatim receipt capture");
+        let input = capture.body["input"]
+            .as_array()
+            .expect("provider input array");
+        assert_eq!(
+            input.len(),
+            2,
+            "both fco_2 and 'fco_2 ' ({incoming_output}) must reach first provider without collapsing: {}",
+            capture.body
+        );
+        assert_eq!(
+            input[0],
+            json!({
+                "type": "function_call_output",
+                "id": "fco_2",
+                "call_id": "call_1",
+                "output": "second-output"
+            })
+        );
+        assert_eq!(
+            input[1],
+            json!({
+                "type": "function_call_output",
+                "id": "fco_2 ",
+                "call_id": "call_1",
+                "output": incoming_output
+            })
+        );
+    }
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

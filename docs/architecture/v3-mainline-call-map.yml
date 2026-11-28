@@ -2707,12 +2707,14 @@ chains:
       consumes:
       - v3.request.normal_payload
       - v3.hub.resolved_target
+      - v3.operation_runner.explicit_history_pairing
       produces:
       - v3.request.provider_semantic
       - v3.hub.provider_protocol
       - v3.operation_runner.attempt_projection_context
       side_channel_reads:
       - v3.hub.execution_plan
+      - v3.operation_runner.explicit_history_pairing
       side_channel_writes:
       - v3.hub.provider_protocol
       - v3.operation_runner.attempt_projection_context
@@ -9614,11 +9616,12 @@ chains:
     callee_file: pending
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
+    notes: Updates v3.operation_runner.explicit_history_pairing (preserve_orphan_tool_output_literal in govern_chat_request_at_req04) for orphan Responses tool outputs.
     resource_flow:
       consumes: [v3.operation_runner.execution_mode, v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing]
-      produces: [v3.operation_runner.tool_thinking_turn_context]
+      produces: [v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing]
       side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.explicit_history_pairing]
-      side_channel_writes: [v3.operation_runner.tool_thinking_turn_context]
+      side_channel_writes: [v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing]
   - step_id: v3-op-runner-req-05
     from_node: V3OperationRunnerGovernChatRequest
     to_node: V3OperationRunnerProjectProviderSemantic

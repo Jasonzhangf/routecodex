@@ -3513,10 +3513,11 @@ resources:
       refill_rule: read and preserved when request_origin_kind=refill; never overwritten from continuation payload
       content: explicit_current_request_history_call_and_output_identity_pairs_with_original_kind_namespace_name_argument_paths_encoding
       authority: history validates and passes through prior calls; it never authorizes a new provider call
+      req04_orphan_rule: Chat Process Req04 (govern_v3_operation_runner_chat_request / govern_chat_request_at_req04) sets preserve_orphan_tool_output_literal on orphan Responses tool outputs before ReqOutbound07 (project_v3_operation_runner_standard_provider_request / build_v3_hub_req_outbound_07_from_v3_hub_req_target_06) reads explicit_history_pairing to compute attempt_projection_context.orphan_tool_output_literals
       resp03_reader: Chat Process Resp03 reads explicit history pairing for validation and pass-through only
       payload_rule: argument and output values remain in canonical payload; only identity and pairing references are control state
-    allowed_writers: [normalize_v3_operation_runner_request_losslessly]
-    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, govern_v3_operation_runner_chat_response]
+    allowed_writers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, govern_chat_request_at_req04]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, build_v3_hub_req_outbound_07_from_v3_hub_req_target_06, govern_v3_operation_runner_chat_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false

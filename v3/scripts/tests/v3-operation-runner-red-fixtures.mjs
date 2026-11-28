@@ -1575,6 +1575,83 @@ const mutations = [
     },
     expect: /attempt_projection_context must declare semantic_contract\.orphan_tool_output_literals/u,
   },
+  {
+    name: 'govern-missing-explicit-history-pairing-write',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'govern_chat_request');
+      if (!node) throw new Error('missing govern_chat_request node');
+      node.resources.writes = node.resources.writes.filter(
+        (id) => id !== 'v3.operation_runner.explicit_history_pairing',
+      );
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /govern_chat_request must write v3\.operation_runner\.explicit_history_pairing/u,
+  },
+  {
+    name: 'project-missing-explicit-history-pairing-read',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'project_standard_provider_request');
+      if (!node) throw new Error('missing project_standard_provider_request node');
+      node.resources.reads = node.resources.reads.filter(
+        (id) => id !== 'v3.operation_runner.explicit_history_pairing',
+      );
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /project_standard_provider_request must read v3\.operation_runner\.explicit_history_pairing/u,
+  },
+  {
+    name: 'op-runner-req-04-missing-explicit-history-pairing-write',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      const edge = chain?.edges?.find((item) => item.step_id === 'v3-op-runner-req-04');
+      if (!edge) throw new Error('missing v3-op-runner-req-04 edge');
+      edge.resource_flow.produces = edge.resource_flow.produces.filter(
+        (id) => id !== 'v3.operation_runner.explicit_history_pairing',
+      );
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /v3-op-runner-req-04 resource_flow\.produces must declare v3\.operation_runner\.explicit_history_pairing/u,
+  },
+  {
+    name: 'op-runner-req-05-missing-explicit-history-pairing-read',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      const edge = chain?.edges?.find((item) => item.step_id === 'v3-op-runner-req-05');
+      if (!edge) throw new Error('missing v3-op-runner-req-05 edge');
+      edge.resource_flow.consumes = edge.resource_flow.consumes.filter(
+        (id) => id !== 'v3.operation_runner.explicit_history_pairing',
+      );
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /v3-op-runner-req-05 resource_flow\.consumes must declare v3\.operation_runner\.explicit_history_pairing/u,
+  },
+  {
+    name: 'resource-map-missing-explicit-history-pairing-req04-writer',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-resource-operation-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const res = doc.resources.find((item) => item.resource_id === 'v3.operation_runner.explicit_history_pairing');
+      if (!res) throw new Error('missing v3.operation_runner.explicit_history_pairing');
+      res.allowed_writers = res.allowed_writers.filter(
+        (id) => id !== 'govern_v3_operation_runner_chat_request',
+      );
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /explicit_history_pairing allowed_writers missing govern_v3_operation_runner_chat_request/u,
+  },
 ];
 
 let failed = 0;
