@@ -2461,18 +2461,23 @@ chains:
       - v3.target.concrete_provider
       - v3.request.normal_payload
       - v3.request.protocol_fields
+      - v3.operation_runner.explicit_history_pairing
       produces:
       - v3.responses_direct.policy
+      - v3.operation_runner.explicit_history_pairing
       side_channel_reads:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
       - v3.request.protocol_fields
+      - v3.operation_runner.explicit_history_pairing
       side_channel_writes:
       - v3.responses_direct.policy
       - v3.request.tool_thinking_turn_context
+      - v3.operation_runner.explicit_history_pairing
     semantic_contract:
       - consumes the current selected Target10 protocol decision and fails fast if Direct receives a non-Direct mode at initial entry
       - Direct runtime reselects from the full captured Target09 candidate set; when the new selected target requires Hub Relay, it returns a typed relay handoff side-channel carrying every request-local failed candidate so Relay cannot retry an already-failed Direct target
+      - Direct kernel (execute_v3_responses_direct_runtime_kernel_core_resident) initializes/retains request-scoped v3.operation_runner.explicit_history_pairing on request_execution_control and standardized.explicit_history_pairing, and responses_direct_route_hook carries it onto V3ResponsesDirect11Policy
   - step_id: v3-rd-10
     from_node: V3ResponsesDirect11Policy
     to_node: V3Provider12ResponsesWirePayload
@@ -2487,15 +2492,18 @@ chains:
       - v3.responses_direct.policy
       - v3.request.normal_payload
       - v3.target.concrete_provider
+      - v3.operation_runner.explicit_history_pairing
       produces:
       - v3.provider.responses_wire_payload
       side_channel_reads:
       - v3.responses_direct.policy
       - v3.target.concrete_provider
+      - v3.operation_runner.explicit_history_pairing
       side_channel_writes: []
     semantic_contract:
       - preserves source reasoning effort until Target10 is concrete, then maps it at the Provider compatibility boundary to the registered official target-protocol domain before Provider12 wire construction
       - never writes source effort or projection decisions to MetadataCenter, error metadata, or client payload
+      - responses_direct_request_projection_hook_with_key_catalog_and_drop_context reads policy.explicit_history_pairing for the Direct messages-only Responses wire projection path
   - step_id: v3-rd-11
     from_node: V3Provider12ResponsesWirePayload
     to_node: V3Transport13ResponsesHttpRequest

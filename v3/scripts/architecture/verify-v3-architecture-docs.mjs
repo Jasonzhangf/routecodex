@@ -160,10 +160,16 @@ if (!explicitHistoryPairing) {
   if (!String(explicitHistoryPairing.semantic_contract?.req04_orphan_rule ?? '').trim()) {
     fail('v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing must declare semantic_contract.req04_orphan_rule');
   }
+  if (!String(explicitHistoryPairing.semantic_contract?.direct_rule ?? '').trim()) {
+    fail('v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing must declare semantic_contract.direct_rule');
+  }
   for (const writer of [
     'normalize_v3_operation_runner_request_losslessly',
     'govern_v3_operation_runner_chat_request',
     'govern_chat_request_at_req04',
+    'execute_v3_responses_direct_runtime_kernel_core_resident',
+    'execute_v3_responses_direct_runtime_kernel',
+    'responses_direct_route_hook',
   ]) {
     if (!array(explicitHistoryPairing.allowed_writers).includes(writer)) {
       fail(`v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing allowed_writers missing ${writer}`);
@@ -173,6 +179,10 @@ if (!explicitHistoryPairing) {
     'govern_v3_operation_runner_chat_request',
     'project_v3_operation_runner_standard_provider_request',
     'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
+    'execute_v3_responses_direct_runtime_kernel_core_resident',
+    'responses_direct_route_hook',
+    'responses_direct_request_projection_hook',
+    'responses_direct_request_projection_hook_with_key_catalog_and_drop_context',
   ]) {
     if (!array(explicitHistoryPairing.allowed_readers).includes(reader)) {
       fail(`v3-resource-operation-map.yml: v3.operation_runner.explicit_history_pairing allowed_readers missing ${reader}`);
@@ -191,6 +201,12 @@ for (const [stepId, field] of [
   ['v3-hub-relay-req-02', 'side_channel_writes'],
   ['v3-hub-req-05', 'consumes'],
   ['v3-hub-req-05', 'side_channel_reads'],
+  ['v3-rd-09-direct-policy', 'consumes'],
+  ['v3-rd-09-direct-policy', 'produces'],
+  ['v3-rd-09-direct-policy', 'side_channel_reads'],
+  ['v3-rd-09-direct-policy', 'side_channel_writes'],
+  ['v3-rd-10', 'consumes'],
+  ['v3-rd-10', 'side_channel_reads'],
 ]) {
   const edge = allEdges.find((candidate) => candidate?.step_id === stepId);
   if (!edge || !array(edge.resource_flow?.[field]).includes('v3.operation_runner.explicit_history_pairing')) {

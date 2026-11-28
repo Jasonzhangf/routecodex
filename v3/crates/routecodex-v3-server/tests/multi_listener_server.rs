@@ -10555,6 +10555,104 @@ async fn issue4a0b3aa_r28_dual_named_top_level_legacy_id_and_idless_native_publi
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r29_dual_two_idless_legacy_and_second_twin_input_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r29_dual_two_idless_legacy",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r29-two-idless-legacy-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "first-output"
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output"
+                }
+            ],
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "second-output"
+            }]
+        }))
+        .send()
+        .await
+        .expect("two ID-less legacy receipts plus equivalent second twin input must succeed");
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("dual-history r29 two idless legacy capture timeout")
+        .expect("dual-history r29 two idless legacy capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        input.len(),
+        2,
+        "both original ID-less receipts must reach first provider exactly once: {}",
+        capture.body
+    );
+    assert!(
+        input[0].get("id").is_none() && input[1].get("id").is_none(),
+        "both ID-less receipts must remain ID-less: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[0],
+        json!({
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "first-output"
+        })
+    );
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "second-output"
+        })
+    );
+    assert!(
+        resp_captures.try_recv().is_err(),
+        "request must complete on first provider without reselection"
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

@@ -3514,10 +3514,11 @@ resources:
       content: explicit_current_request_history_call_and_output_identity_pairs_with_original_kind_namespace_name_argument_paths_encoding
       authority: history validates and passes through prior calls; it never authorizes a new provider call
       req04_orphan_rule: Chat Process Req04 (govern_v3_operation_runner_chat_request / govern_chat_request_at_req04) sets preserve_orphan_tool_output_literal on orphan Responses tool outputs before ReqOutbound07 (project_v3_operation_runner_standard_provider_request / build_v3_hub_req_outbound_07_from_v3_hub_req_target_06) reads explicit_history_pairing to compute attempt_projection_context.orphan_tool_output_literals
+      direct_rule: Direct kernel (execute_v3_responses_direct_runtime_kernel_core_resident / execute_v3_responses_direct_runtime_kernel) initializes and retains request-scoped explicit_history_pairing on request_execution_control and standardized.explicit_history_pairing, responses_direct_route_hook carries it onto V3ResponsesDirect11Policy, and responses_direct_request_projection_hook_with_key_catalog_and_drop_context reads policy.explicit_history_pairing on the messages-only Responses projection path
       resp03_reader: Chat Process Resp03 reads explicit history pairing for validation and pass-through only
       payload_rule: argument and output values remain in canonical payload; only identity and pairing references are control state
-    allowed_writers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, govern_chat_request_at_req04]
-    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, build_v3_hub_req_outbound_07_from_v3_hub_req_target_06, govern_v3_operation_runner_chat_response]
+    allowed_writers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, govern_chat_request_at_req04, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel, responses_direct_route_hook]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, build_v3_hub_req_outbound_07_from_v3_hub_req_target_06, govern_v3_operation_runner_chat_response, execute_v3_responses_direct_runtime_kernel_core_resident, responses_direct_route_hook, responses_direct_request_projection_hook, responses_direct_request_projection_hook_with_key_catalog_and_drop_context]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false

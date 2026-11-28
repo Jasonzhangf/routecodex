@@ -659,9 +659,18 @@ fn merge_responses_chat_histories(
                         && merge_equivalent_chat_value(&merged[idx], result).is_some()
                 })
             } else {
-                (0..original_source_len).find(|&idx| {
-                    is_unreserved_candidate(idx) && tool_output_item_id(&merged[idx]).is_none()
-                })
+                (0..original_source_len)
+                    .find(|&idx| {
+                        is_unreserved_candidate(idx)
+                            && tool_output_item_id(&merged[idx]).is_none()
+                            && merge_equivalent_chat_value(&merged[idx], result).is_some()
+                    })
+                    .or_else(|| {
+                        (0..original_source_len).find(|&idx| {
+                            is_unreserved_candidate(idx)
+                                && tool_output_item_id(&merged[idx]).is_none()
+                        })
+                    })
             };
             if let Some(pos) = matched_pos {
                 source_reserved[pos] = true;
@@ -2540,6 +2549,76 @@ mod tests {
         let err =
             build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(same_item_id_conflict)
                 .expect_err("same explicit item_id with conflicting outputs must still fail");
+        assert!(
+            err.contains("conflicting tool output representations"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dual_two_idless_legacy_tool_outputs_match_equivalent_second_twin_before_conflict() {
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "first-output"
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "second-output"
+                    }
+                ],
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "second-output"
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("second equivalent ID-less legacy receipt must match without false conflict");
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(messages.len(), 2, "{messages:#?}");
+        assert_eq!(messages[0]["content"], json!("first-output"));
+        assert_eq!(messages[1]["content"], json!("second-output"));
+        assert!(normalized
+            .explicit_history_pairing
+            .message_entry(0)
+            .is_some_and(|entry| entry.omit_tool_output_id));
+        assert!(normalized
+            .explicit_history_pairing
+            .message_entry(1)
+            .is_some_and(|entry| entry.omit_tool_output_id));
+
+        let lone_conflict = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "first-output"
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "second-output"
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(lone_conflict)
+            .expect_err("lone conflicting ID-less twin must still fail");
         assert!(
             err.contains("conflicting tool output representations"),
             "unexpected error: {err}"
