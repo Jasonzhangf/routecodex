@@ -30,8 +30,7 @@
           "responses": { "type": "string" },
           "openai_chat": { "type": "string" },
           "anthropic": { "type": "string" },
-          "gemini": { "type": "string" },
-          "transform": { "type": ["string", "null"] }
+          "gemini": { "type": "string" }
         }
       }
     },
@@ -44,8 +43,7 @@
         "properties": {
           "hub_field": { "type": "string" },
           "protocol": { "type": "string" },
-          "protocol_field": { "type": "string" },
-          "transform": { "type": ["string", "null"] }
+          "protocol_field": { "type": "string" }
         }
       }
     }

@@ -5,15 +5,13 @@
 //!   角色 / finish_reason 映射必须以 JSON 表为真源，禁止在 codec 中手写新映射；
 //! - 表数据在 `tables/*.json`，结构规范在 `tables/schema/protocol_tables.schema.json`；
 //! - 加载器 include_str! + serde_json + OnceLock，加载即校验，校验失败 fail-fast；
-//! - 少数无法纯数据表达的转换（折叠、状态机）用表内 `"transform": "fn_name"`
-//!   引用注册函数兜底；未注册 transform 在使用时 fail-fast。
 //!
 //! 本模块只承载查表语义，不承载任何协议转换实现；codec 通过本模块的查询函数
 //! 读取映射，禁止绕过表直接手写映射逻辑。
 
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 /// 查表方向：Inbound = 协议值 -> hub 值（归一化）；Outbound = hub 值 -> 协议值（反向投影）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,76 +48,6 @@ impl V3TableKind {
     }
 }
 
-/// transform 注册函数：少数无法纯数据表达的转换（折叠、状态机）的兜底。
-pub type V3TableTransform = fn(&Value) -> Result<Value, String>;
-
-static TRANSFORM_REGISTRY: OnceLock<Mutex<HashMap<&'static str, V3TableTransform>>> =
-    OnceLock::new();
-
-fn transform_registry() -> &'static Mutex<HashMap<&'static str, V3TableTransform>> {
-    TRANSFORM_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// 注册一个 transform 函数（重复注册 fail-fast）。
-pub fn register_transform(name: &'static str, f: V3TableTransform) -> Result<(), String> {
-    let mut registry = transform_registry()
-        .lock()
-        .map_err(|_| "transform registry poisoned".to_string())?;
-    if registry.insert(name, f).is_some() {
-        return Err(format!("transform '{name}' already registered"));
-    }
-    Ok(())
-}
-
-/// 执行已注册的 transform（未注册 fail-fast）。
-pub fn run_transform(name: &str, value: &Value) -> Result<Value, String> {
-    let registry = transform_registry()
-        .lock()
-        .map_err(|_| "transform registry poisoned".to_string())?;
-    let f = registry
-        .get(name)
-        .ok_or_else(|| format!("transform '{name}' not registered"))?;
-    f(value)
-}
-
-/// 校验表内 transform 引用均已注册（供红测与启动校验调用）。
-pub fn validate_table_transforms() -> Result<(), String> {
-    let tables = protocol_tables()?;
-    for (table_id, table) in &tables.tables {
-        match table {
-            V3TableData::Value { rows, .. } => {
-                for row in rows {
-                    if let Some(transform) = &row.transform {
-                        ensure_transform_registered(table_id, transform)?;
-                    }
-                }
-            }
-            V3TableData::Field { entries, .. } => {
-                for entry in entries {
-                    if let Some(transform) = &entry.transform {
-                        ensure_transform_registered(table_id, transform)?;
-                    }
-                }
-            }
-            V3TableData::FieldWhitelist { .. } => {}
-        }
-    }
-    Ok(())
-}
-
-fn ensure_transform_registered(table_id: &str, transform: &str) -> Result<(), String> {
-    let registry = transform_registry()
-        .lock()
-        .map_err(|_| "transform registry poisoned".to_string())?;
-    if registry.contains_key(transform) {
-        Ok(())
-    } else {
-        Err(format!(
-            "table '{table_id}' references unregistered transform '{transform}'"
-        ))
-    }
-}
-
 /// 一张 protocol_value_map 的行：hub 为 canonical 轴值；by_protocol 为各协议等价值；
 /// direction 限定方向（None = 双向）。
 #[derive(Debug, Clone)]
@@ -127,7 +55,6 @@ struct V3ValueRow {
     hub: String,
     direction: Option<V3TableDirection>,
     by_protocol: BTreeMap<String, String>,
-    transform: Option<String>,
 }
 
 impl V3ValueRow {
@@ -145,7 +72,6 @@ struct V3FieldEntry {
     hub_field: String,
     protocol: String,
     protocol_field: String,
-    transform: Option<String>,
 }
 
 #[derive(Debug)]
@@ -297,10 +223,6 @@ fn validate_value_table(
                 by_protocol.insert(protocol.clone(), protocol_value.to_string());
             }
         }
-        let transform = value
-            .get("transform")
-            .and_then(Value::as_str)
-            .map(str::to_string);
         // inbound 唯一性：仅约束 Inbound 方向可命中的行（协议值 -> hub 必须唯一；
         // outbound 折叠是 hub -> 协议 多对一，合法）。
         if direction_matches_for_inbound(direction) {
@@ -319,7 +241,6 @@ fn validate_value_table(
             hub: hub.to_string(),
             direction,
             by_protocol,
-            transform,
         });
     }
     if rows.is_empty() {
@@ -370,10 +291,6 @@ fn validate_field_table(
             .ok_or_else(|| {
                 format!("table '{table_id}' entries[{index}] missing 'protocol_field'")
             })?;
-        let transform = entry
-            .get("transform")
-            .and_then(Value::as_str)
-            .map(str::to_string);
         let key = (protocol.to_string(), protocol_field.to_string());
         if let Some(previous) = inbound_index.get(&key) {
             return Err(format!(
@@ -386,7 +303,6 @@ fn validate_field_table(
             hub_field: hub_field.to_string(),
             protocol: protocol.to_string(),
             protocol_field: protocol_field.to_string(),
-            transform,
         });
     }
     if rows.is_empty() {
@@ -1010,19 +926,5 @@ mod tests {
         assert!(responses_fields.contains("web_search_options"));
         // anthropic 白名单曾含重复 "user"：BTreeSet 去重后仍可查询
         assert!(tables.is_whitelisted("anthropic", "user").unwrap());
-    }
-
-    #[test]
-    fn transform_registry_lifecycle() {
-        let name: &'static str = "test_transform_identity";
-        let _ = register_transform(name, |value| Ok(value.clone()));
-        let result = run_transform(name, &serde_json::json!({"a": 1}));
-        assert_eq!(result.unwrap(), serde_json::json!({"a": 1}));
-        // 重复注册 fail-fast
-        let duplicate = register_transform(name, |value| Ok(value.clone()));
-        assert!(duplicate.is_err());
-        // 未注册 fail-fast
-        let missing = run_transform("no_such_transform", &serde_json::json!(1));
-        assert!(missing.is_err());
     }
 }

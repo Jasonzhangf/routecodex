@@ -3,7 +3,7 @@
 mod field_operator_library;
 mod profile;
 
-pub(crate) use field_operator_library::{FieldOperator, FieldOperatorRegistry};
+pub(crate) use field_operator_library::FieldOperatorRegistry;
 pub(crate) use profile::{FieldProfile, ProfileError};
 
 use serde::{Deserialize, Serialize};
