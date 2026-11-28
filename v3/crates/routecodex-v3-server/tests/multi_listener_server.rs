@@ -7663,6 +7663,15 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
     assert_eq!(first.status(), StatusCode::OK);
     let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
     let output = first_body["output"].as_array().expect("output array");
+    let turn1_reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .expect("turn 1 reasoning item")
+        .clone();
+    assert!(
+        turn1_reasoning.get("encrypted_content").is_none(),
+        "provider-emitted cipherless reasoning omits encrypted_content on Responses output: {turn1_reasoning}"
+    );
     let assistant_text = output
         .iter()
         .find(|item| item["type"] == "message")
@@ -7688,6 +7697,49 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         "both exact hosted web_search and declared lookup tool must reach the first provider attempt: {}",
         first_capture.body
     );
+
+    // Replay the exact provider-emitted Turn-1 reasoning item first.
+    let emitted_replay = client
+        .post(format!("{base}/v1/responses"))
+        .json(
+            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                {"role":"user","content":REASONING_LOOKUP_CONTROL},
+                turn1_reasoning,
+                assistant_text.clone(),
+                call.clone(),
+                {"type":"function_call_output","call_id":call_id,"output":tool_output}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(emitted_replay.status(), StatusCode::OK);
+    let emitted_replay_body =
+        reasoning_client_completed_response(&emitted_replay.text().await.unwrap());
+    assert_eq!(emitted_replay_body["status"], "completed");
+    let emitted_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        emitted_capture.body["tools"],
+        json!(reasoning_lookup_expected_tools()),
+        "emitted-turn1-replay: exact hosted web_search + lookup tools must survive: {}",
+        emitted_capture.body
+    );
+    let emitted_thinking = emitted_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|block| block["type"] == "thinking" && block["thinking"] == "plan the lookup")
+        .expect("emitted-turn1-replay: provider-emitted reasoning must survive on wire");
+    assert_eq!(
+        emitted_thinking["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+    assert!(emitted_thinking.get("signature").is_none());
+    assert!(captures.try_recv().is_err());
 
     for (summary_label, summary) in [
         (
@@ -7851,7 +7903,10 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         }
     }
 
-    // Native `thinking` with a present empty signature (`encrypted_content: ""`)
+    // Client-supplied Responses `thinking` with explicit empty `encrypted_content: ""`
+    // (separate from Responses output policy in `wire.rs` which retains only non-empty
+    // cipher strings; native `/v1/messages` empty signature round-trip is covered by
+    // `anthropic_empty_signature_tool_followup_reaches_first_provider_attempt`)
     // must keep its explicit empty `signature` key on the first Anthropic attempt.
     let native_empty_sig_second = client
         .post(format!("{base}/v1/responses"))
