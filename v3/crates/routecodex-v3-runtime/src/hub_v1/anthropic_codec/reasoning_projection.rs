@@ -230,10 +230,13 @@ fn restore_anthropic_reasoning_extension(
     extension: &Map<String, Value>,
     block: &mut Map<String, Value>,
 ) {
+    let same_block_type =
+        extension.get("type").and_then(Value::as_str) == block.get("type").and_then(Value::as_str);
     for (key, value) in extension {
-        if !matches!(key.as_str(), "type" | "signature" | "data") {
-            block.entry(key.clone()).or_insert_with(|| value.clone());
+        if key == "type" || (matches!(key.as_str(), "signature" | "data") && !same_block_type) {
+            continue;
         }
+        block.entry(key.clone()).or_insert_with(|| value.clone());
     }
 }
 

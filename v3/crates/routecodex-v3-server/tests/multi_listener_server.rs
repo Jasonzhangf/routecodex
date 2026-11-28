@@ -6950,8 +6950,15 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
             "tool_result must start its user message content: {body}"
         ));
     }
-    if tool_result["tool_use_id"] != REASONING_LOOKUP_CALL_ID || tool_result["content"] != "42" {
-        return Err(format!("tool_result identity or content changed: {body}"));
+    if tool_result["tool_use_id"] != REASONING_LOOKUP_CALL_ID
+        || tool_result["content"] != "42"
+        || tool_result
+            .get("is_error")
+            .is_some_and(|value| value != &Value::Bool(false))
+    {
+        return Err(format!(
+            "tool_result identity, content, or success status changed: {body}"
+        ));
     }
     Ok(())
 }
@@ -7147,6 +7154,27 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
         .await
         .unwrap();
     assert_eq!(missing_assistant_text.status(), StatusCode::BAD_REQUEST);
+
+    let failed_tool_result = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":reasoning_lookup_expected_tools(),"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[
+                {"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},
+                {"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}}
+            ]},
+            {"role":"user","content":[{
+                "type":"tool_result",
+                "tool_use_id":REASONING_LOOKUP_CALL_ID,
+                "content":"42",
+                "is_error":true
+            }]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(failed_tool_result.status(), StatusCode::BAD_REQUEST);
     shutdown.send(()).unwrap();
 }
 
@@ -7226,8 +7254,19 @@ async fn controlled_reasoning_lookup_fixture_rejects_missing_opening_message() {
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    shutdown.send(()).unwrap();
+}
 
-    let invalid_block_type = client
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_block_type() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let invalid = client
         .post(format!("{provider_base_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
         .json(
@@ -7238,7 +7277,12 @@ async fn controlled_reasoning_lookup_fixture_rejects_missing_opening_message() {
         .send()
         .await
         .unwrap();
-    assert_eq!(invalid_block_type.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    let invalid_body = invalid.text().await.unwrap();
+    assert!(
+        invalid_body.contains("opening message must contain exactly one"),
+        "expected opening block shape rejection at request_index=0: {invalid_body}"
+    );
     shutdown.send(()).unwrap();
 }
 
@@ -7931,6 +7975,13 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
             capture.body
         );
         assert_eq!(tool_result["content"], "42", "{label}: {}", capture.body);
+        assert!(
+            tool_result
+                .get("is_error")
+                .is_none_or(|value| value == &Value::Bool(false)),
+            "{label}: successful tool result must not be projected as an error: {}",
+            capture.body
+        );
         assert!(
             captures.try_recv().is_err(),
             "{label}: the selected provider must accept the first attempt without fallback"
