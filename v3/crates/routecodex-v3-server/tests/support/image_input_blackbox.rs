@@ -1036,6 +1036,9 @@ async fn run_completed_image_history_case(direct: bool, stream: bool) {
                 1,
                 json!({"type":"input_image","file_id":"file-history-receipt"}),
             );
+        } else {
+            // Exercise JSON-encoded native paired media as well as native arrays.
+            tool_input[2]["output"] = json!(tool_input[2]["output"].to_string());
         }
         let mut next = tool_input.as_array().unwrap().clone();
         next.push(prior_answer.clone());
@@ -1079,6 +1082,12 @@ async fn run_completed_image_history_case(direct: bool, stream: bool) {
                     item["type"] == "function_call_output" && item["call_id"] == call["call_id"]
                 })
                 .unwrap();
+            if first && !direct {
+                assert!(
+                    output["output"].is_array(),
+                    "paired media must reach vision wire as structured parts: {output}"
+                );
+            }
             let output = output["output"].to_string();
             assert!(output.contains("paired tool payload"));
             assert_eq!(
@@ -1661,6 +1670,21 @@ async fn earlier_turn_image_stays_in_history_and_selects_default() {
         };
         assert_isolated_image_boundary(path, content, true).await;
     }
+}
+
+#[tokio::test]
+async fn paired_historical_inline_image_tool_result_projects_to_text_placeholder() {
+    let _guard = TEST_LOCK.lock().await;
+    assert_isolated_image_boundary(
+        "/v1/responses",
+        json!({
+            "type":"function_call_output",
+            "call_id":"bare_data",
+            "output":"data:image/png;base64,AAAA"
+        }),
+        true,
+    )
+    .await;
 }
 
 const CONSECUTIVE_IMAGE: &str = "https://example.test/consecutive-turn.png";

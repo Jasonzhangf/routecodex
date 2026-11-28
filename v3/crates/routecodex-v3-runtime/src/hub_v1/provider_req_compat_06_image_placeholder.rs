@@ -10,6 +10,14 @@ pub(super) fn project_default_text_attempt_images(
     payload: &mut Value,
     protocol: V3HubProviderWireProtocol,
 ) {
+    project_default_text_attempt_images_with_tool_policy(payload, protocol, &[]);
+}
+
+pub(super) fn project_default_text_attempt_images_with_tool_policy(
+    payload: &mut Value,
+    protocol: V3HubProviderWireProtocol,
+    orphan_tool_output_literals: &[bool],
+) {
     let (messages, content) = match protocol {
         V3HubProviderWireProtocol::Responses => ("input", "content"),
         V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Anthropic => {
@@ -20,24 +28,43 @@ pub(super) fn project_default_text_attempt_images(
     let Some(messages) = payload.get_mut(messages).and_then(Value::as_array_mut) else {
         return;
     };
+    let mut tool_result_index = 0usize;
     for message in messages {
         let text_type = match protocol {
             V3HubProviderWireProtocol::Responses if message["role"] == "assistant" => "output_text",
             V3HubProviderWireProtocol::Responses => "input_text",
             _ => "text",
         };
-        if matches!(
-            message["type"].as_str(),
-            Some("function_call_output" | "custom_tool_call_output")
-        ) && protocol == V3HubProviderWireProtocol::Responses
+        if protocol == V3HubProviderWireProtocol::Responses
+            && matches!(
+                message["type"].as_str(),
+                Some(
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "tool_result"
+                        | "tool_call_output"
+                        | "tool_message"
+                )
+            )
         {
+            let preserve_literal = orphan_tool_output_literals
+                .get(tool_result_index)
+                .copied()
+                .unwrap_or(false);
+            tool_result_index += 1;
             if let Some(output) = message.get_mut("output") {
-                project_tool_output(output, text_type);
+                project_tool_output(output, text_type, !preserve_literal);
             }
+            continue;
         }
         if protocol == V3HubProviderWireProtocol::OpenAiChat && message["role"] == "tool" {
+            let preserve_literal = orphan_tool_output_literals
+                .get(tool_result_index)
+                .copied()
+                .unwrap_or(false);
+            tool_result_index += 1;
             if let Some(output) = message.get_mut(content) {
-                project_tool_output(output, text_type);
+                project_tool_output(output, text_type, !preserve_literal);
             }
             continue;
         }
@@ -49,8 +76,13 @@ pub(super) fn project_default_text_attempt_images(
             for part in parts {
                 if protocol == V3HubProviderWireProtocol::Anthropic && part["type"] == "tool_result"
                 {
+                    let preserve_literal = orphan_tool_output_literals
+                        .get(tool_result_index)
+                        .copied()
+                        .unwrap_or(false);
+                    tool_result_index += 1;
                     if let Some(output) = part.get_mut("content") {
-                        project_tool_output(output, text_type);
+                        project_tool_output(output, text_type, !preserve_literal);
                     }
                 } else {
                     project_image_part(part, text_type);
@@ -60,16 +92,26 @@ pub(super) fn project_default_text_attempt_images(
     }
 }
 
-fn project_tool_output(output: &mut Value, text_type: &str) {
-    project_tool_output_parts(output, |part| project_image_part(part, text_type));
+fn project_tool_output(output: &mut Value, text_type: &str, project_string_parts: bool) {
+    project_tool_output_parts(output, project_string_parts, |part| {
+        project_image_part(part, text_type)
+    });
 }
 
-fn project_tool_output_parts(output: &mut Value, mut project: impl FnMut(&mut Value) -> bool) {
+fn project_tool_output_parts(
+    output: &mut Value,
+    project_string_parts: bool,
+    mut project: impl FnMut(&mut Value) -> bool,
+) {
     if let Some(parts) = output.as_array_mut() {
         for part in parts {
             project(part);
         }
     } else if let Some(text) = output.as_str() {
+        // Unpaired native Responses strings remain literal.
+        if !project_string_parts {
+            return;
+        }
         if is_v3_inline_image_reference(text) {
             *output = json!(IMAGE_PLACEHOLDER);
             return;
@@ -130,7 +172,7 @@ fn project_gemini_parts(parts: &mut Vec<Value>) {
                 .get_mut("response")
                 .and_then(|response| response.get_mut("output"))
             {
-                project_tool_output_parts(output, |part| {
+                project_tool_output_parts(output, true, |part| {
                     project_gemini_image_part(part) || project_image_part(part, "text")
                 });
             }
@@ -171,4 +213,177 @@ fn project_gemini_image_part(part: &mut Value) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod provider_req_compat_06_image_placeholder_tests {
+    use super::*;
+
+    #[test]
+    fn paired_responses_encoded_image_parts_project_without_changing_opaque_parts() {
+        let parts = json!([
+            {"type":"input_text","text":"image result","vendor_text":{"count":9}},
+            {"type":"input_image","image_url":"data:image/png;base64,AAAA","vendor_image":{"count":7}},
+            {"type":"input_file","file_id":"file-opaque"},
+            {"type":"vendor_part","value":{"count":7}}
+        ]);
+        let mut payload = json!({"input":[
+            {"type":"function_call","call_id":"paired","name":"read_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"paired","output":parts.to_string()},
+            {"type":"function_call_output","call_id":"orphan","output":parts.to_string()},
+            {"role":"user","content":[{"type":"input_text","text":"later turn"}]}
+        ]});
+        let original = payload.clone();
+        project_default_text_attempt_images_with_tool_policy(
+            &mut payload,
+            V3HubProviderWireProtocol::Responses,
+            &[false, true],
+        );
+        let mut expected = parts;
+        expected[1] = json!({"type":"input_text","text":"[Image]","vendor_image":{"count":7}});
+        assert_eq!(payload["input"][1]["output"], expected.to_string());
+        for index in [0, 2, 3] {
+            assert_eq!(payload["input"][index], original["input"][index]);
+        }
+    }
+
+    #[test]
+    fn responses_literal_json_strings_stay_literal_in_relay_and_project_in_direct() {
+        for literal in [
+            r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#,
+            r#"[{"type":"input_text","text":"literal"}]"#,
+        ] {
+            let mut relay_payload = json!({"input":[{"type":"function_call_output","call_id":"orphan","output":literal}]});
+            let original = relay_payload.clone();
+            project_default_text_attempt_images_with_tool_policy(
+                &mut relay_payload,
+                V3HubProviderWireProtocol::Responses,
+                &[true],
+            );
+            assert_eq!(relay_payload, original);
+        }
+        let mut direct_payload = json!({"input":[
+            {"type":"function_call_output","call_id":"upstream_call","output":r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#}
+        ]});
+        project_default_text_attempt_images(
+            &mut direct_payload,
+            V3HubProviderWireProtocol::Responses,
+        );
+        assert_eq!(
+            direct_payload["input"][0]["output"],
+            json!([{"type":"input_text","text":"[Image]"}]).to_string()
+        );
+        let mut payload = json!({"input":[
+            {"type":"function_call_output","call_id":"image","output":"data:image/png;base64,AAAA"},
+            {"type":"function_call_output","call_id":"array","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_file","file_id":"file-123"}]},
+            {"type":"function_call","call_id":"paired_bare","name":"read_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"paired_bare","output":"data:image/png;base64,AAAA"}
+        ]});
+        project_default_text_attempt_images_with_tool_policy(
+            &mut payload,
+            V3HubProviderWireProtocol::Responses,
+            &[true, false, false],
+        );
+        assert_eq!(
+            payload["input"][0]["output"], "data:image/png;base64,AAAA",
+            "unpaired bare data:image URI must stay literal in Responses Relay"
+        );
+        assert_eq!(
+            payload["input"][1]["output"],
+            json!([
+                {"type":"input_text","text":"[Image]"},
+                {"type":"input_file","file_id":"file-123"}
+            ])
+        );
+        assert_eq!(
+            payload["input"][3]["output"], "[Image]",
+            "paired bare data:image URI must project to [Image]"
+        );
+
+        let mut direct_bare_payload = json!({"input":[
+            {"type":"function_call_output","call_id":"image","output":"data:image/png;base64,AAAA"}
+        ]});
+        project_default_text_attempt_images(
+            &mut direct_bare_payload,
+            V3HubProviderWireProtocol::Responses,
+        );
+        assert_eq!(direct_bare_payload["input"][0]["output"], "[Image]");
+
+        let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+        let mut same_id_later_call = json!({"input":[
+            {"type":"function_call_output","call_id":"call_b","output":encoded_image},
+            {"type":"function_call","call_id":"call_b","name":"read_image","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_b","output":encoded_image}
+        ]});
+        project_default_text_attempt_images_with_tool_policy(
+            &mut same_id_later_call,
+            V3HubProviderWireProtocol::Responses,
+            &[true, false],
+        );
+        assert_eq!(
+            same_id_later_call["input"][0]["output"],
+            json!(encoded_image),
+            "later call_id in Relay wire must not rewrite earlier orphan JSON image string"
+        );
+        assert_eq!(
+            same_id_later_call["input"][2]["output"],
+            json!([{"type":"input_text","text":"[Image]"}]).to_string(),
+            "paired output after matching call must project to [Image]"
+        );
+    }
+
+    #[test]
+    fn openai_chat_orphan_tool_literal_policy_preserves_orphan_and_projects_paired() {
+        let mut payload = json!({
+            "messages": [
+                {"role": "tool", "tool_call_id": "call_orphan_bare", "content": "data:image/png;base64,AAAA"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "call_paired_bare", "type": "function", "function": {"name": "read_image", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "call_paired_bare", "content": "data:image/png;base64,BBBB"}
+            ]
+        });
+        project_default_text_attempt_images_with_tool_policy(
+            &mut payload,
+            V3HubProviderWireProtocol::OpenAiChat,
+            &[true, false],
+        );
+        assert_eq!(
+            payload["messages"][0]["content"],
+            json!("data:image/png;base64,AAAA")
+        );
+        assert_eq!(payload["messages"][2]["content"], json!("[Image]"));
+    }
+
+    #[test]
+    fn anthropic_orphan_tool_literal_policy_preserves_orphan_and_projects_paired() {
+        let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+        let mut payload = json!({
+            "messages": [
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_orphan_json", "content": encoded_image}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_orphan_bare", "content": "data:image/png;base64,BBBB"}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_paired_media", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "CCCC"}}]}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_paired_bare", "content": "data:image/png;base64,DDDD"}]}
+            ]
+        });
+        project_default_text_attempt_images_with_tool_policy(
+            &mut payload,
+            V3HubProviderWireProtocol::Anthropic,
+            &[true, true, false, false],
+        );
+        assert_eq!(
+            payload["messages"][0]["content"][0]["content"],
+            json!(encoded_image)
+        );
+        assert_eq!(
+            payload["messages"][1]["content"][0]["content"],
+            json!("data:image/png;base64,BBBB")
+        );
+        assert_eq!(
+            payload["messages"][2]["content"][0]["content"],
+            json!([{"type": "text", "text": "[Image]"}])
+        );
+        assert_eq!(
+            payload["messages"][3]["content"][0]["content"],
+            json!("[Image]")
+        );
+    }
 }

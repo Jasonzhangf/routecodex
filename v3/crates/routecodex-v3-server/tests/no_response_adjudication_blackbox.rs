@@ -1697,6 +1697,430 @@ async fn refill_responses_dual_history_continuation_stays_acceptable_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: a dual Responses history with
+/// `[assistant_msg_1, function_call, assistant_msg_2, matching_result]` plus
+/// its equivalent `messages` twin must preserve both assistant messages, the
+/// call, and the matching result in exact source order across a bounded refill.
+#[tokio::test]
+async fn refill_responses_dual_pending_assistant_history_survives_in_source_order_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            source_summary_wire(false, "DUAL_PENDING_ROUND_TWO"),
+            EntryOptions {
+                attempt_bodies: vec![refill_round_wire(false, "DUAL_PENDING_ROUND_ONE")],
+                refill_max: None,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let expected_prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "dual pending assistant task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "assistant msg 1"}]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dual_pending",
+                "call_id": "call_dual_pending",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "assistant msg 2"}]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_dual_pending",
+                "output": "matched result"
+            }
+        ]);
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "input": expected_prefix,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "dual pending assistant task"
+                        },
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "assistant msg 1"},
+                                {"type": "text", "text": "assistant msg 2"}
+                            ],
+                            "tool_calls": [{
+                                "id": "call_dual_pending",
+                                "type": "function",
+                                "function": {"name": "lookup", "arguments": "{}"}
+                            }]
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_dual_pending",
+                            "content": "matched result"
+                        }
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "dual-pending-assistant entry ({process}) must run exactly one refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "dual-pending-assistant entry ({process}) must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("DUAL_PENDING_ROUND_ONE")
+                && consumed.body.contains("DUAL_PENDING_ROUND_TWO"),
+            "both rounds must reach the responses client ({process}): {consumed:?}"
+        );
+        for (round_idx, request_body) in captured.iter().enumerate() {
+            assert!(
+                request_body.get("messages").is_none(),
+                "provider request {round_idx} ({process}) must not leak stale messages twin: {request_body}"
+            );
+            let input = request_body["input"].as_array().unwrap_or_else(|| {
+                panic!("provider request {round_idx} ({process}) must carry Responses input: {request_body}")
+            });
+            assert!(
+                input.len() >= 5,
+                "provider request {round_idx} ({process}) must retain all 5 history items: {request_body}"
+            );
+            assert_eq!(
+                json!(&input[0..5]),
+                expected_prefix,
+                "provider request {round_idx} ({process}) must keep [user, assistant_msg_1, function_call, assistant_msg_2, matching_result] in source order: {request_body}"
+            );
+        }
+        let second_rendered = captured[1].to_string();
+        assert!(
+            second_rendered.contains("DUAL_PENDING_ROUND_ONE"),
+            "second provider request ({process}) must replay round 1 assistant output: {}",
+            captured[1]
+        );
+        assert!(
+            second_rendered.contains(REFILL_INSTRUCTION),
+            "second provider request ({process}) must carry the refill instruction: {}",
+            captured[1]
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn refill_responses_dual_singleton_text_part_pending_assistant_history_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            source_summary_wire(false, "DUAL_SINGLETON_ROUND_TWO"),
+            EntryOptions {
+                attempt_bodies: vec![refill_round_wire(false, "DUAL_SINGLETON_ROUND_ONE")],
+                refill_max: None,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let request_input = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "dual singleton assistant task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_1",
+                "status": "completed",
+                "content": "assistant msg 1"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dual_singleton",
+                "call_id": "call_dual_singleton",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_2",
+                "status": "incomplete",
+                "content": "assistant msg 2"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_dual_singleton",
+                "output": "matched result"
+            }
+        ]);
+        let expected_prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "dual singleton assistant task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_1",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "assistant msg 1"}]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dual_singleton",
+                "call_id": "call_dual_singleton",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "id": "msg_dual_2",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "assistant msg 2"}]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_dual_singleton",
+                "output": "matched result"
+            }
+        ]);
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "input": request_input,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "dual singleton assistant task"
+                        },
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "assistant msg 1\nassistant msg 2"}
+                            ],
+                            "tool_calls": [{
+                                "id": "call_dual_singleton",
+                                "type": "function",
+                                "function": {"name": "lookup", "arguments": "{}"}
+                            }]
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_dual_singleton",
+                            "content": "matched result"
+                        }
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "dual-singleton-text-part entry ({process}) must run exactly one refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "dual-singleton-text-part entry ({process}) must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("DUAL_SINGLETON_ROUND_ONE")
+                && consumed.body.contains("DUAL_SINGLETON_ROUND_TWO"),
+            "both rounds must reach the responses client ({process}): {consumed:?}"
+        );
+        for (round_idx, request_body) in captured.iter().enumerate() {
+            assert!(
+                request_body.get("messages").is_none(),
+                "provider request {round_idx} ({process}) must not leak stale messages twin: {request_body}"
+            );
+            let input = request_body["input"].as_array().unwrap_or_else(|| {
+                panic!("provider request {round_idx} ({process}) must carry Responses input: {request_body}")
+            });
+            assert!(
+                input.len() >= 5,
+                "provider request {round_idx} ({process}) must retain all 5 history items: {request_body}"
+            );
+            assert_eq!(
+                json!(&input[0..5]),
+                expected_prefix,
+                "provider request {round_idx} ({process}) must preserve exact assistant item boundaries, IDs, status, and order for singleton-text-part twin: {request_body}"
+            );
+        }
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn refill_responses_native_input_only_preserves_provenance_and_order_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    for process in ["direct", "chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            source_summary_wire(false, "NATIVE_INPUT_ROUND_TWO"),
+            EntryOptions {
+                attempt_bodies: vec![refill_reasoning_round_wire()],
+                refill_max: None,
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let expected_prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "native input only task"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "assistant msg 1"}]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_native_pending",
+                "call_id": "call_native_pending",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "assistant msg 2"}]
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_native_orphan",
+                "call_id": "call_native_orphan",
+                "output": encoded_image
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_native_pending",
+                "output": "matched result"
+            }
+        ]);
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "input": expected_prefix,
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "native input-only entry ({process}) must run exactly one refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "native input-only entry ({process}) must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("REASONING_ROUND_ONE")
+                && consumed.body.contains("NATIVE_INPUT_ROUND_TWO"),
+            "both rounds must reach the responses client ({process}): {consumed:?}"
+        );
+        for (round_idx, request_body) in captured.iter().enumerate() {
+            assert!(
+                request_body.get("messages").is_none(),
+                "provider request {round_idx} ({process}) must keep native input-only representation: {request_body}"
+            );
+            let input = request_body["input"].as_array().unwrap_or_else(|| {
+                panic!("provider request {round_idx} ({process}) must carry Responses input: {request_body}")
+            });
+            assert!(
+                input.len() >= 6,
+                "provider request {round_idx} ({process}) must retain all 6 history items: {request_body}"
+            );
+            assert_eq!(
+                json!(&input[0..6]),
+                expected_prefix,
+                "provider request {round_idx} ({process}) must preserve original client provenance (order, ids, absent id, orphan literal): {request_body}"
+            );
+        }
+        let second_input = captured[1]["input"].as_array().expect("second input array");
+        let appended = &second_input[6..];
+        let appended_rendered = Value::Array(appended.to_vec()).to_string();
+        assert!(
+            appended.iter().any(|item| item["type"] == "reasoning" && item["id"] == "rsn_provider_capture"),
+            "second provider request ({process}) must carry appended provider reasoning: {appended:?}"
+        );
+        assert!(
+            appended_rendered.contains("REASONING_ROUND_ONE"),
+            "second provider request ({process}) must replay round 1 assistant output: {appended:?}"
+        );
+        assert!(
+            appended_rendered.contains(REFILL_INSTRUCTION),
+            "second provider request ({process}) must carry the refill instruction: {appended:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: the `messages` twin of a dual Responses history can carry
 /// a business extension that `input` does not. The refill continuation must
 /// extend the merged history inbound accepted, so the association survives the

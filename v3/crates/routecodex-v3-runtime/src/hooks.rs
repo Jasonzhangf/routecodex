@@ -3,7 +3,8 @@ use crate::direct_response_hooks::{
     V3DirectResponseCompatContext, V3DirectResponseHookFailure,
 };
 use crate::kernel::direct_request_key_hooks::{
-    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog, V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
+    V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
@@ -19,9 +20,9 @@ use crate::shared::{
     V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3InternalErrorCode,
+    V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -523,28 +524,89 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         crate::hub_v1::V3HubProviderWireProtocol::Responses
             if request_body.get("messages").is_some() =>
         {
-            let (wire_body, mut projection_drops) =
-                crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops(
-                    &request_body,
-                    candidate
-                        .model_capabilities
-                        .iter()
-                        .any(|capability| capability == "web_search"),
-                )
-                .map_err(|error| {
-                    raise_v3_source_via_err01(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3ResponsesDirect11Policy",
-                        "responses_provider_request_projection_failed",
-                        error,
-                        V3Err01SourceInput::Internal(
-                            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-                        ),
+            if request_body.get("input").is_some()
+                && request_body.get("messages").is_some_and(Value::is_null)
+            {
+                let mut input_only = request_body;
+                if let Some(object) = input_only.as_object_mut() {
+                    object.remove("messages");
+                }
+                input_only
+            } else {
+                let (source_body, provenance) = if request_body.get("input").is_some() {
+                    let mut contribution =
+                        crate::hub_v1::v3_hub_responses_accepted_chat_contribution(&request_body)
+                            .map_err(|error| {
+                            raise_v3_source_via_err01(
+                                V3ErrorSourceKind::RuntimeFailure,
+                                "V3ResponsesDirect11Policy",
+                                "responses_provider_request_projection_failed",
+                                error,
+                                V3Err01SourceInput::Internal(
+                                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                                ),
+                            )
+                            .map(|(_, source)| source)
+                        })?;
+                    for (msg_idx, message) in contribution.messages.iter_mut().enumerate() {
+                        if contribution
+                            .provenance
+                            .message_entry(msg_idx)
+                            .is_some_and(|entry| entry.decoder_captured_responses_tool_output)
+                        {
+                            if let Some(raw_output) = message
+                                .pointer("/routecodex_chat_extension/responses_tool_output_content")
+                                .filter(|value| value.is_string())
+                                .cloned()
+                            {
+                                // Direct bypasses Req04; restore decoder-owned string outputs
+                                // before outbound item projection so JSON-encoded image strings
+                                // keep their exact native string type and value.
+                                message["content"] = raw_output;
+                            }
+                        }
+                    }
+                    let mut collapsed = request_body.clone();
+                    if let Some(object) = collapsed.as_object_mut() {
+                        object.remove("input");
+                        object.insert("messages".to_string(), Value::Array(contribution.messages));
+                        if let Some(tools) = contribution.tools {
+                            object.insert("tools".to_string(), tools);
+                        }
+                    }
+                    (collapsed, contribution.provenance)
+                } else {
+                    (
+                        request_body.clone(),
+                        policy.explicit_history_pairing.clone(),
                     )
-                    .map(|(_, source)| source)
-                })?;
-            drop_context.restamp_and_emit(&mut projection_drops);
-            wire_body
+                };
+                let (wire_body, mut projection_drops, _) =
+                    crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+                        &source_body,
+                        candidate
+                            .model_capabilities
+                            .iter()
+                            .any(|capability| capability == "web_search"),
+                        false,
+                        Some(&provenance),
+                        true,
+                    )
+                    .map_err(|error| {
+                        raise_v3_source_via_err01(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3ResponsesDirect11Policy",
+                            "responses_provider_request_projection_failed",
+                            error,
+                            V3Err01SourceInput::Internal(
+                                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                            ),
+                        )
+                        .map(|(_, source)| source)
+                    })?;
+                drop_context.restamp_and_emit(&mut projection_drops);
+                wire_body
+            }
         }
         _ => request_body,
     };

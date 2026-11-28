@@ -34,7 +34,7 @@ use response_projection::{
 };
 pub(crate) use responses_to_anthropic::responses_web_search_tool_as_anthropic_tool;
 use responses_to_anthropic::{
-    chat_messages_as_anthropic_messages, responses_input_as_anthropic_messages,
+    chat_messages_as_anthropic_messages_with_provenance, responses_input_as_anthropic_messages,
     responses_system_as_anthropic_system, responses_tool_choice_as_anthropic_tool_choice,
     responses_tools_for_anthropic_wire,
 };
@@ -441,6 +441,15 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
 pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
     input: Value,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), V3AnthropicCodecError> {
+    let (request, drops, _) =
+        encode_v3_responses_semantic_as_anthropic_request_with_drops_and_provenance(input, None)?;
+    Ok((request, drops))
+}
+
+pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops_and_provenance(
+    input: Value,
+    provenance: Option<&super::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), V3AnthropicCodecError> {
     let mut drops = Vec::new();
     namespace_tool_names::validate_anthropic_declared_tool_names(&input)
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
@@ -478,10 +487,17 @@ pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
     {
         system_parts.push(system);
     }
-    let messages = if let Some(messages) = object.get("messages") {
-        chat_messages_as_anthropic_messages(messages, &mut system_parts)?
+    let (messages, orphan_tool_output_literals) = if let Some(messages) = object.get("messages") {
+        chat_messages_as_anthropic_messages_with_provenance(
+            messages,
+            &mut system_parts,
+            provenance,
+        )?
     } else {
-        responses_input_as_anthropic_messages(object.get("input"), &mut system_parts)?
+        (
+            responses_input_as_anthropic_messages(object.get("input"), &mut system_parts)?,
+            Vec::new(),
+        )
     };
     if let Some(system) = anthropic_system_blocks {
         output.insert("system".to_string(), system.to_owned());
@@ -555,7 +571,7 @@ pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
             json!({"gemini_native_fields":records}),
         );
     }
-    Ok((Value::Object(output), drops))
+    Ok((Value::Object(output), drops, orphan_tool_output_literals))
 }
 
 fn consume_mapped_gemini_request_root_fields(input: &mut Value) {

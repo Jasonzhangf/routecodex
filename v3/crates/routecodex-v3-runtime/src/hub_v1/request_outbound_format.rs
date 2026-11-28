@@ -36,14 +36,17 @@ use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
     validate_openai_metadata,
 };
-use super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION;
+use super::responses_openai_codec::{
+    chat_content_digest, responses_tool_output_content, v3_openai_chat_content_is_empty,
+    RESPONSES_REASONING_ITEMS_EXTENSION,
+};
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
 #[path = "signature_target_projection.rs"]
 mod signature_target_projection;
 use self::request_outbound_responses_items::{
-    chat_content_to_responses_content, chat_tool_call_to_responses_input_item,
-    chat_tool_result_to_responses_input_item,
+    chat_content_to_responses_content, chat_tool_call_to_responses_input_item_with_provenance,
+    chat_tool_result_to_responses_input_item_with_provenance_and_drops,
 };
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
@@ -145,22 +148,56 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     has_web_search_capability: bool,
     preserve_responses_custom_tools: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+        payload,
+        has_web_search_capability,
+        preserve_responses_custom_tools,
+        None,
+    )
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+    payload: &Value,
+    has_web_search_capability: bool,
+    preserve_responses_custom_tools: bool,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    let (projected, drops, _) =
+        build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+            payload,
+            has_web_search_capability,
+            preserve_responses_custom_tools,
+            provenance,
+            false,
+        )?;
+    Ok((projected, drops))
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+    payload: &Value,
+    has_web_search_capability: bool,
+    preserve_responses_custom_tools: bool,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
                 .to_string(),
         );
     }
-    let (mut projected, drops) =
-        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
+    let (mut projected, drops, orphan_tool_output_literals) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
             payload,
             preserve_responses_custom_tools,
+            provenance,
+            preserve_responses_entry_tool_output_id,
         )?;
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
         has_web_search_capability,
     );
-    Ok((projected, drops))
+    Ok((projected, drops, orphan_tool_output_literals))
 }
 
 fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
@@ -175,13 +212,19 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
 fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
     payload: &Value,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(payload, false)
+    let (projected, drops, _) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
+            payload, false, None, false,
+        )?;
+    Ok((projected, drops))
 }
 
-fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
     payload: &Value,
     preserve_responses_custom_tools: bool,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
             "RawPayloadShortcut target_protocol=responses path=$.reasoning; use registered Chat reasoning fields"
@@ -194,22 +237,31 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
                 payload,
                 V3OutboundTargetProtocol::OpenAiResponses,
             )?;
-        return build_v3_openai_responses_request_from_projected_chat_canonical(
+        return build_v3_openai_responses_request_from_projected_chat_canonical_with_literals(
             projected_source,
             drops,
+            provenance,
+            preserve_responses_entry_tool_output_id,
         );
     }
     let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
-    build_v3_openai_responses_request_from_projected_chat_canonical(projected_source, drops)
+    build_v3_openai_responses_request_from_projected_chat_canonical_with_literals(
+        projected_source,
+        drops,
+        provenance,
+        preserve_responses_entry_tool_output_id,
+    )
 }
 
-fn build_v3_openai_responses_request_from_projected_chat_canonical(
+fn build_v3_openai_responses_request_from_projected_chat_canonical_with_literals(
     projected_source: Value,
-    drops: Vec<V3ProjectionDropRecord>,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    mut drops: Vec<V3ProjectionDropRecord>,
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     let messages = projected_source
         .get("messages")
         .and_then(Value::as_array)
@@ -218,10 +270,14 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     if let Some(model) = projected_source.get("model") {
         responses_payload.insert("model".to_string(), model.clone());
     }
-    responses_payload.insert(
-        "input".to_string(),
-        build_responses_input_from_chat_messages(messages)?,
-    );
+    let (input, item_drops, orphan_tool_output_literals) =
+        build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals_and_entry(
+            messages,
+            provenance,
+            preserve_responses_entry_tool_output_id,
+        )?;
+    drops.extend(item_drops);
+    responses_payload.insert("input".to_string(), input);
     for key in [
         "tools",
         "tool_choice",
@@ -268,6 +324,7 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     Ok((
         normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))?,
         drops,
+        orphan_tool_output_literals,
     ))
 }
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
@@ -1190,12 +1247,47 @@ fn collect_unmapped_outbound_field_paths(
 pub(crate) fn build_responses_input_from_chat_messages(
     messages: &[Value],
 ) -> Result<Value, String> {
-    let mut output = Vec::new();
-    let source_order = |item: &Value| {
-        item.pointer("/routecodex_chat_extension/responses_tool_input_order")
-            .and_then(Value::as_u64)
-    };
-    for message in messages {
+    build_responses_input_from_chat_messages_with_provenance(messages, None)
+}
+
+pub(crate) fn build_responses_input_from_chat_messages_with_provenance(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<Value, String> {
+    build_responses_input_from_chat_messages_with_provenance_and_drops(messages, provenance)
+        .map(|(input, _)| input)
+}
+
+pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    let (input, drops, _) =
+        build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals(
+            messages, provenance,
+        )?;
+    Ok((input, drops))
+}
+
+pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
+    build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals_and_entry(
+        messages, provenance, false,
+    )
+}
+
+fn build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals_and_entry(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
+    let mut output: Vec<(Option<u64>, Value, bool)> = Vec::new();
+    let mut drops = Vec::new();
+    let message_order =
+        |msg_idx: usize| provenance.and_then(|provenance| provenance.message_order(msg_idx));
+    for (msg_idx, message) in messages.iter().enumerate() {
         let Some(row) = message.as_object() else {
             continue;
         };
@@ -1209,30 +1301,155 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 .pointer("/routecodex_chat_extension/responses_tool_output_name")
                 .is_some()
         {
-            if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
-                output.push((source_order(message), item));
+            let msg_provenance = provenance.and_then(|p| p.message_entry(msg_idx));
+            let omit_tool_output_id = preserve_responses_entry_tool_output_id
+                || msg_provenance.is_some_and(|p| p.omit_tool_output_id);
+            let preserve_native_tool_output_id = preserve_responses_entry_tool_output_id
+                || msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
+            let restore_responses_hosted_web_search =
+                msg_provenance.is_some_and(|p| p.restore_responses_hosted_web_search);
+            let decoder_captured_tool_output = msg_provenance
+                .is_some_and(|p| p.decoder_captured_responses_tool_output)
+                .then(|| {
+                    row.get("routecodex_chat_extension")
+                        .and_then(|ext| ext.get("responses_tool_output_content"))
+                })
+                .flatten();
+            let source_input_index = msg_provenance
+                .and_then(|p| p.message_input_order)
+                .and_then(|order| usize::try_from(order).ok());
+            if let Some(item) = chat_tool_result_to_responses_input_item_with_provenance_and_drops(
+                row,
+                omit_tool_output_id,
+                preserve_native_tool_output_id,
+                restore_responses_hosted_web_search,
+                decoder_captured_tool_output,
+                source_input_index,
+                &mut drops,
+            )? {
+                let preserve_literal = matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some(
+                        "function_call_output"
+                            | "custom_tool_call_output"
+                            | "tool_result"
+                            | "tool_call_output"
+                            | "tool_message"
+                    )
+                ) && msg_provenance
+                    .is_some_and(|p| p.preserve_orphan_tool_output_literal);
+                output.push((message_order(msg_idx), item, preserve_literal));
             }
             continue;
         }
         if role.eq_ignore_ascii_case("assistant") {
             if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row)? {
-                match reasoning {
-                    Value::Array(reasoning_items) => {
-                        output.extend(reasoning_items.into_iter().map(|item| (None, item)))
-                    }
-                    reasoning_item => output.push((None, reasoning_item)),
+                let reasoning_items = match reasoning {
+                    Value::Array(items) => items,
+                    item => vec![item],
+                };
+                let raw_orders: Vec<Option<u64>> = (0..reasoning_items.len())
+                    .map(|index| {
+                        provenance
+                            .and_then(|provenance| provenance.reasoning_item_order(msg_idx, index))
+                    })
+                    .collect();
+                for (index, item) in reasoning_items.into_iter().enumerate() {
+                    let order = raw_orders[index]
+                        .or_else(|| raw_orders[index + 1..].iter().flatten().copied().next())
+                        .or_else(|| raw_orders[..index].iter().rev().flatten().copied().next())
+                        .or_else(|| message_order(msg_idx));
+                    output.push((order, item, false));
                 }
             }
+            let tool_calls_present = row
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some_and(|calls| !calls.is_empty());
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                let start = output.len();
-                for call in tool_calls {
-                    if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
-                        output.push((source_order(call), item));
+                for (call_idx, call) in tool_calls.iter().enumerate() {
+                    let suppress_hosted_call = provenance.is_some_and(|provenance| {
+                        provenance.suppress_responses_hosted_call(msg_idx, call_idx)
+                    });
+                    if let Some(item) = chat_tool_call_to_responses_input_item_with_provenance(
+                        call,
+                        suppress_hosted_call,
+                        preserve_responses_entry_tool_output_id,
+                    )? {
+                        let call_order = provenance
+                            .and_then(|provenance| provenance.tool_call_order(msg_idx, call_idx));
+                        output.push((call_order, item, false));
                     }
                 }
-                if output.len() != start {
-                    continue;
+            }
+            if let Some(assistant_items) =
+                provenance.and_then(|provenance| provenance.assistant_items(msg_idx))
+            {
+                let actual = row.get("content").unwrap_or(&Value::Null);
+                let msg_provenance =
+                    provenance.and_then(|provenance| provenance.message_entry(msg_idx));
+                let matches_canonical = msg_provenance
+                    .and_then(|entry| entry.assistant_content_digest)
+                    .is_some_and(|expected_digest| chat_content_digest(actual) == expected_digest);
+                let resolved_contents = if matches_canonical {
+                    resolve_assistant_item_contents(actual, assistant_items)
+                } else {
+                    None
+                };
+                if let Some(entry_contents) = resolved_contents {
+                    let assistant_item_statuses = row
+                        .get("routecodex_chat_extension")
+                        .and_then(|extension| {
+                            extension.get(
+                                super::responses_openai_codec::RESPONSES_ASSISTANT_ITEM_STATUSES_EXTENSION,
+                            )
+                        })
+                        .and_then(Value::as_array);
+                    let mut emitted = false;
+                    for (item_idx, (entry, chat_content)) in assistant_items
+                        .iter()
+                        .zip(entry_contents.iter())
+                        .enumerate()
+                    {
+                        if tool_calls_present && v3_openai_chat_content_is_empty(chat_content) {
+                            continue;
+                        }
+                        let content = chat_content_to_responses_content(chat_content, role)?;
+                        let mut item = Map::from_iter([
+                            ("type".to_string(), Value::String("message".to_string())),
+                            (
+                                "role".to_string(),
+                                Value::String(
+                                    if role.is_empty() { "user" } else { role }.to_string(),
+                                ),
+                            ),
+                            ("content".to_string(), content),
+                        ]);
+                        if let Some(item_id) = entry.id.as_deref() {
+                            item.insert("id".to_string(), Value::String(item_id.to_string()));
+                        }
+                        if let Some(status) = assistant_item_statuses
+                            .and_then(|statuses| statuses.get(item_idx))
+                            .filter(|value| !value.is_null())
+                        {
+                            item.insert("status".to_string(), status.clone());
+                        }
+                        output.push((entry.source_input_order, Value::Object(item), false));
+                        emitted = true;
+                    }
+                    if emitted || tool_calls_present {
+                        continue;
+                    }
                 }
+            }
+            if tool_calls_present
+                && !row.get("content").is_some_and(|content| match content {
+                    Value::String(text) => !text.trim().is_empty(),
+                    Value::Array(parts) => !parts.is_empty(),
+                    _ => false,
+                })
+            {
+                continue;
             }
         }
         let content = row
@@ -1241,7 +1458,7 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .transpose()?
             .unwrap_or_else(|| Value::Array(Vec::new()));
         output.push((
-            None,
+            message_order(msg_idx),
             Value::Object(Map::from_iter([
                 ("type".to_string(), Value::String("message".to_string())),
                 (
@@ -1250,16 +1467,95 @@ pub(crate) fn build_responses_input_from_chat_messages(
                 ),
                 ("content".to_string(), content),
             ])),
+            false,
         ));
     }
     // Canonical Chat groups pending calls, while Responses represents separate
-    // items. Restore their source order within each native tool-item run.
+    // items. Restore their source order together with native history messages.
     for group in output.chunk_by_mut(|left, right| left.0.is_some() && right.0.is_some()) {
-        group.sort_by_key(|(order, _)| *order);
+        group.sort_by_key(|(order, _, _)| *order);
     }
-    Ok(Value::Array(
-        output.into_iter().map(|(_, item)| item).collect(),
+    let orphan_tool_output_literals = output
+        .iter()
+        .filter(|(_, item, _)| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some(
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "tool_result"
+                        | "tool_call_output"
+                        | "tool_message"
+                )
+            )
+        })
+        .map(|(_, _, preserve_literal)| *preserve_literal)
+        .collect();
+    Ok((
+        Value::Array(output.into_iter().map(|(_, item, _)| item).collect()),
+        drops,
+        orphan_tool_output_literals,
     ))
+}
+
+fn resolve_assistant_item_contents(
+    actual: &Value,
+    assistant_items: &[super::req_inbound_02_normalized::V3HubAssistantItemProvenance],
+) -> Option<Vec<Value>> {
+    use super::req_inbound_02_normalized::V3HubAssistantItemContentRange;
+
+    let non_empty_count = assistant_items
+        .iter()
+        .filter(|entry| !matches!(entry.content_range, V3HubAssistantItemContentRange::Empty))
+        .count();
+    let empty_value = if actual.is_string() {
+        Value::String(String::new())
+    } else {
+        Value::Array(Vec::new())
+    };
+    let mut resolved = Vec::with_capacity(assistant_items.len());
+    for entry in assistant_items {
+        let slice = match entry.content_range {
+            V3HubAssistantItemContentRange::Empty => empty_value.clone(),
+            V3HubAssistantItemContentRange::Parts { start, end } => match actual {
+                Value::Array(parts) if start <= end && end <= parts.len() => {
+                    Value::Array(parts[start..end].to_vec())
+                }
+                Value::String(text) if non_empty_count == 1 && end == start + 1 => {
+                    Value::String(text.clone())
+                }
+                _ => return None,
+            },
+            V3HubAssistantItemContentRange::TextRange {
+                byte_start,
+                byte_end,
+            } => {
+                if let Some(text) =
+                    super::req_inbound_02_normalized::comparable_chat_content(actual).as_str()
+                {
+                    if byte_start <= byte_end
+                        && byte_end <= text.len()
+                        && text.is_char_boundary(byte_start)
+                        && text.is_char_boundary(byte_end)
+                    {
+                        Value::String(text[byte_start..byte_end].to_string())
+                    } else {
+                        return None;
+                    }
+                } else if let Value::Array(parts) = actual {
+                    if non_empty_count == 1 && parts.len() == 1 {
+                        Value::Array(parts.clone())
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+        };
+        resolved.push(slice);
+    }
+    Some(resolved)
 }
 
 fn chat_assistant_reasoning_to_responses_input_item(

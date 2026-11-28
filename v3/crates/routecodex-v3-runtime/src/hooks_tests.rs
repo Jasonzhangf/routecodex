@@ -6,8 +6,8 @@ use crate::{
 use routecodex_v3_config::{
     V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteTargetKind,
 };
-use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
 use routecodex_v3_error::build_v3_error_01_source_raised;
+use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
 use routecodex_v3_target::{V3Target10ConcreteProviderSelected, V3TargetCandidate};
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
 use serde_json::json;
@@ -155,6 +155,7 @@ fn direct_policy_with_models(
         request_id: "req-direct-model-binding".to_string(),
         request_purpose: crate::nodes::V3RequestPurpose::Conversation,
         request_body: json!({"model": client_model, "input": "hello"}),
+        explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance::empty(),
     }
 }
 
@@ -1073,4 +1074,37 @@ fn external_provider_error_branch_preserves_external_identity() {
         assert_eq!(external.provider_id.as_deref(), Some(expected_provider_id));
         assert_eq!(external.status, expected_status);
     }
+}
+
+#[test]
+fn direct_responses_dual_history_preserves_decoder_json_string_output_for_vision_target() {
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    let mut policy = direct_policy_with_models(
+        "client-route-alias",
+        "canonical-provider-model",
+        "provider-wire-model",
+    );
+    policy
+        .target
+        .candidate
+        .model_capabilities
+        .push("vision".to_string());
+    policy.request_body = json!({
+        "model": "client-route-alias",
+        "messages": [],
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_direct_dual_vision",
+            "output": encoded_image
+        }]
+    });
+
+    let wire = responses_direct_request_projection_hook(&policy)
+        .expect("Direct dual-history vision projection must preserve native string output");
+    let output = &wire.body()["input"][0]["output"];
+    assert!(
+        output.is_string(),
+        "output must remain a JSON string: {wire:?}"
+    );
+    assert_eq!(output, encoded_image);
 }

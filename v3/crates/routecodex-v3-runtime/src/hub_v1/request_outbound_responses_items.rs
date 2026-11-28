@@ -1,7 +1,25 @@
+use crate::projection_drop_log::V3ProjectionDropRecord;
 use crate::protocol_tables::{
     map_field as table_map_field, map_value as table_map_value, V3TableDirection, V3TableKind,
 };
 use serde_json::{json, Map, Value};
+
+const RESPONSES_HOSTED_WEB_SEARCH_CALL_REGISTERED_FIELDS: &[&str] = &[
+    "type",
+    "id",
+    "call_id",
+    "tool_call_id",
+    "status",
+    "action",
+    "arguments",
+    "execution",
+    "result",
+    "result_items",
+    "results",
+    "output",
+    "error",
+    "errors",
+];
 
 use super::super::request_outbound_mcp_names::provider_function_name;
 use super::super::request_outbound_tool_id::compact_tool_id;
@@ -104,6 +122,14 @@ pub(super) fn chat_content_to_responses_content(
 pub(super) fn chat_tool_call_to_responses_input_item(
     call: &Value,
 ) -> Result<Option<Value>, String> {
+    chat_tool_call_to_responses_input_item_with_provenance(call, false, false)
+}
+
+pub(super) fn chat_tool_call_to_responses_input_item_with_provenance(
+    call: &Value,
+    suppress_responses_hosted_call: bool,
+    preserve_responses_entry_item_id: bool,
+) -> Result<Option<Value>, String> {
     let Some(row) = call.as_object() else {
         return Ok(None);
     };
@@ -113,6 +139,10 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         .and_then(|extension| extension.get("responses_tool_call_type"))
         .and_then(Value::as_str)
         .unwrap_or("function_call");
+    if responses_tool_call_type == "web_search_call" && suppress_responses_hosted_call {
+        // The synthetic Chat result carries the complete native hosted item.
+        return Ok(None);
+    }
     let call_id = row
         .get("call_id")
         .or_else(|| row.get("tool_call_id"))
@@ -149,16 +179,21 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         None => None,
     };
     if responses_tool_call_type == "custom_tool_call" {
-        let item_id = responses_custom_item_id(row, call_id);
         let mut item = Map::from_iter([
             (
                 "type".to_string(),
                 Value::String("custom_tool_call".to_string()),
             ),
-            ("id".to_string(), Value::String(item_id)),
             ("call_id".to_string(), Value::String(call_id.to_string())),
             ("name".to_string(), Value::String(name.clone())),
         ]);
+        insert_responses_tool_call_item_id(
+            row,
+            call_id,
+            preserve_responses_entry_item_id,
+            true,
+            &mut item,
+        );
         if let Some(arguments_text) = arguments_text.as_deref() {
             let input = serde_json::from_str::<Value>(arguments_text)
                 .ok()
@@ -196,21 +231,45 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         return Ok(Some(Value::Object(item)));
     }
 
-    let item_id = responses_function_item_id(row, call_id);
     let mut item = Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call".to_string()),
         ),
-        ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name)),
     ]);
+    insert_responses_tool_call_item_id(
+        row,
+        call_id,
+        preserve_responses_entry_item_id,
+        false,
+        &mut item,
+    );
     if let Some(arguments_text) = arguments_text {
         item.insert("arguments".to_string(), Value::String(arguments_text));
     }
     project_responses_call_signature(row, &mut item);
     Ok(Some(Value::Object(item)))
+}
+
+fn insert_responses_tool_call_item_id(
+    row: &Map<String, Value>,
+    call_id: &str,
+    preserve_responses_entry_item_id: bool,
+    is_custom_tool_call: bool,
+    item: &mut Map<String, Value>,
+) {
+    let item_id = if preserve_responses_entry_item_id {
+        responses_item_id_from_chat_extension(row).map(str::to_string)
+    } else if is_custom_tool_call {
+        Some(responses_custom_item_id(row, call_id))
+    } else {
+        Some(responses_function_item_id(row, call_id))
+    };
+    if let Some(item_id) = item_id {
+        item.insert("id".to_string(), Value::String(item_id));
+    }
 }
 
 /// Same-protocol opaque business extension: preserve the exact call-local value.
@@ -245,14 +304,45 @@ fn responses_custom_item_id(row: &Map<String, Value>, call_id: &str) -> String {
         .unwrap_or_else(|| compact_tool_id("fc_", call_id))
 }
 
-pub(super) fn chat_tool_result_to_responses_input_item(
+pub(super) fn chat_tool_result_to_responses_input_item_with_provenance(
     row: &Map<String, Value>,
+    omit_tool_output_id: bool,
+    preserve_native_tool_output_id: bool,
+    restore_responses_hosted_web_search: bool,
 ) -> Result<Option<Value>, String> {
-    let responses_tool_output_type = row
+    let mut unused_drops = Vec::new();
+    chat_tool_result_to_responses_input_item_with_provenance_and_drops(
+        row,
+        omit_tool_output_id,
+        preserve_native_tool_output_id,
+        restore_responses_hosted_web_search,
+        None,
+        None,
+        &mut unused_drops,
+    )
+}
+
+pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops(
+    row: &Map<String, Value>,
+    omit_tool_output_id: bool,
+    preserve_native_tool_output_id: bool,
+    restore_responses_hosted_web_search: bool,
+    decoder_captured_tool_output: Option<&Value>,
+    source_input_index: Option<usize>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Option<Value>, String> {
+    let raw_responses_tool_output_type = row
         .get("routecodex_chat_extension")
         .and_then(|extension| extension.get("responses_tool_output_type"))
         .and_then(Value::as_str)
         .unwrap_or("function_call_output");
+    let responses_tool_output_type = if raw_responses_tool_output_type == "web_search_call"
+        && !restore_responses_hosted_web_search
+    {
+        "function_call_output"
+    } else {
+        raw_responses_tool_output_type
+    };
     let call_id = row
         .get("tool_call_id")
         .or_else(|| row.get("call_id"))
@@ -275,6 +365,14 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
         })
         .unwrap_or_default();
+    if responses_tool_output_type == "web_search_call" {
+        return build_typed_responses_hosted_web_search_call_item(
+            &output,
+            source_input_index,
+            drops,
+        )
+        .map(Some);
+    }
     if responses_tool_output_type == "tool_search_output" {
         let call_id = call_id.ok_or_else(|| {
             "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_output.call_id".to_string()
@@ -309,10 +407,10 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         ),
         (
             "output".to_string(),
-            if let Some(content) = extension
-                .and_then(|fields| fields.get("responses_tool_output_content"))
-                .filter(|content| content.is_array() && output == content.to_string())
-            {
+            if let Some(content) = decoder_captured_tool_output.filter(|content| {
+                (content.is_string() && row.get("content") == Some(*content))
+                    || (content.is_array() && output == content.to_string())
+            }) {
                 content.clone()
             } else if let Some(content) = row.get("content").filter(|content| {
                 content.as_array().is_some_and(|parts| {
@@ -330,15 +428,24 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             },
         ),
     ]);
+    if let Some(native_parts) = decoder_captured_tool_output.filter(|content| {
+        content.is_array()
+            && super::responses_tool_output_content(content)
+                .is_ok_and(|canonical| row.get("content") == Some(&canonical))
+    }) {
+        // Restore the native Responses parts only while canonical Chat still
+        // matches their declared conversion. A Chat Process transformation
+        // must remain authoritative. Provider Compat can then apply its normal
+        // per-attempt image placeholder while retaining structured file parts.
+        item.insert("output".to_string(), native_parts.clone());
+    }
     if let Some(call_id) = call_id {
-        // Responses-derived outputs retain an absent item id through the round trip.
-        if responses_item_id_from_chat_extension(row).is_some()
-            || extension
-                .and_then(|fields| fields.get("responses_tool_output_id_omitted"))
-                .and_then(Value::as_bool)
-                != Some(true)
-        {
-            let item_id = if responses_tool_output_type == "custom_tool_call_output" {
+        // Responses-derived outputs retain an absent item id through the round trip,
+        // and explicit item IDs accepted from Responses entry are emitted verbatim.
+        if responses_item_id_from_chat_extension(row).is_some() || !omit_tool_output_id {
+            let item_id = if responses_tool_output_type == "custom_tool_call_output"
+                || preserve_native_tool_output_id
+            {
                 responses_custom_item_id(row, call_id)
             } else {
                 responses_function_item_id(row, call_id)
@@ -374,6 +481,141 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         }
     }
     Ok(Some(Value::Object(item)))
+}
+
+fn build_typed_responses_hosted_web_search_call_item(
+    output: &str,
+    source_input_index: Option<usize>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Value, String> {
+    let parsed: Value = serde_json::from_str(output).map_err(|error| {
+        format!("MalformedOutboundField target_protocol=responses path=$.input[].web_search_call: {error}")
+    })?;
+    let object = parsed.as_object().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call: expected object"
+            .to_string()
+    })?;
+    if object.get("type").and_then(Value::as_str) != Some("web_search_call") {
+        return Err(
+            "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.type"
+                .to_string(),
+        );
+    }
+    let parent_path = match source_input_index {
+        Some(index) => format!("$.input[{index}]"),
+        None => "$.input[].web_search_call".to_string(),
+    };
+    let mut projected = Map::new();
+    for (key, value) in object {
+        if key == "action" {
+            let action_path = super::json_path_child(&parent_path, key);
+            projected.insert(
+                key.clone(),
+                project_responses_web_search_action(value, &action_path, drops)?,
+            );
+            continue;
+        }
+        if RESPONSES_HOSTED_WEB_SEARCH_CALL_REGISTERED_FIELDS.contains(&key.as_str()) {
+            projected.insert(key.clone(), value.clone());
+            continue;
+        }
+        // Reserved internal carriers must never be emitted or re-interpreted on wire.
+        if key == "routecodex_chat_extension" {
+            continue;
+        }
+        drops.push(V3ProjectionDropRecord::new(
+            "responses",
+            super::json_path_child(&parent_path, key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "build_typed_responses_hosted_web_search_call_item",
+        ));
+    }
+    Ok(Value::Object(projected))
+}
+
+fn project_responses_web_search_action(
+    action: &Value,
+    action_path: &str,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<Value, String> {
+    let action_object = action.as_object().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action"
+            .to_string()
+    })?;
+    let action_type = action_object
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.type"
+                .to_string()
+        })?;
+    let registered_fields: &[&str] = match action_type {
+        "search" => &["type", "query", "queries", "sources"],
+        "open_page" => &["type", "url"],
+        "find_in_page" | "find" => &["type", "url", "pattern"],
+        _ => {
+            return Err(
+                "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.type"
+                    .to_string(),
+            );
+        }
+    };
+    let mut projected_action = Map::new();
+    for (key, value) in action_object {
+        if action_type == "search" && key == "sources" {
+            let sources = value.as_array().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.sources"
+                    .to_string()
+            })?;
+            let sources_path = super::json_path_child(action_path, key);
+            let mut projected_sources = Vec::with_capacity(sources.len());
+            for (index, source) in sources.iter().enumerate() {
+                let source_object = source.as_object().ok_or_else(|| {
+                    "MalformedOutboundField target_protocol=responses path=$.input[].web_search_call.action.sources[]"
+                        .to_string()
+                })?;
+                let source_path = format!("{sources_path}[{index}]");
+                let mut projected_source = Map::new();
+                for (src_key, src_value) in source_object {
+                    if matches!(src_key.as_str(), "type" | "url") {
+                        projected_source.insert(src_key.clone(), src_value.clone());
+                        continue;
+                    }
+                    if src_key == "routecodex_chat_extension" {
+                        continue;
+                    }
+                    drops.push(V3ProjectionDropRecord::new(
+                        "responses",
+                        super::json_path_child(&source_path, src_key),
+                        "unmapped_target_protocol_field_unrepresentable",
+                        src_value.clone(),
+                        "build_typed_responses_hosted_web_search_call_item",
+                    ));
+                }
+                projected_sources.push(Value::Object(projected_source));
+            }
+            projected_action.insert(key.clone(), Value::Array(projected_sources));
+            continue;
+        }
+        if registered_fields.contains(&key.as_str()) {
+            projected_action.insert(key.clone(), value.clone());
+            continue;
+        }
+        if key == "routecodex_chat_extension" {
+            continue;
+        }
+        drops.push(V3ProjectionDropRecord::new(
+            "responses",
+            super::json_path_child(action_path, key),
+            "unmapped_target_protocol_field_unrepresentable",
+            value.clone(),
+            "build_typed_responses_hosted_web_search_call_item",
+        ));
+    }
+    Ok(Value::Object(projected_action))
 }
 
 fn project_responses_item_extension_fields(

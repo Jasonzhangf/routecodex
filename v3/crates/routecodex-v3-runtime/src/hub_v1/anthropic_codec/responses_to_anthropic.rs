@@ -64,11 +64,21 @@ pub(super) fn chat_messages_as_anthropic_messages(
     value: &Value,
     system_parts: &mut Vec<String>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    chat_messages_as_anthropic_messages_with_provenance(value, system_parts, None)
+        .map(|(messages, _)| messages)
+}
+
+pub(super) fn chat_messages_as_anthropic_messages_with_provenance(
+    value: &Value,
+    system_parts: &mut Vec<String>,
+    provenance: Option<&super::super::V3HubExplicitHistoryProvenance>,
+) -> Result<(Vec<Value>, Vec<bool>), V3AnthropicCodecError> {
     let messages = value
         .as_array()
         .ok_or(V3AnthropicCodecError::MessagesNotArray)?;
     let mut output = Vec::new();
-    for message in messages {
+    let mut orphan_tool_output_literals = Vec::new();
+    for (msg_idx, message) in messages.iter().enumerate() {
         let object = message
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "message" })?;
@@ -78,6 +88,9 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         if role == "tool" {
+            let preserve_literal = provenance
+                .is_some_and(|provenance| provenance.preserve_orphan_tool_output_literal(msg_idx));
+            orphan_tool_output_literals.push(preserve_literal);
             let mut tool_result = Map::new();
             tool_result.insert("type".to_string(), Value::String("tool_result".to_string()));
             tool_result.insert(
@@ -86,7 +99,10 @@ pub(super) fn chat_messages_as_anthropic_messages(
             );
             tool_result.insert(
                 "content".to_string(),
-                responses_tool_output_as_anthropic_content(object.get("content"))?,
+                responses_tool_output_as_anthropic_content_with_policy(
+                    object.get("content"),
+                    preserve_literal,
+                )?,
             );
             if let Some(is_error) = tool_result_explicit_is_error(object)? {
                 tool_result.insert("is_error".to_string(), is_error.clone());
@@ -117,7 +133,7 @@ pub(super) fn chat_messages_as_anthropic_messages(
             "content": content
         }));
     }
-    Ok(output)
+    Ok((output, orphan_tool_output_literals))
 }
 
 pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
@@ -749,9 +765,19 @@ pub(super) fn responses_function_call_input(
 pub(super) fn responses_tool_output_as_anthropic_content(
     value: Option<&Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
+    responses_tool_output_as_anthropic_content_with_policy(value, false)
+}
+
+pub(super) fn responses_tool_output_as_anthropic_content_with_policy(
+    value: Option<&Value>,
+    preserve_literal: bool,
+) -> Result<Value, V3AnthropicCodecError> {
     let Some(value) = value else {
         return Ok(Value::String(String::new()));
     };
+    if preserve_literal && value.is_string() {
+        return Ok(value.clone());
+    }
     let content = responses_tool_output_content(value).map_err(|_| {
         V3AnthropicCodecError::MalformedField {
             field: "tool output content",

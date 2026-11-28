@@ -416,3 +416,61 @@ fn bug4beffbf_anthropic_long_custom_name_is_bounded_to_128_chars() {
     assert!(bug4beffbf_legal_anthropic_alias(alias), "alias={alias}");
     assert_eq!(alias.chars().count(), 128);
 }
+
+#[test]
+fn responses_orphan_json_image_string_stays_literal_in_anthropic_tool_result() {
+    let encoded_image = r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#;
+    let (canonical, provenance) =
+        crate::hub_v1::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_with_provenance(
+            &json!({
+                "model": "claude",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_orphan_json",
+                        "output": encoded_image
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_orphan_structured",
+                        "output": [{"type": "input_image", "image_url": "data:image/png;base64,BBBB"}]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_paired_json",
+                        "name": "read_image",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_paired_json",
+                        "output": encoded_image
+                    }
+                ]
+            }),
+        )
+        .expect("Responses payload must decode to canonical Chat with provenance");
+    let (wire, _, literals) =
+        super::super::encode_v3_responses_semantic_as_anthropic_request_with_drops_and_provenance(
+            canonical,
+            Some(&provenance),
+        )
+        .expect("Anthropic projection must succeed");
+    assert_eq!(literals, vec![true, false, false]);
+    assert_eq!(
+        wire["messages"][0]["content"][0],
+        json!({
+            "type": "tool_result",
+            "tool_use_id": "call_orphan_json",
+            "content": encoded_image
+        })
+    );
+    assert_eq!(
+        wire["messages"][1]["content"][0]["content"][0]["type"],
+        json!("image")
+    );
+    assert_eq!(
+        wire["messages"][3]["content"][0]["content"][0]["type"],
+        json!("image")
+    );
+}

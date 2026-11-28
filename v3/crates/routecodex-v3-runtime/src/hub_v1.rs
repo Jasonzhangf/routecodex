@@ -68,8 +68,8 @@ pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_chat_standard_request_from_chat_canonical_recording,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals,
     normalize_v3_openai_responses_provider_request_payload,
 };
 mod anthropic_codec_tool_projection;
@@ -87,6 +87,7 @@ pub use req_execution_05_planned::*;
 mod req_target_06_resolved;
 pub use req_target_06_resolved::*;
 mod req_outbound_07_provider_semantic;
+pub(crate) use req_outbound_07_provider_semantic::project_v3_operation_runner_standard_provider_request_with_provenance;
 pub use req_outbound_07_provider_semantic::*;
 mod provider_req_compat_06_drop;
 mod provider_req_compat_06_provider_compat;

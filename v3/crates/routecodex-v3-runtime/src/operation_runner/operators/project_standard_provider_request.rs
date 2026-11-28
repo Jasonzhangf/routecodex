@@ -1,6 +1,6 @@
 use crate::hub_v1::{
-    project_v3_operation_runner_standard_provider_request, V3HubEntryProtocol,
-    V3HubProviderWireProtocol, V3HubTransportIntent,
+    project_v3_operation_runner_standard_provider_request_with_provenance, V3HubEntryProtocol,
+    V3HubExplicitHistoryProvenance, V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use crate::projection_drop_log::V3ProjectionDropRecord;
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
@@ -14,6 +14,7 @@ const OPERATOR_VERSION: &str = "1";
 pub(crate) struct StandardProjectionSideOutput {
     pub(crate) drops: Vec<V3ProjectionDropRecord>,
     pub(crate) namespace_registry: NamespaceToolIdentityRegistry,
+    pub(crate) orphan_tool_output_literals: Vec<bool>,
 }
 
 pub(crate) struct ProjectStandardProviderRequestOperator {
@@ -21,6 +22,7 @@ pub(crate) struct ProjectStandardProviderRequestOperator {
     transport_intent: V3HubTransportIntent,
     provider_protocol: V3HubProviderWireProtocol,
     selected_target: routecodex_v3_target::V3TargetCandidate,
+    explicit_history_pairing: V3HubExplicitHistoryProvenance,
     side_output: Arc<Mutex<Option<StandardProjectionSideOutput>>>,
 }
 
@@ -30,6 +32,7 @@ impl ProjectStandardProviderRequestOperator {
         transport_intent: V3HubTransportIntent,
         provider_protocol: V3HubProviderWireProtocol,
         selected_target: routecodex_v3_target::V3TargetCandidate,
+        explicit_history_pairing: V3HubExplicitHistoryProvenance,
         side_output: Arc<Mutex<Option<StandardProjectionSideOutput>>>,
     ) -> Self {
         Self {
@@ -37,6 +40,7 @@ impl ProjectStandardProviderRequestOperator {
             transport_intent,
             provider_protocol,
             selected_target,
+            explicit_history_pairing,
             side_output,
         }
     }
@@ -60,12 +64,13 @@ impl Operator for ProjectStandardProviderRequestOperator {
     }
 
     fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
-        let projected = project_v3_operation_runner_standard_provider_request(
+        let projected = project_v3_operation_runner_standard_provider_request_with_provenance(
             &input,
             self.entry_protocol,
             self.transport_intent,
             self.provider_protocol,
             &self.selected_target,
+            Some(&self.explicit_history_pairing),
         )?;
         let mut holder = self.side_output.lock().map_err(|_| {
             "provider standard projection side-output holder is poisoned".to_string()
@@ -73,6 +78,7 @@ impl Operator for ProjectStandardProviderRequestOperator {
         *holder = Some(StandardProjectionSideOutput {
             drops: projected.drops,
             namespace_registry: projected.namespace_registry,
+            orphan_tool_output_literals: projected.orphan_tool_output_literals,
         });
         Ok(projected.payload)
     }

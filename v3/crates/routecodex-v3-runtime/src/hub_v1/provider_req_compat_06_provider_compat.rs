@@ -50,6 +50,7 @@ struct AdjustProviderPrivateRequestOperator {
     side_output: Arc<AdjustProviderPrivateRequestSideOutput>,
     execution_mode: super::V3HubExecutionMode,
     entry_protocol: super::V3HubEntryProtocol,
+    orphan_tool_output_literals: Vec<bool>,
 }
 
 impl Operator for AdjustProviderPrivateRequestOperator {
@@ -70,11 +71,12 @@ impl Operator for AdjustProviderPrivateRequestOperator {
     }
 
     fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
-        let result = apply_v3_provider_req_compat_to_provider_payload(
+        let result = apply_v3_provider_req_compat_to_provider_payload_with_policy(
             input,
             &self.selected_target,
             self.provider_protocol,
             &self.profile,
+            &self.orphan_tool_output_literals,
         )
         .map(|(mut payload, custom_tool_function_binding)| {
             let opencode_zen_tcm_bridge = if self
@@ -135,6 +137,12 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
+    let orphan_tool_output_literals: Vec<bool> =
+        if input.previous.previous.execution == super::V3HubExecutionMode::Relay {
+            input.orphan_tool_output_literals.clone()
+        } else {
+            Vec::new()
+        };
     let side_output = Arc::new(AdjustProviderPrivateRequestSideOutput::default());
     let output = run_v3_single_node_operator(
         V3OperationGraph::Request,
@@ -148,6 +156,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
             side_output: Arc::clone(&side_output),
             execution_mode: input.previous.previous.execution,
             entry_protocol: input.entry_protocol(),
+            orphan_tool_output_literals,
         },
     );
     let typed_outcome = side_output
@@ -209,10 +218,26 @@ pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> 
 }
 
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
+    payload: Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    profile: &V3ProviderCompatProfileId,
+) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
+    apply_v3_provider_req_compat_to_provider_payload_with_policy(
+        payload,
+        selected,
+        provider_protocol,
+        profile,
+        &[],
+    )
+}
+
+fn apply_v3_provider_req_compat_to_provider_payload_with_policy(
     mut payload: Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
+    orphan_tool_output_literals: &[bool],
 ) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let custom_tool_function_binding = (profile
@@ -251,7 +276,11 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         .is_some_and(|pool| pool == "default")
         && !selected.supports_vision()
     {
-        image_placeholder::project_default_text_attempt_images(&mut result, provider_protocol);
+        image_placeholder::project_default_text_attempt_images_with_tool_policy(
+            &mut result,
+            provider_protocol,
+            orphan_tool_output_literals,
+        );
     }
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);
@@ -1603,6 +1632,7 @@ mod tests {
                 side_output: Arc::clone(&side_output),
                 execution_mode: req07.previous.previous.execution,
                 entry_protocol: req07.entry_protocol(),
+                orphan_tool_output_literals: Vec::new(),
             },
         )
         .expect("canonical private request node must execute");

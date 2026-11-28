@@ -166,6 +166,7 @@ pub struct V3Req04StandardizedResponses {
     pub method: String,
     pub request_purpose: V3RequestPurpose,
     pub tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
+    pub(crate) explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance,
 }
 
 /// Chat 入口标准化（与 V3Req04StandardizedResponses 同构，协议不同）：
@@ -184,6 +185,7 @@ pub struct V3Req04StandardizedChat {
     pub method: String,
     pub request_purpose: V3RequestPurpose,
     pub tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
+    pub(crate) explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance,
 }
 
 /// Chat direct 执行策略节点（与 V3ResponsesDirect11Policy 同构）。
@@ -211,6 +213,7 @@ pub struct V3ResponsesDirect11Policy {
     pub request_id: String,
     pub request_purpose: V3RequestPurpose,
     pub request_body: Value,
+    pub(crate) explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,6 +321,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
         request_purpose: raw.request_purpose,
         body,
         tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
+        explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance::empty(),
     })
 }
 
@@ -340,6 +344,7 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
         request_purpose: raw.request_purpose,
         body,
         tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
+        explicit_history_pairing: crate::hub_v1::V3HubExplicitHistoryProvenance::empty(),
     })
 }
 
@@ -743,6 +748,7 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
         request_id: standardized.request_id.clone(),
         request_purpose: standardized.request_purpose,
         request_body: standardized.body.clone(),
+        explicit_history_pairing: standardized.explicit_history_pairing.clone(),
     }
 }
 

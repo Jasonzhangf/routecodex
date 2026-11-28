@@ -4,6 +4,116 @@
 // the former inline `mod tests`.
 
 use super::*;
+
+#[test]
+fn responses_reasoning_invalid_carriers_return_errors_and_valid_input_still_decodes() {
+    for extension in [
+        json!(false),
+        json!([]),
+        json!({"responses_reasoning_items":false}),
+        json!({"responses_reasoning_items":[false]}),
+    ] {
+        let result = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"thought"}],"routecodex_chat_extension":extension}]
+        }));
+        assert!(
+            result.is_err(),
+            "invalid registered carrier must return an error"
+        );
+    }
+    let (canonical, provenance) = build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+        "input":[{"type":"reasoning","id":"rs_owned","summary":[{"type":"summary_text","text":"thought"}],
+            "routecodex_chat_extension":{"responses_reasoning_items":[{"id":"rs_client","encrypted_content":"enc_client"}]}}]
+    })).unwrap();
+    let entries =
+        &canonical["messages"][0]["routecodex_chat_extension"][RESPONSES_REASONING_ITEMS_EXTENSION];
+    assert_eq!(entries.as_array().unwrap().len(), 2);
+    assert_eq!(entries[0]["id"], "rs_client");
+    assert_eq!(entries[0]["encrypted_content"], "enc_client");
+    assert!(entries[0].get("source_input_order").is_none());
+    assert_eq!(entries[1]["id"], "rs_owned");
+    assert!(entries[1].get("source_input_order").is_none());
+    assert_eq!(provenance.reasoning_item_order(0, 0), None);
+    assert_eq!(provenance.reasoning_item_order(0, 1), Some(0));
+}
+
+#[test]
+fn responses_pending_assistant_items_keep_boundaries_and_dual_history_equivalence() {
+    let input = json!([
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"before call"}]},
+        {"type":"function_call","id":"fc_1","name":"lookup","call_id":"call_1","arguments":"{}"},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"while pending"}]},
+        {"type":"function_call_output","call_id":"call_1","output":"done"}
+    ]);
+    let (canonical, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": input.clone()
+        }))
+        .unwrap();
+    let messages = canonical["messages"].as_array().unwrap();
+    assert_eq!(
+        messages.len(),
+        2,
+        "must keep grouped Chat row count: {canonical}"
+    );
+    assert!(
+        messages[0]
+            .pointer("/routecodex_chat_extension/responses_assistant_items")
+            .is_none(),
+        "canonical JSON must not tunnel assistant items via payload extensions: {canonical}"
+    );
+    assert!(
+        messages[0]["tool_calls"][0]
+            .pointer("/routecodex_chat_extension/responses_tool_input_order")
+            .is_none()
+            && messages[1]
+                .pointer("/routecodex_chat_extension/responses_tool_input_order")
+                .is_none()
+            && messages[1]
+                .pointer("/routecodex_chat_extension/responses_tool_output_id_omitted")
+                .is_none(),
+        "canonical JSON must not carry decoder provenance markers: {canonical}"
+    );
+    let provenance_debug = format!("{provenance:?}");
+    assert!(
+        !provenance_debug.contains("before call") && !provenance_debug.contains("while pending"),
+        "V3HubExplicitHistoryProvenance must hold zero copies of assistant business content: {provenance_debug}"
+    );
+    let (projected, _) =
+        super::super::request_outbound_format::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            &canonical,
+            true,
+            false,
+            Some(&provenance),
+        )
+        .unwrap();
+    assert_eq!(projected["input"], input);
+}
+
+#[test]
+fn responses_custom_tool_call_output_preserves_structured_array_content() {
+    let input = json!([{
+        "type":"custom_tool_call_output",
+        "call_id":"call_custom_orphan",
+        "output":[{"type":"input_text","text":"structured custom"}]
+    }]);
+    let (canonical, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": input.clone()
+        }))
+        .unwrap();
+    let (projected, _) =
+        super::super::request_outbound_format::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            &canonical,
+            true,
+            false,
+            Some(&provenance),
+        )
+        .unwrap();
+    assert_eq!(projected["input"], input);
+}
 use serde_json::{json, Value};
 
 #[test]
@@ -579,26 +689,27 @@ fn responses_inbound_does_not_rewrite_same_named_user_tool_schema() {
 }
 #[test]
 fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id() {
-    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
-        "model": "gpt-5.5",
-        "input": [
-            {
-                "type": "web_search_call",
-                "status": "failed",
-                "action": {
-                    "type": "search",
-                    "query": "微信小程序 发布流程",
-                    "queries": ["微信小程序 发布流程", "微信小程序 request 合法域名"]
+    let (request, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "web_search_call",
+                    "status": "failed",
+                    "action": {
+                        "type": "search",
+                        "query": "微信小程序 发布流程",
+                        "queries": ["微信小程序 发布流程", "微信小程序 request 合法域名"]
+                    }
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "继续"}]
                 }
-            },
-            {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": "继续"}]
-            }
-        ]
-    }))
-    .expect("web_search_call history must project to legal OpenAI Chat tool pair");
+            ]
+        }))
+        .expect("web_search_call history must project to legal OpenAI Chat tool pair");
 
     let messages = request["messages"].as_array().expect("messages");
     assert_eq!(
@@ -647,8 +758,15 @@ fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id
     assert_eq!(result["action"], arguments);
     assert_eq!(
         messages[2],
-        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+        json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "继续"}]
+        })
     );
+    assert!(provenance.suppress_responses_hosted_call(0, 0));
+    assert_eq!(provenance.tool_call_order(0, 0), Some(0));
+    assert_eq!(provenance.message_order(1), Some(0));
+    assert_eq!(provenance.message_order(2), Some(1));
 }
 #[test]
 fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions() {
@@ -662,35 +780,36 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
             "parameters": {"type": "object"}
         }]
     }]);
-    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
-        "model": "gpt-5.5",
-        "input": [
-            {
-                "type": "tool_search_call",
-                "call_id": "call_FTUTqdbVH4EQwpp0DWcX5q6M",
-                "execution": "client",
-                "status": "completed",
-                "arguments": {
-                    "query": "multi-agent send message to existing agent status resume agent",
-                    "limit": 8
+    let (request, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "call_id": "call_FTUTqdbVH4EQwpp0DWcX5q6M",
+                    "execution": "client",
+                    "status": "completed",
+                    "arguments": {
+                        "query": "multi-agent send message to existing agent status resume agent",
+                        "limit": 8
+                    }
+                },
+                {
+                    "type": "tool_search_output",
+                    "id": "tso_123",
+                    "call_id": "call_FTUTqdbVH4EQwpp0DWcX5q6M",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": discovered_tools
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "继续"}]
                 }
-            },
-            {
-                "type": "tool_search_output",
-                "id": "tso_123",
-                "call_id": "call_FTUTqdbVH4EQwpp0DWcX5q6M",
-                "execution": "client",
-                "status": "completed",
-                "tools": discovered_tools
-            },
-            {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": "继续"}]
-            }
-        ]
-    }))
-    .expect("tool_search call/output must normalize to adjacent Chat tool history");
+            ]
+        }))
+        .expect("tool_search call/output must normalize to adjacent Chat tool history");
 
     let messages = request["messages"].as_array().expect("messages");
     assert_eq!(
@@ -748,8 +867,14 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
     );
     assert_eq!(
         messages[2],
-        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+        json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "继续"}]
+        })
     );
+    assert_eq!(provenance.tool_call_order(0, 0), Some(0));
+    assert_eq!(provenance.message_order(1), Some(1));
+    assert_eq!(provenance.message_order(2), Some(2));
     assert!(
         messages.iter().all(|message| {
             message.get("type").and_then(Value::as_str) != Some("tool_search_call")
@@ -758,23 +883,72 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
     );
 }
 #[test]
-fn responses_tool_search_output_without_matching_call_fails_in_inbound_owner() {
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
-        "model": "gpt-5.5",
-        "input": [{
-            "type": "tool_search_output",
-            "call_id": "call_missing",
-            "status": "completed",
-            "execution": "client",
-            "tools": []
-        }]
-    }))
-    .expect_err("orphan tool_search_output must not cross ReqInbound02");
-
-    assert!(
-        error.contains("no preceding assistant tool_call"),
-        "unexpected error: {error}"
+fn responses_orphan_and_second_tool_search_output_decode_at_inbound_while_malformed_fails() {
+    let (orphan_canonical, orphan_prov) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "tool_search_output",
+                "call_id": "call_missing",
+                "status": "completed",
+                "execution": "client",
+                "tools": []
+            }]
+        }))
+        .expect("orphan tool_search_output must decode at ReqInbound02");
+    assert_eq!(orphan_canonical["messages"][0]["role"], json!("tool"));
+    assert_eq!(
+        orphan_canonical["messages"][0]["tool_call_id"],
+        json!("call_missing")
     );
+    assert_eq!(
+        orphan_canonical["messages"][0]["routecodex_chat_extension"]["responses_tool_output_type"],
+        json!("tool_search_output")
+    );
+    assert_eq!(orphan_prov.message_order(0), Some(0));
+
+    let (second_receipt_canonical, second_prov) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "call_id": "call_repeat",
+                    "arguments": {"query": "lookup"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_repeat",
+                    "tools": []
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_repeat",
+                    "tools": [{"type": "function", "name": "later_tool", "parameters": {"type": "object"}}]
+                }
+            ]
+        }))
+        .expect("second tool_search_output receipt after first consumed pending call must decode");
+    assert_eq!(
+        second_receipt_canonical["messages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(second_prov.message_order(2), Some(2));
+
+    for bad_item in [
+        json!({"type": "tool_search_output", "tools": []}),
+        json!({"type": "tool_search_output", "call_id": "", "tools": []}),
+        json!({"type": "tool_search_output", "call_id": "call_bad", "tools": "not-an-array"}),
+    ] {
+        build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [bad_item]
+        }))
+        .expect_err("malformed tool_search_output must still fail at ReqInbound02");
+    }
 }
 #[test]
 fn responses_function_call_item_id_enters_chat_extension() {
@@ -1093,4 +1267,128 @@ fn responses_system_message_between_pending_tool_call_and_result_defers_to_prese
         messages[2]["content"],
         json!([{"type": "text", "text": "system after pending tool call"}])
     );
+}
+
+#[test]
+fn responses_folded_string_and_mixed_assistant_items_keep_boundaries_without_content_copy() {
+    let input = json!([
+        {"type":"message","role":"assistant","id":"msg_s1","status":"completed","content":"first text"},
+        {"type":"output_text","id":"msg_s2","text":"second text"},
+        {"type":"function_call","id":"fc_mix","name":"lookup","call_id":"call_mix","arguments":"{}"},
+        {"type":"message","role":"assistant","id":"msg_arr","status":"completed","content":[{"type":"output_text","text":"third array"}]},
+        {"type":"function_call_output","call_id":"call_mix","output":"done"}
+    ]);
+    let (canonical, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": input
+        }))
+        .expect("mixed string + output_text + array assistant items must decode");
+    let provenance_debug = format!("{provenance:?}");
+    assert!(
+        !provenance_debug.contains("first text")
+            && !provenance_debug.contains("second text")
+            && !provenance_debug.contains("third array"),
+        "provenance must hold zero copies of assistant text: {provenance_debug}"
+    );
+    let (projected, _) =
+        super::super::request_outbound_format::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+            &canonical,
+            true,
+            false,
+            Some(&provenance),
+        )
+        .expect("mixed folded assistant items must project back in source order");
+    assert_eq!(
+        projected["input"],
+        json!([
+            {"type":"message","role":"assistant","id":"msg_s1","status":"completed","content":[{"type":"output_text","text":"first text"}]},
+            {"type":"message","role":"assistant","id":"msg_s2","content":[{"type":"output_text","text":"second text"}]},
+            {"type":"function_call","id":"fc_mix","name":"lookup","call_id":"call_mix","arguments":"{}"},
+            {"type":"message","role":"assistant","id":"msg_arr","status":"completed","content":[{"type":"output_text","text":"third array"}]},
+            {"type":"function_call_output","call_id":"call_mix","output":"done"}
+        ])
+    );
+}
+
+#[test]
+fn resolve_orphan_media_skips_legacy_rows_with_default_provenance() {
+    let mut messages = vec![
+        json!({
+            "role": "tool",
+            "tool_call_id": "call_legacy",
+            "content": "actual",
+            "routecodex_chat_extension": {"responses_tool_output_content": "different"}
+        }),
+        json!({
+            "role": "tool",
+            "tool_call_id": "call_native_alias",
+            "content": "actual",
+            "routecodex_chat_extension": {
+                "responses_tool_output_type": "tool_result",
+                "responses_tool_output_content": "different"
+            }
+        }),
+        json!({
+            "role": "tool",
+            "tool_call_id": "call_native",
+            "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}],
+            "routecodex_chat_extension": {
+                "responses_tool_output_type": "function_call_output",
+                "responses_tool_output_content": r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#
+            }
+        }),
+    ];
+    let mut provenance = V3HubExplicitHistoryProvenance {
+        message_entries: vec![
+            V3HubMessageHistoryProvenance::default(),
+            V3HubMessageHistoryProvenance {
+                message_input_order: Some(0),
+                preserve_native_tool_output_id: true,
+                decoder_native_tool_output: true,
+                decoder_captured_responses_tool_output: false,
+                ..Default::default()
+            },
+            V3HubMessageHistoryProvenance {
+                message_input_order: Some(1),
+                preserve_native_tool_output_id: true,
+                decoder_native_tool_output: true,
+                decoder_captured_responses_tool_output: true,
+                ..Default::default()
+            },
+        ],
+    };
+    resolve_orphan_responses_tool_output_media(&mut messages, &mut provenance);
+    assert_eq!(messages[0]["content"], json!("actual"));
+    assert!(!provenance.preserve_orphan_tool_output_literal(0));
+    assert_eq!(messages[1]["content"], json!("actual"));
+    assert!(provenance.preserve_orphan_tool_output_literal(1));
+    assert_eq!(
+        messages[2]["content"],
+        json!(r#"[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]"#)
+    );
+    assert!(provenance.preserve_orphan_tool_output_literal(2));
+}
+
+#[test]
+fn tool_result_alias_captures_responses_tool_output_content_bool_provenance() {
+    let alias_image_json = r#"[{"type":"input_image","image_url":"https://example.com/a.png"}]"#;
+    let (canonical, provenance) =
+        build_v3_chat_canonical_request_from_responses_payload_with_provenance(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "tool_result",
+                "call_id": "call_alias_img",
+                "output": alias_image_json
+            }]
+        }))
+        .expect("tool_result alias with JSON image array must decode");
+    assert_eq!(
+        canonical["messages"][0]["routecodex_chat_extension"]["responses_tool_output_content"],
+        json!(alias_image_json)
+    );
+    assert_eq!(canonical["messages"][0]["content"], json!(alias_image_json));
+    let entry = provenance.message_entry(0).expect("provenance entry");
+    assert!(entry.decoder_captured_responses_tool_output);
+    assert!(entry.preserve_orphan_tool_output_literal);
 }

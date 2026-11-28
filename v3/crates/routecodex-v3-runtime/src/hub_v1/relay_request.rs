@@ -2,9 +2,10 @@ use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
-    compile_v3_tool_thinking_turn_context_at_req04, V3HubEntryProtocol, V3HubInvocationSource,
-    V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
-    V3HubRequestSemanticProtocol, V3HubTransportIntent, V3ToolThinkingTurnContext,
+    compile_v3_tool_thinking_turn_context_at_req04, V3HubEntryProtocol,
+    V3HubExplicitHistoryProvenance, V3HubInvocationSource, V3HubReqChatProcess04Governed,
+    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
+    V3HubTransportIntent, V3ToolThinkingTurnContext,
 };
 use crate::operation_runner::{run_v3_single_node_operator, V3OperationGraph};
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
@@ -159,7 +160,7 @@ struct GovernChatRequestSideOutput {
     tool_thinking_turn_context: V3ToolThinkingTurnContext,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct GovernChatRequestContext {
     entry_protocol: V3HubEntryProtocol,
     invocation_source: V3HubInvocationSource,
@@ -167,6 +168,7 @@ struct GovernChatRequestContext {
     semantic_protocol: V3HubRequestSemanticProtocol,
     canonicalized_from_responses: bool,
     memory_raw_capture_guidance_injected: bool,
+    explicit_history_pairing: V3HubExplicitHistoryProvenance,
 }
 
 impl GovernChatRequestContext {
@@ -178,10 +180,11 @@ impl GovernChatRequestContext {
             semantic_protocol: normalized.semantic_protocol,
             canonicalized_from_responses: normalized.canonicalized_from_responses,
             memory_raw_capture_guidance_injected: normalized.memory_raw_capture_guidance_injected,
+            explicit_history_pairing: normalized.explicit_history_pairing.clone(),
         }
     }
 
-    fn into_normalized(self, payload: Value) -> V3HubReqInbound02Normalized {
+    fn into_normalized(&self, payload: Value) -> V3HubReqInbound02Normalized {
         V3HubReqInbound02Normalized {
             previous: build_v3_hub_req_inbound_01_client_raw(
                 payload,
@@ -192,6 +195,7 @@ impl GovernChatRequestContext {
             semantic_protocol: self.semantic_protocol,
             canonicalized_from_responses: self.canonicalized_from_responses,
             memory_raw_capture_guidance_injected: self.memory_raw_capture_guidance_injected,
+            explicit_history_pairing: self.explicit_history_pairing.clone(),
         }
     }
 }
@@ -296,12 +300,15 @@ fn govern_chat_request_at_req04(
             V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini
         );
     let allow_missing_parent = normalized.entry_protocol() == V3HubEntryProtocol::Responses;
+    let mut explicit_history_pairing = normalized.explicit_history_pairing.clone();
     let tool_output_count = govern_tool_outputs_at_req04(
         Arc::make_mut(&mut normalized.previous.payload.0),
         govern_chat_messages_tool_outputs,
         allow_missing_parent,
         current_payload_start,
+        &mut explicit_history_pairing,
     )?;
+    normalized.explicit_history_pairing = explicit_history_pairing;
     events.push(V3HubRelayRequestHookEvent::Req04ToolGoverned);
     events.push(V3HubRelayRequestHookEvent::Req04Exit);
     Ok(Box::new(GovernChatRequestSideOutput {
@@ -500,6 +507,7 @@ fn govern_tool_outputs_at_req04(
     govern_chat_messages: bool,
     allow_missing_parent: bool,
     current_payload_start: usize,
+    explicit_history_pairing: &mut V3HubExplicitHistoryProvenance,
 ) -> Result<usize, V3HubRelayRequestError> {
     if payload.get("input").and_then(Value::as_array).is_none()
         && payload.get("messages").and_then(Value::as_array).is_some()
@@ -509,6 +517,7 @@ fn govern_tool_outputs_at_req04(
             payload,
             allow_missing_parent,
             current_payload_start,
+            explicit_history_pairing,
         );
     }
     let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
@@ -544,6 +553,7 @@ fn govern_tool_outputs_at_req04(
         let actual_kind = match item.get("type").and_then(Value::as_str) {
             Some("function_call_output") => V3HubRelayActualToolOutputKind::Function,
             Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
+            Some("tool_search_output") => V3HubRelayActualToolOutputKind::ToolSearch,
             _ => continue,
         };
         output_count += 1;
@@ -576,13 +586,17 @@ fn govern_chat_tool_outputs_at_req04(
     payload: &mut Value,
     allow_missing_parent: bool,
     current_payload_start: usize,
+    explicit_history_pairing: &mut V3HubExplicitHistoryProvenance,
 ) -> Result<usize, V3HubRelayRequestError> {
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
-    let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
+    let mut expected_outputs: BTreeMap<
+        String,
+        Vec<(V3HubRelayExpectedToolOutputKind, Option<u64>)>,
+    > = BTreeMap::new();
+    let mut prior_outputs: BTreeMap<String, Vec<(V3HubRelayExpectedToolOutputKind, Option<u64>)>> =
         BTreeMap::new();
-    let mut prior_outputs = BTreeMap::new();
     let mut output_count = 0usize;
     for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
         match message.get("role").and_then(Value::as_str) {
@@ -590,26 +604,42 @@ fn govern_chat_tool_outputs_at_req04(
                 // A Responses continuation may contain further receipts for
                 // earlier calls after an intervening assistant group.
                 if allow_missing_parent {
-                    prior_outputs.append(&mut expected_outputs);
+                    for (call_id, entries) in std::mem::take(&mut expected_outputs) {
+                        prior_outputs.entry(call_id).or_default().extend(entries);
+                    }
                 } else {
                     expected_outputs.clear();
                 }
                 if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-                    for call in calls {
+                    for (call_idx, call) in calls.iter().enumerate() {
                         if let Some((call_id, expected_kind)) =
                             expected_tool_call_output_from_chat_call(call)
                         {
+                            let call_source_pos =
+                                explicit_history_pairing.tool_call_order(index, call_idx);
                             expected_outputs
                                 .entry(call_id)
                                 .or_default()
-                                .push(expected_kind);
+                                .push((expected_kind, call_source_pos));
                         }
                     }
                 }
                 continue;
             }
             Some("tool") => {}
-            _ => continue,
+            _ => {
+                let is_named_output_row = message
+                    .pointer("/routecodex_chat_extension/responses_tool_output_name")
+                    .is_some()
+                    && message.get("tool_call_id").is_none();
+                if is_named_output_row && allow_missing_parent {
+                    apply_orphan_responses_tool_output_literal(
+                        message,
+                        explicit_history_pairing.message_entries.get_mut(index),
+                    );
+                }
+                continue;
+            }
         }
         output_count = output_count.saturating_add(1);
         let Some(call_id) = message
@@ -631,11 +661,40 @@ fn govern_chat_tool_outputs_at_req04(
             }
             return Err(V3HubRelayRequestError::MalformedToolOutput { index });
         };
-        let Some(expected_kinds) = expected_outputs
+        let output_source_pos = explicit_history_pairing.message_order(index);
+        let is_preceding_parent =
+            |call_source_pos: Option<u64>| match (call_source_pos, output_source_pos) {
+                (Some(call_pos), Some(output_pos)) => call_pos < output_pos,
+                _ => true,
+            };
+        let expected_kinds = expected_outputs
             .get(&call_id)
-            .or_else(|| prior_outputs.get(&call_id))
-        else {
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|(_, call_pos)| is_preceding_parent(*call_pos))
+                    .map(|(kind, _)| *kind)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|kinds| !kinds.is_empty())
+            .or_else(|| {
+                prior_outputs
+                    .get(&call_id)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter(|(_, call_pos)| is_preceding_parent(*call_pos))
+                            .map(|(kind, _)| *kind)
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|kinds| !kinds.is_empty())
+            });
+        let Some(expected_kinds) = expected_kinds else {
             if allow_missing_parent {
+                apply_orphan_responses_tool_output_literal(
+                    message,
+                    explicit_history_pairing.message_entries.get_mut(index),
+                );
                 continue;
             }
             return Err(V3HubRelayRequestError::OrphanToolOutput {
@@ -643,6 +702,9 @@ fn govern_chat_tool_outputs_at_req04(
                 call_id: call_id.to_owned(),
             });
         };
+        if let Some(entry) = explicit_history_pairing.message_entries.get_mut(index) {
+            entry.preserve_orphan_tool_output_literal = false;
+        }
         if message
             .pointer("/routecodex_chat_extension/responses_tool_output_type")
             .is_none()
@@ -677,12 +739,38 @@ fn govern_chat_tool_outputs_at_req04(
     Ok(output_count)
 }
 
+fn apply_orphan_responses_tool_output_literal(
+    message: &mut Value,
+    provenance_entry: Option<&mut super::req_inbound_02_normalized::V3HubMessageHistoryProvenance>,
+) {
+    let Some(entry) = provenance_entry else {
+        return;
+    };
+    if !entry.decoder_native_tool_output {
+        return;
+    }
+    if entry.decoder_captured_responses_tool_output {
+        if let Some(raw_output) = message
+            .pointer("/routecodex_chat_extension/responses_tool_output_content")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        {
+            // An orphan (call-ID or named output) has no declared tool media semantics.
+            message["content"] = Value::String(raw_output);
+        }
+    }
+    if message.get("content").is_some_and(Value::is_string) {
+        entry.preserve_orphan_tool_output_literal = true;
+    }
+}
+
 fn actual_chat_tool_output_kind(message: &Value) -> V3HubRelayActualToolOutputKind {
     match message
         .pointer("/routecodex_chat_extension/responses_tool_output_type")
         .and_then(Value::as_str)
     {
         Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
+        Some("tool_search_output") => V3HubRelayActualToolOutputKind::ToolSearch,
         _ => V3HubRelayActualToolOutputKind::Function,
     }
 }
@@ -690,6 +778,7 @@ fn actual_chat_tool_output_kind(message: &Value) -> V3HubRelayActualToolOutputKi
 enum V3HubRelayExpectedToolOutputKind {
     Function,
     Custom,
+    ToolSearch,
     ApplyPatch,
 }
 
@@ -697,6 +786,7 @@ enum V3HubRelayExpectedToolOutputKind {
 enum V3HubRelayActualToolOutputKind {
     Function,
     Custom,
+    ToolSearch,
 }
 
 impl V3HubRelayExpectedToolOutputKind {
@@ -709,6 +799,9 @@ impl V3HubRelayExpectedToolOutputKind {
             ) | (
                 V3HubRelayExpectedToolOutputKind::Custom,
                 V3HubRelayActualToolOutputKind::Custom
+            ) | (
+                V3HubRelayExpectedToolOutputKind::ToolSearch,
+                V3HubRelayActualToolOutputKind::ToolSearch
             ) | (V3HubRelayExpectedToolOutputKind::ApplyPatch, _)
         )
     }
@@ -736,6 +829,12 @@ fn expected_tool_call_output_from_chat_call(
         == Some("custom_tool_call")
     {
         V3HubRelayExpectedToolOutputKind::Custom
+    } else if call
+        .pointer("/routecodex_chat_extension/responses_tool_call_type")
+        .and_then(Value::as_str)
+        == Some("tool_search_call")
+    {
+        V3HubRelayExpectedToolOutputKind::ToolSearch
     } else {
         V3HubRelayExpectedToolOutputKind::Function
     };
@@ -747,6 +846,7 @@ fn expected_tool_call_output_from_item(
 ) -> Option<(String, V3HubRelayExpectedToolOutputKind)> {
     let expected_kind = match item.get("type").and_then(Value::as_str) {
         Some("custom_tool_call") => V3HubRelayExpectedToolOutputKind::Custom,
+        Some("tool_search_call") => V3HubRelayExpectedToolOutputKind::ToolSearch,
         Some("function_call" | "tool_call") => V3HubRelayExpectedToolOutputKind::Function,
         _ => return None,
     };
@@ -949,5 +1049,173 @@ mod tests {
             "history tool image bytes must survive Relay Req04"
         );
         assert_eq!(output["messages"][4]["content"], "now explain it");
+    }
+
+    #[test]
+    fn govern_chat_request_req04_applies_absence_and_kind_policy_for_tool_search_output() {
+        let mut responses_orphan = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+            build_v3_hub_req_inbound_01_client_raw(
+                json!({
+                    "model": "gpt-5.5",
+                    "input": [{
+                        "type": "tool_search_output",
+                        "call_id": "call_orphan_search",
+                        "tools": []
+                    }]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+        )
+        .expect("responses orphan tool_search_output must normalize");
+        let mut events = Vec::new();
+        let outcome = govern_chat_request_at_req04(
+            &mut responses_orphan,
+            &V3HubRequestHookProfile::enabled(),
+            &mut events,
+        )
+        .expect("responses orphan tool_search_output must pass Req04 absence policy");
+        assert_eq!(outcome.tool_output_count, 1);
+
+        let mut kind_mismatch = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+            build_v3_hub_req_inbound_01_client_raw(
+                json!({
+                    "model": "gpt-5.5",
+                    "input": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_wrong_kind",
+                            "name": "lookup",
+                            "arguments": "{}"
+                        },
+                        {
+                            "type": "tool_search_output",
+                            "call_id": "call_wrong_kind",
+                            "tools": []
+                        }
+                    ]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+        )
+        .expect("kind mismatch normalizes before Req04");
+        let err = govern_chat_request_at_req04(
+            &mut kind_mismatch,
+            &V3HubRequestHookProfile::enabled(),
+            &mut Vec::new(),
+        )
+        .expect_err("tool_search_output paired with function_call must fail Req04 kind check");
+        assert!(matches!(
+            err,
+            V3HubRelayRequestError::ToolOutputKindMismatch { .. }
+        ));
+
+        let mut chat_orphan = normalized_chat(json!({
+            "model": "gpt-5.5",
+            "messages": [{
+                "role": "tool",
+                "tool_call_id": "call_chat_orphan",
+                "content": "[]",
+                "routecodex_chat_extension": {"responses_tool_output_type": "tool_search_output"}
+            }]
+        }));
+        let err = govern_chat_request_at_req04(
+            &mut chat_orphan,
+            &V3HubRequestHookProfile::enabled(),
+            &mut Vec::new(),
+        )
+        .expect_err("non-Responses entry orphan tool_search_output must fail Req04");
+        assert!(matches!(
+            err,
+            V3HubRelayRequestError::ProtocolToolIdentityInvalid { .. }
+                | V3HubRelayRequestError::OrphanToolOutput { .. }
+        ));
+    }
+
+    #[test]
+    fn govern_chat_request_req04_derives_orphan_literal_for_native_tool_result_and_skips_paired_and_legacy(
+    ) {
+        let alias_image_json =
+            r#"[{"type":"input_image","image_url":"https://example.com/a.png"}]"#;
+        let mut normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+            build_v3_hub_req_inbound_01_client_raw(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": [
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_legacy_spoof",
+                            "content": [{"type": "image_url", "image_url": {"url": "https://example.com/client.png"}}],
+                            "routecodex_chat_extension": {"responses_tool_output_content": alias_image_json}
+                        },
+                        {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": "call_paired",
+                                "type": "function",
+                                "function": {"name": "read_image", "arguments": "{}"}
+                            }]
+                        }
+                    ],
+                    "input": [
+                        {
+                            "type": "tool_result",
+                            "call_id": "call_orphan_alias",
+                            "output": alias_image_json
+                        },
+                        {
+                            "type": "tool_result",
+                            "call_id": "call_paired",
+                            "output": alias_image_json
+                        }
+                    ]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+        )
+        .expect("mixed legacy + orphan + paired alias must normalize");
+
+        // Before Req04, canonical messages[2] (orphan alias) still holds image parts
+        // and preserve_orphan_tool_output_literal is false.
+        assert!(normalized.payload()["messages"][2]["content"].is_array());
+        assert!(!normalized
+            .explicit_history_pairing
+            .preserve_orphan_tool_output_literal(2));
+
+        let mut events = Vec::new();
+        let outcome = govern_chat_request_at_req04(
+            &mut normalized,
+            &V3HubRequestHookProfile::enabled(),
+            &mut events,
+        )
+        .expect("Responses mixed orphan + paired request must pass Req04");
+        assert_eq!(outcome.tool_output_count, 3);
+
+        // Index 0: legacy client-supplied row is NOT restored as an orphan literal.
+        assert!(normalized.payload()["messages"][0]["content"].is_array());
+        assert!(!normalized
+            .explicit_history_pairing
+            .preserve_orphan_tool_output_literal(0));
+
+        // Index 2: native orphan tool_result alias IS restored to exact literal string.
+        assert_eq!(
+            normalized.payload()["messages"][2]["content"],
+            json!(alias_image_json)
+        );
+        assert!(normalized
+            .explicit_history_pairing
+            .preserve_orphan_tool_output_literal(2));
+
+        // Index 3 (paired tool_result): stays array, literal bit false.
+        assert!(normalized.payload()["messages"][3]["content"].is_array());
+        assert!(!normalized
+            .explicit_history_pairing
+            .preserve_orphan_tool_output_literal(3));
     }
 }
