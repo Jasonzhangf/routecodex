@@ -6857,7 +6857,30 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
                 Some("tool_result") => {
                     return Err(format!("unexpected duplicate tool_result: {body}"));
                 }
-                Some("thinking") => thinking_blocks.push((message_index, block_index, block)),
+                Some("thinking") => {
+                    if block["thinking"]
+                        .as_str()
+                        .is_none_or(|text| text.trim().is_empty())
+                    {
+                        return Err(format!("thinking block missing text: {body}"));
+                    }
+                    if block
+                        .get("signature")
+                        .is_some_and(|sig| sig.as_str().is_none_or(|value| value.is_empty()))
+                    {
+                        return Err(format!(
+                            "thinking block must not carry an empty or non-string signature: {body}"
+                        ));
+                    }
+                    thinking_blocks.push((message_index, block_index, block));
+                }
+                Some("redacted_thinking")
+                    if block["data"].as_str().is_none_or(|data| data.is_empty()) =>
+                {
+                    return Err(format!(
+                        "redacted_thinking block must carry non-empty data: {body}"
+                    ));
+                }
                 _ => {}
             }
         }
@@ -7376,7 +7399,10 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+    let tools = json!([
+        {"type":"web_search"},
+        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
+    ]);
 
     // Turn 1: the provider answers with reasoning (carrying `cache_control`)
     // and a native tool call.
@@ -7574,7 +7600,10 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+    let tools = json!([
+        {"type":"web_search"},
+        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
+    ]);
 
     let first = client
         .post(format!("{base}/v1/responses"))
@@ -7710,6 +7739,11 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                     "{label}: cache_control must survive alongside plaintext reasoning: {}",
                     capture.body
                 );
+                assert!(
+                    replayed_reasoning.get("signature").is_none(),
+                    "{label}: empty or null ciphertext must not emit an empty signature field: {}",
+                    capture.body
+                );
             } else {
                 assert!(
                     !blocks.iter().any(|block| block["type"] == "thinking"),
@@ -7782,7 +7816,10 @@ async fn responses_client_anthropic_redacted_reasoning_association_survives_two_
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+    let tools = json!([
+        {"type":"web_search"},
+        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
+    ]);
 
     let first = client
         .post(format!("{base}/v1/responses"))
@@ -7969,7 +8006,10 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
         .build()
         .unwrap();
     let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
-    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+    let tools = json!([
+        {"type":"web_search"},
+        {"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}
+    ]);
 
     for order in ["plain-first", "extended-first"] {
         let first = client

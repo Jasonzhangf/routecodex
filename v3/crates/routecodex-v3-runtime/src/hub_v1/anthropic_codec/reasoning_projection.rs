@@ -134,7 +134,7 @@ fn project_chat_reasoning_block(
             Value::String(reasoning_content.to_string()),
         ),
     ]);
-    if let Some(signature) = encrypted_content {
+    if let Some(signature) = encrypted_content.filter(|value| !value.is_empty()) {
         block.insert(
             "signature".to_string(),
             Value::String(signature.to_string()),
