@@ -519,4 +519,99 @@ mod tests {
             .expect_err("a function call without call_id cannot be framed");
         assert!(error.contains("missing call_id"), "{error}");
     }
+
+    fn governed_for_staging() -> super::super::V3HubRespChatProcess03Governed {
+        use super::super::*;
+        let raw = build_v3_provider_resp_inbound_01_raw(
+            json!({"id": "resp_staging", "status": "completed", "output": []}),
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Direct,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(raw)
+            .expect("staging compat");
+        let normalized = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+            .expect("staging normalization");
+        build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(normalized)
+    }
+
+    fn committed_sse_stream(frames: &[&str]) -> V3ResponsesRelayClientStream {
+        let mut builder = crate::nodes::V3CommittedClientSseBuilder::with_budget(
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .expect("committed SSE builder");
+        for frame in frames {
+            builder
+                .push(frame.as_bytes().to_vec())
+                .expect("valid SSE frame");
+        }
+        builder
+            .mark_last_frame_as_terminal()
+            .expect("terminal marker");
+        builder
+            .seal_after_validated_terminal()
+            .expect("sealed committed SSE stream")
+    }
+
+    #[test]
+    fn server_resp_outbound_06_json_stages_every_entry_protocol_candidate() {
+        // The JSON staging executor is protocol agnostic: it must return the
+        // complete client candidate unchanged and never invent a frame.
+        let candidates = [
+            json!({"id": "resp_json", "status": "completed", "output": [], "opaque": {"keep": true}}),
+            json!({"id": "chatcmpl_json", "object": "chat.completion", "choices": [], "opaque": {"keep": true}}),
+            json!({"responseId": "gemini_json", "candidates": [], "opaque": {"keep": true}}),
+            json!({"id": "msg_json", "type": "message", "content": [], "opaque": {"keep": true}}),
+        ];
+
+        for candidate in candidates {
+            let staged = execute_v3_operation_runner_response_frame_committed_client_json(
+                candidate.clone(),
+                Ok,
+            )
+            .expect("protocol candidate JSON staging must succeed");
+            assert_eq!(staged, candidate);
+        }
+    }
+
+    #[test]
+    fn server_resp_outbound_06_empty_servertool_candidate_is_not_fabricated() {
+        let staged =
+            execute_v3_operation_runner_response_frame_committed_client_json(json!({}), Ok)
+                .expect("the empty servertool staging candidate must pass the frame node");
+        assert_eq!(staged, json!({}));
+    }
+
+    #[tokio::test]
+    async fn server_resp_outbound_06_sse_stages_committed_candidates_for_every_entry_protocol() {
+        let candidates = [
+            json!({"type": "response.completed", "response": {"id": "resp_sse"}}),
+            json!({"id": "chatcmpl_sse", "object": "chat.completion.chunk", "choices": []}),
+            json!({"candidates": [{"content": {"role": "model", "parts": []}}]}),
+            json!({"events": [{"event": "message_stop", "data": "stop"}]}),
+        ];
+        let frames = ["data: {}\n\n", "data: [DONE]\n\n"];
+
+        for candidate in candidates {
+            let semantic =
+                super::super::resp_outbound_05_client_semantic::
+                    build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+                        governed_for_staging(),
+                        candidate,
+                    );
+            let (staged, stream) = execute_v3_operation_runner_response_frame_committed_client_sse(
+                semantic.client_payload().clone(),
+                move |mut payload| {
+                    payload["staged"] = json!(true);
+                    Ok((payload, committed_sse_stream(&frames)))
+                },
+            )
+            .expect("committed SSE staging must cover the protocol candidate");
+            assert_eq!(staged["staged"], true);
+            let collected = stream.collect::<Vec<_>>().await;
+            assert_eq!(collected.len(), 2);
+        }
+    }
 }

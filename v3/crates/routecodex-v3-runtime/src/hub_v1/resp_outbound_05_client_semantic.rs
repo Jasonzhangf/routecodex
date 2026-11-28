@@ -212,4 +212,98 @@ mod tests {
             "{error}"
         );
     }
+
+    #[test]
+    fn resp_outbound_05_responses_projector_preserves_unknown_fields_and_complete_arguments() {
+        let input = governed_response(json!({
+            "id": "resp_05_responses_opaque",
+            "status": "completed",
+            "opaque_root": {"keep": [1, {"nested": null}]},
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "ok", "opaque_part": {"keep": true}}
+                    ]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_05",
+                    "name": "shell",
+                    "arguments": {"command": ["not", "valid"], "nested": {"keep": null}},
+                    "opaque_tool": {"keep": true}
+                }
+            ]
+        }));
+
+        let output =
+            try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
+                input,
+                |payload| {
+                    Ok(super::super::responses_relay_runtime::
+                        project_v3_responses_client_completed_response(&payload))
+                },
+            )
+            .expect("the Responses client projector must keep the complete business response");
+
+        let payload = output.client_payload();
+        assert_eq!(payload["opaque_root"]["keep"][1]["nested"], Value::Null);
+        assert_eq!(
+            payload["output"][0]["content"][0]["opaque_part"]["keep"],
+            true
+        );
+        assert_eq!(payload["output"][1]["arguments"]["command"][0], "not");
+        assert_eq!(payload["output"][1]["opaque_tool"]["keep"], true);
+        assert!(
+            !payload.to_string().contains("requires_action"),
+            "a completed function call must not fabricate requires_action: {payload}"
+        );
+    }
+
+    #[test]
+    fn resp_outbound_05_chat_projector_serializes_complete_structured_arguments() {
+        let input = governed_response(json!({
+            "id": "resp_05_chat_args",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_05_chat",
+                    "name": "shell",
+                    "arguments": {"command": ["not", "valid"], "nested": {"keep": null}}
+                }
+            ]
+        }));
+
+        let output =
+            try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
+                input,
+                |payload| {
+                    super::super::openai_chat_codec::
+                        project_v3_openai_chat_client_response_with_source_terminal(
+                            &payload,
+                            None,
+                            true,
+                        )
+                },
+            )
+            .expect("the Chat client projector must preserve model-generated arguments");
+
+        let payload = output.client_payload();
+        let arguments = payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("Chat tool arguments are string-valued on the wire");
+        let parsed: Value = serde_json::from_str(arguments)
+            .expect("the complete structured arguments must survive");
+        assert_eq!(
+            parsed,
+            json!({"command": ["not", "valid"], "nested": {"keep": null}})
+        );
+        assert_eq!(payload["choices"][0]["finish_reason"], "tool_calls");
+        assert!(
+            !payload.to_string().contains("requires_action"),
+            "a completed tool call must not fabricate requires_action: {payload}"
+        );
+    }
 }

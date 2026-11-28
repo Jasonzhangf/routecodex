@@ -282,6 +282,50 @@ fn project_v3_client_disconnect_returns_real_client_disconnect_error06() {
 }
 
 #[test]
+fn target_resolution_failure_carries_canonical_error01_into_error06() {
+    let scope = "target_origin_error_slice";
+    let manifest = target_resolution_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let resolution = resolve_target(&manifest, "missing-server", &BTreeSet::new(), &health);
+    let V3RelayProviderTargetResolution::Failed(failure) = resolution else {
+        panic!("missing server must produce a target-resolution failure");
+    };
+    let V3RelayProviderTargetResolutionFailure { projection, source } = failure;
+
+    assert_eq!(projection, serde_json::to_value(&source).unwrap());
+    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+
+    let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
+        projection,
+        source.clone(),
+        V3ErrorActionScope::None,
+        0,
+        false,
+        false,
+        None,
+    )
+    .expect("target-origin failure must run canonical Error02 through Error05");
+    assert_eq!(
+        decision.action,
+        routecodex_v3_error::V3Error05ExecutionAction::RejectNonProviderError
+    );
+    let (_, projected) =
+        run_v3_error_06_terminal_projection_operator(decision_projection, decision)
+            .expect("terminal target failure must run canonical Error06")
+            .expect("terminal target failure must produce a typed projection");
+
+    assert_eq!(
+        projected.chain,
+        routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+    );
+    assert_eq!(projected.diagnostic_source, source);
+    assert_eq!(
+        projected.body["error"]["code"],
+        "target_resolution_classification_failed"
+    );
+}
+
+#[test]
 fn sdk_error_keeps_original_source_and_runner_message() {
     let (_, source) = real_client_disconnect_source();
     let runner_error = run_v3_error_02_to_05_decision_operators(

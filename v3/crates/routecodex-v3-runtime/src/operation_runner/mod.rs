@@ -10,10 +10,17 @@ use std::sync::OnceLock;
 
 mod error_decision;
 pub(crate) mod field_walker;
+mod lifecycle;
+pub use lifecycle::{
+    V3AttemptCleanupReason, V3AttemptCleanupReceipt, V3AttemptScopedResource,
+    V3MetadataCenterControl, V3RequestFinalizeReason, V3RequestFinalizeReceipt, V3RequestOrigin,
+    V3RequestOriginKind, V3RequestScopedResource,
+};
 mod operators;
 #[cfg(test)]
 pub(crate) use operators::err01_execution_count_for_test;
 pub(crate) mod plan_execution;
+mod precompiled;
 mod resolve_target;
 mod single_node;
 pub(crate) use error_decision::{
@@ -28,11 +35,16 @@ pub(crate) use operators::{
     run_v3_err01_source_raised_operator, run_v3_err02_classified_operator,
     run_v3_error_04_target_exhaustion_operator, V3Err01SourceInput,
 };
+pub(crate) use precompiled::run_precompiled_error_02_to_05;
+pub use precompiled::{
+    compiled_graph_node_ids, initialize as initialize_v3_operation_runner_graphs,
+    precompiled_node_ids, V3OperationGraph,
+};
 pub(crate) use resolve_target::{
     run_v3_resolve_target_operator, run_v3_resolve_target_operator_with_history_images,
     V3ResolveTargetExecutionMode, V3ResolveTargetOperatorError, V3ResolveTargetSideOutput,
 };
-pub(crate) use single_node::{run_v3_single_node_operator, V3OperationGraph};
+pub(crate) use single_node::run_v3_single_node_operator;
 
 const REQUEST_GRAPH_JSON: &str =
     include_str!("../../../../../docs/architecture/dagpipe/v3.operation_runner.request.graph.json");
@@ -102,9 +114,26 @@ fn derived_capture_slice_graph_id(canonical_graph_id: &str, selected_node_id: &s
 
 impl RuntimeRequestGraphEntry {
     pub fn capture_client_json(&self, payload: Value) -> Result<Value, OperationRunnerError> {
+        let origin = V3RequestOrigin::new(
+            "client-request",
+            "client-entry",
+            V3RequestOriginKind::ClientEntry,
+        )?;
+        self.capture_client_json_with_origin(payload, &origin)
+    }
+
+    pub fn capture_client_json_with_origin(
+        &self,
+        payload: Value,
+        origin: &V3RequestOrigin,
+    ) -> Result<Value, OperationRunnerError> {
         static EXECUTION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
         let execution_id = EXECUTION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let identity = request_graph_identity(&self.graph, format!("request-{execution_id}"));
+        let identity = request_graph_identity_with_origin(
+            &self.graph,
+            format!("{}-{execution_id}", origin.invocation_id),
+            origin.origin_kind,
+        );
         let mut inputs = HashMap::<ArcId, Value>::new();
         inputs.insert(SOURCE_REQUEST_ARC.to_string(), payload);
         let result = Runtime::new(BTreeSet::new()).run(
@@ -122,12 +151,20 @@ impl RuntimeRequestGraphEntry {
 }
 
 fn request_graph_identity(graph: &CompiledGraph, execution_id: String) -> Identity {
+    request_graph_identity_with_origin(graph, execution_id, V3RequestOriginKind::ClientEntry)
+}
+
+fn request_graph_identity_with_origin(
+    graph: &CompiledGraph,
+    execution_id: String,
+    origin_kind: V3RequestOriginKind,
+) -> Identity {
     Identity {
         project_id: "routecodex-v3".to_string(),
         graph_id: graph.id().to_string(),
         graph_version: graph.version().to_string(),
         execution_id,
-        attempt_id: "client-entry".to_string(),
+        attempt_id: origin_kind.as_str().to_string(),
     }
 }
 
@@ -563,6 +600,7 @@ pub fn compile_v3_operation_runner_request_capture_client_json(
 }
 
 fn request_graph_entry() -> Result<&'static RuntimeRequestGraphEntry, OperationRunnerError> {
+    precompiled::initialize()?;
     static ENTRY: OnceLock<Result<RuntimeRequestGraphEntry, OperationRunnerError>> =
         OnceLock::new();
     match ENTRY.get_or_init(RuntimeRequestGraphEntry::compile) {
@@ -577,6 +615,13 @@ pub fn execute_v3_operation_runner_request_capture_client_json(
     request_graph_entry()?.capture_client_json(payload)
 }
 
+pub fn execute_v3_operation_runner_request_capture_client_json_with_origin(
+    payload: Value,
+    origin: &V3RequestOrigin,
+) -> Result<Value, OperationRunnerError> {
+    request_graph_entry()?.capture_client_json_with_origin(payload, origin)
+}
+
 pub(crate) fn execute_v3_operation_runner_request_project_standard_provider_request(
     payload: Value,
     entry_protocol: crate::hub_v1::V3HubEntryProtocol,
@@ -585,31 +630,19 @@ pub(crate) fn execute_v3_operation_runner_request_project_standard_provider_requ
     selected_target: routecodex_v3_target::V3TargetCandidate,
 ) -> Result<crate::hub_v1::V3HubReqOutbound07StandardProjection, OperationRunnerError> {
     let side_output = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let mut registry = Registry::default();
-    registry.register(ProjectStandardProviderRequestOperator::new(
+    let operator = ProjectStandardProviderRequestOperator::new(
         entry_protocol,
         transport_intent,
         provider_protocol,
         selected_target,
         side_output.clone(),
-    ))?;
-    let graph = compile_v3_operation_runner_request_project_standard_provider_request(&registry)?;
-    static EXECUTION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-    let execution_id = EXECUTION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let identity = request_graph_identity(&graph, format!("request-{execution_id}"));
-    let mut inputs = HashMap::<ArcId, Value>::new();
-    inputs.insert(GOVERNED_REQUEST_ARC.to_string(), payload);
-    let result =
-        Runtime::new(BTreeSet::new()).run(&graph, identity, inputs, &Cancellation::default())?;
-    let payload = result
-        .outputs
-        .get(STANDARD_PROVIDER_REQUEST_ARC)
-        .map(|output| output.payload.clone())
-        .ok_or_else(|| {
-            OperationRunnerError::new(
-                "standard projection graph omitted `standard-provider-request` output",
-            )
-        })?;
+    );
+    let payload = run_v3_single_node_operator(
+        V3OperationGraph::Request,
+        PROJECT_STANDARD_NODE_ID,
+        payload,
+        operator,
+    )?;
     let side_output = side_output
         .lock()
         .map_err(|_| {
