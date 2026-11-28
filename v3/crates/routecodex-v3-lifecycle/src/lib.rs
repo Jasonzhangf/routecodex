@@ -507,6 +507,11 @@ impl V3ManagedLifecycle {
         wait_for_stopping_instance(&instance_dir, &declaration, timeout).await?;
         recover_exited_front_control_handoff(&instance_dir, &declaration).await?;
         reap_inactive_runtime_files(&instance_dir, &declaration)?;
+        prune_stale_stopped_instance_dirs(
+            &self.state_root,
+            &declaration.instance_id,
+            &declaration.config_path,
+        );
         self.launch_managed_child(executable_path.as_ref(), &declaration, timeout)
             .await
     }
@@ -640,6 +645,11 @@ impl V3ManagedLifecycle {
             recover_exited_front_control_handoff(&instance_dir, &declaration).await?;
             reap_inactive_runtime_files(&instance_dir, &declaration)?;
             Self::prepare_fresh_launch(&instance_dir, &declaration)?;
+            prune_stale_stopped_instance_dirs(
+                &self.state_root,
+                &declaration.instance_id,
+                &declaration.config_path,
+            );
         }
         exec_foreground_start(executable_path.as_ref(), &declaration, self)
     }
@@ -1025,6 +1035,11 @@ impl V3ManagedLifecycle {
                         ));
                     }
                     reap_inactive_runtime_files(&instance_dir, &declaration)?;
+                    prune_stale_stopped_instance_dirs(
+                        &self.state_root,
+                        &declaration.instance_id,
+                        &declaration.config_path,
+                    );
                     return tokio::time::timeout_at(
                         deadline,
                         self.launch_managed_child(
@@ -1144,6 +1159,11 @@ impl V3ManagedLifecycle {
                 validate_auth_handles(&manifest)?;
                 recover_exited_front_control_handoff(&instance_dir, &declaration).await?;
                 reap_inactive_runtime_files(&instance_dir, &declaration)?;
+                prune_stale_stopped_instance_dirs(
+                    &self.state_root,
+                    &declaration.instance_id,
+                    &declaration.config_path,
+                );
                 trace(&mut observe, "launching recovered owner");
                 return tokio::time::timeout_at(
                     deadline,
@@ -1217,6 +1237,11 @@ impl V3ManagedLifecycle {
                         previous_start_nonce.as_deref(),
                     )?;
                     if restart_transition_observed || nonce_changed {
+                        prune_stale_stopped_instance_dirs(
+                            &self.state_root,
+                            &declaration.instance_id,
+                            &declaration.config_path,
+                        );
                         observe_status_if_changed(&mut observe, &mut last_observed_status, &status);
                         return Ok(status);
                     }
@@ -2191,7 +2216,351 @@ async fn require_no_pending_shutdown(
     }
     Ok(())
 }
+
+/// Retains at most two stopped instance directories per config path (excluding
+/// `current_instance_id`) once older than 24 hours and unlocked, so repeated
+/// config-digest restarts do not accumulate unbounded `instances/` directories
+/// without breaking `rcc restart` for other stopped configs.
+fn prune_stale_stopped_instance_dirs(
+    state_root: &Path,
+    current_instance_id: &str,
+    current_config_path: &str,
+) {
+    prune_stale_stopped_instance_dirs_with_hook(
+        state_root,
+        current_instance_id,
+        current_config_path,
+        |_| {},
+    );
+}
+
+fn validate_prunable_stopped_instance_dir(
+    path: &Path,
+    current_instance_id: &str,
+    current_config_path: &str,
+    now: std::time::SystemTime,
+    check_age: bool,
+) -> Option<std::time::SystemTime> {
+    const PRUNABLE_STOPPED_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+    let metadata = fs::symlink_metadata(path).ok()?;
+    // Never follow directory symlinks under instances/.
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return None;
+    }
+    let name = path.file_name().and_then(|name| name.to_str())?;
+    if name == current_instance_id || name.starts_with(".pruning-") {
+        return None;
+    }
+    let declaration =
+        read_json::<V3ManagedInstanceDeclaration>(&path.join("instance.json")).ok()?;
+    if declaration.config_path != current_config_path {
+        return None;
+    }
+    let status = read_json::<V3ManagedStatusRecord>(&path.join("status.json")).ok()?;
+    if status.state != V3ManagedRunState::Stopped
+        || status
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("pending active-key control cleanup"))
+    {
+        return None;
+    }
+    if !reap::is_settled_stopped_instance_dir(path, &declaration) {
+        return None;
+    }
+    let modified = metadata.modified().ok()?;
+    if check_age
+        && !now
+            .duration_since(modified)
+            .is_ok_and(|age| age >= PRUNABLE_STOPPED_AGE)
+    {
+        return None;
+    }
+    Some(modified)
+}
+
+fn prune_stale_stopped_instance_dirs_with_hook<F>(
+    state_root: &Path,
+    current_instance_id: &str,
+    current_config_path: &str,
+    mut before_prune_candidate: F,
+) where
+    F: FnMut(&Path),
+{
+    const RETAINED_STOPPED_INSTANCES: usize = 2;
+    let instances_root = state_root.join("instances");
+    let Ok(entries) = fs::read_dir(&instances_root) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    let mut stopped = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.join("lifecycle.lock").exists() {
+            continue;
+        }
+        if let Some(modified) = validate_prunable_stopped_instance_dir(
+            &path,
+            current_instance_id,
+            current_config_path,
+            now,
+            true,
+        ) {
+            stopped.push((modified, path));
+        }
+    }
+    if stopped.len() <= RETAINED_STOPPED_INSTANCES {
+        return;
+    }
+    stopped.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    for (_, path) in stopped.into_iter().skip(RETAINED_STOPPED_INSTANCES) {
+        before_prune_candidate(&path);
+        // Re-check symlink before acquiring lock so acquire_operation_lock cannot chmod a symlink target.
+        let Ok(pre_lock_meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if pre_lock_meta.file_type().is_symlink() || !pre_lock_meta.is_dir() {
+            continue;
+        }
+        let Ok(lock) = acquire_operation_lock(&path, "prune") else {
+            continue;
+        };
+        // Revalidate stopped/exited state while holding lock; skip age re-check because
+        // creating `lifecycle.lock` updates the directory's own mtime.
+        if validate_prunable_stopped_instance_dir(
+            &path,
+            current_instance_id,
+            current_config_path,
+            std::time::SystemTime::now(),
+            false,
+        )
+        .is_none()
+        {
+            drop(lock);
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            drop(lock);
+            continue;
+        };
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tombstone =
+            instances_root.join(format!(".pruning-{name}-{}-{nanos}", std::process::id()));
+        if fs::rename(&path, &tombstone).is_ok() {
+            // Original path no longer exists; let remove_dir_all clean tombstone/lifecycle.lock
+            // without touching any newly created instance_dir at the original path.
+            std::mem::forget(lock);
+            let _ = fs::remove_dir_all(&tombstone);
+        } else {
+            drop(lock);
+        }
+    }
+}
+
 #[cfg(test)]
 mod internal_hooksd_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod instance_prune_tests {
+    use super::*;
+
+    fn write_test_declaration(dir: &Path, id: &str, config_path: &str) {
+        let decl = V3ManagedInstanceDeclaration {
+            schema_version: 1,
+            instance_id: id.to_string(),
+            config_path: config_path.to_string(),
+            config_digest: format!("digest-{id}"),
+            executable_path: "/tmp/rccv3".to_string(),
+            listeners: vec![],
+        };
+        write_json_atomic(&dir.join("instance.json"), &decl).expect("write declaration");
+    }
+
+    fn backdate_dir(path: &Path, hours: u64) {
+        let modified = std::time::SystemTime::now() - Duration::from_secs(hours * 3600);
+        let handle = std::fs::File::open(path).expect("open dir to backdate");
+        handle
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .expect("backdate dir");
+    }
+
+    #[test]
+    fn prune_stale_stopped_instance_dirs_preserves_other_configs_locks_and_symlinks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let instances = dir.path().join("instances");
+        fs::create_dir_all(&instances).expect("create instances");
+
+        let mut stopped = Vec::new();
+        for idx in 0..4 {
+            let id = format!("v3-stopped-{idx}");
+            let inst_dir = instances.join(&id);
+            fs::create_dir_all(&inst_dir).expect("create stopped dir");
+            write_test_declaration(&inst_dir, &id, "/tmp/config-a.toml");
+            write_status(&inst_dir, &id, V3ManagedRunState::Stopped, None).expect("write status");
+            backdate_dir(&inst_dir, 48 - idx as u64);
+            stopped.push(inst_dir);
+        }
+
+        // Stopped directory belonging to another config must stay for its own `rcc restart`.
+        let other_cfg = instances.join("v3-other-config");
+        fs::create_dir_all(&other_cfg).expect("create other config dir");
+        write_test_declaration(&other_cfg, "v3-other-config", "/tmp/config-b.toml");
+        write_status(
+            &other_cfg,
+            "v3-other-config",
+            V3ManagedRunState::Stopped,
+            None,
+        )
+        .expect("write other status");
+        backdate_dir(&other_cfg, 72);
+
+        // Stopped directory holding lifecycle.lock must never be unlinked.
+        let locked_dir = instances.join("v3-locked");
+        fs::create_dir_all(&locked_dir).expect("create locked dir");
+        write_test_declaration(&locked_dir, "v3-locked", "/tmp/config-a.toml");
+        write_status(&locked_dir, "v3-locked", V3ManagedRunState::Stopped, None)
+            .expect("write locked status");
+        fs::write(locked_dir.join("lifecycle.lock"), b"operation=start").expect("write lock");
+        backdate_dir(&locked_dir, 72);
+
+        // Symlink inside instances/ must never be followed or removed.
+        let external_target = dir.path().join("external-target");
+        fs::create_dir_all(&external_target).expect("create external target");
+        write_test_declaration(&external_target, "v3-symlink", "/tmp/config-a.toml");
+        write_status(
+            &external_target,
+            "v3-symlink",
+            V3ManagedRunState::Stopped,
+            None,
+        )
+        .expect("write external status");
+        let symlink_entry = instances.join("v3-symlink");
+        std::os::unix::fs::symlink(&external_target, &symlink_entry).expect("create symlink");
+
+        let running = instances.join("v3-running");
+        fs::create_dir_all(&running).expect("create running dir");
+        write_test_declaration(&running, "v3-running", "/tmp/config-a.toml");
+        write_status(&running, "v3-running", V3ManagedRunState::Running, None)
+            .expect("write running status");
+        backdate_dir(&running, 72);
+
+        let current = instances.join("v3-current");
+        fs::create_dir_all(&current).expect("create current dir");
+
+        prune_stale_stopped_instance_dirs(dir.path(), "v3-current", "/tmp/config-a.toml");
+
+        assert!(current.exists());
+        assert!(running.exists());
+        assert!(other_cfg.exists());
+        assert!(locked_dir.exists());
+        assert!(symlink_entry.symlink_metadata().is_ok());
+        assert!(external_target.exists());
+        assert!(!stopped[0].exists());
+        assert!(!stopped[1].exists());
+        assert!(stopped[2].exists());
+        assert!(stopped[3].exists());
+    }
+
+    #[test]
+    fn prune_stale_stopped_instance_dirs_skips_candidate_locked_after_discovery() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let instances = dir.path().join("instances");
+        fs::create_dir_all(&instances).expect("create instances");
+
+        let mut stopped = Vec::new();
+        for idx in 0..3 {
+            let id = format!("v3-race-{idx}");
+            let inst_dir = instances.join(&id);
+            fs::create_dir_all(&inst_dir).expect("create stopped dir");
+            write_test_declaration(&inst_dir, &id, "/tmp/config-race.toml");
+            write_status(&inst_dir, &id, V3ManagedRunState::Stopped, None).expect("write status");
+            backdate_dir(&inst_dir, 48 - idx as u64);
+            stopped.push(inst_dir);
+        }
+
+        let mut acquired_lock: Option<OperationLock> = None;
+        prune_stale_stopped_instance_dirs_with_hook(
+            dir.path(),
+            "v3-current",
+            "/tmp/config-race.toml",
+            |candidate| {
+                // Simulate a concurrent `start`/`restart` acquiring lifecycle.lock after initial scan.
+                if candidate == stopped[0] {
+                    acquired_lock = Some(
+                        acquire_operation_lock(candidate, "start")
+                            .expect("concurrent start lock must succeed before prune"),
+                    );
+                }
+            },
+        );
+
+        assert!(acquired_lock.is_some());
+        assert!(
+            stopped[0].exists() && stopped[0].join("instance.json").exists(),
+            "candidate locked after discovery must preserve its directory and artifacts"
+        );
+        drop(acquired_lock);
+    }
+
+    #[test]
+    fn prune_stale_stopped_instance_dirs_preserves_retained_custody_and_hooks_records() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let instances = dir.path().join("instances");
+        fs::create_dir_all(&instances).expect("create instances");
+
+        let mut dirs = Vec::new();
+        for (idx, id) in [
+            "v3-retained-custody",
+            "v3-hooks-live",
+            "v3-ordinary-settled",
+            "v3-newest-1",
+            "v3-newest-2",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let inst_dir = instances.join(id);
+            fs::create_dir_all(&inst_dir).expect("create stopped dir");
+            write_test_declaration(&inst_dir, id, "/tmp/config-custody.toml");
+            let detail = (id == "v3-retained-custody")
+                .then(|| "pending active-key control cleanup".to_string());
+            write_status(&inst_dir, id, V3ManagedRunState::Stopped, detail).expect("write status");
+            if id == "v3-retained-custody" {
+                fs::write(inst_dir.join("control.json"), b"{}").expect("write retained control");
+                fs::write(inst_dir.join(FRONT_HANDOFF_FILE), b"{}")
+                    .expect("write unresolved handoff");
+            }
+            if id == "v3-hooks-live" {
+                fs::write(
+                    inst_dir.join(HOOKS_SIDECAR_PROCESS_FILE),
+                    format!("{{\"pid\":{}}}", std::process::id()),
+                )
+                .expect("write hooks sidecar record");
+            }
+            backdate_dir(&inst_dir, 96 - idx as u64);
+            dirs.push(inst_dir);
+        }
+
+        prune_stale_stopped_instance_dirs(dir.path(), "v3-current", "/tmp/config-custody.toml");
+
+        assert!(
+            dirs[0].exists() && dirs[0].join("control.json").exists(),
+            "retained control custody stopped dir must survive pruning"
+        );
+        assert!(
+            dirs[1].exists() && dirs[1].join(HOOKS_SIDECAR_PROCESS_FILE).exists(),
+            "stopped dir with hooks sidecar record must survive pruning"
+        );
+        assert!(
+            !dirs[2].exists(),
+            "ordinary settled >24h stopped dir beyond 2 retained must still be pruned"
+        );
+        assert!(dirs[3].exists());
+        assert!(dirs[4].exists());
+    }
+}
