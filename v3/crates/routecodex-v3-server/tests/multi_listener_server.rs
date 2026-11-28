@@ -6869,12 +6869,9 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
                     {
                         return Err(format!("thinking block missing text: {body}"));
                     }
-                    if block
-                        .get("signature")
-                        .is_some_and(|sig| sig.as_str().is_none_or(|value| value.is_empty()))
-                    {
+                    if block.get("signature").is_some_and(|sig| !sig.is_string()) {
                         return Err(format!(
-                            "thinking block must not carry an empty or non-string signature: {body}"
+                            "thinking block signature must be a string when present: {body}"
                         ));
                     }
                     thinking_blocks.push((message_index, block_index, block));
@@ -7182,9 +7179,17 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_declaration
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    let invalid_body = invalid.text().await.unwrap();
+    assert!(
+        invalid_body.contains("hosted web_search + lookup"),
+        "expected declaration rejection at request_index=0: {invalid_body}"
+    );
+    shutdown.send(()).unwrap();
 
+    let (fresh_url, _fresh_captures, fresh_shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
     let malformed_hosted = client
-        .post(format!("{provider_base_url}/messages"))
+        .post(format!("{fresh_url}/messages"))
         .header("x-api-key", "reasoning-controlled-key")
         .json(&json!({"stream":true,"tools":[
             {"type":"web_search_20250305","name":"web_search","input_schema":{}},
@@ -7196,7 +7201,12 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_declaration
         .await
         .unwrap();
     assert_eq!(malformed_hosted.status(), StatusCode::BAD_REQUEST);
-    shutdown.send(()).unwrap();
+    let malformed_hosted_body = malformed_hosted.text().await.unwrap();
+    assert!(
+        malformed_hosted_body.contains("hosted web_search + lookup"),
+        "expected hosted declaration rejection at request_index=0: {malformed_hosted_body}"
+    );
+    fresh_shutdown.send(()).unwrap();
 }
 
 #[tokio::test]
@@ -7840,6 +7850,63 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
             );
         }
     }
+
+    // Native `thinking` with a present empty signature (`encrypted_content: ""`)
+    // must keep its explicit empty `signature` key on the first Anthropic attempt.
+    let native_empty_sig_second = client
+        .post(format!("{base}/v1/responses"))
+        .json(
+            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                {"role":"user","content":REASONING_LOOKUP_CONTROL},
+                {
+                    "type":"reasoning",
+                    "summary":[{"type":"summary_text","text":"plan the bounded lookup"}],
+                    "encrypted_content":"",
+                    "routecodex_chat_extension":{
+                        "anthropic_reasoning":{
+                            "type":"thinking",
+                            "cache_control":{"type":"ephemeral"}
+                        }
+                    }
+                },
+                assistant_text,
+                call,
+                {"type":"function_call_output","call_id":call_id,"output":tool_output}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(native_empty_sig_second.status(), StatusCode::OK);
+    let native_empty_sig_body =
+        reasoning_client_completed_response(&native_empty_sig_second.text().await.unwrap());
+    assert_eq!(native_empty_sig_body["status"], "completed");
+    let native_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        native_capture.body["tools"],
+        json!(reasoning_lookup_expected_tools()),
+        "native-thinking-key-empty: exact hosted web_search + lookup tools must survive: {}",
+        native_capture.body
+    );
+    let native_thinking_block = native_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|block| block["type"] == "thinking" && block["thinking"] == "plan the bounded lookup")
+        .expect("native thinking block must survive on provider wire");
+    assert_eq!(
+        native_thinking_block
+            .get("signature")
+            .and_then(Value::as_str),
+        Some(""),
+        "native thinking with encrypted_content=\"\" must preserve explicit empty signature: {}",
+        native_capture.body
+    );
+    assert!(captures.try_recv().is_err());
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
