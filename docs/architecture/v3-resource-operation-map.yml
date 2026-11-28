@@ -3466,8 +3466,11 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3OperationRunnerAttemptProjection
     identity: [requestId, attemptId, selectedProviderProtocol, modelCapabilityRevision]
-    allowed_writers: [project_v3_operation_runner_standard_provider_request]
-    allowed_readers: [normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]
+    semantic_contract:
+      orphan_tool_output_literals: >-
+        Per-tool-output literal-preservation flags computed by ReqOutbound07 (project_v3_operation_runner_standard_provider_request / build_v3_hub_req_outbound_07_from_v3_hub_req_target_06) from explicit_history_pairing for Responses-entry Relay attempts and consumed by Provider Compat (adjust_provider_private_request / build_provider_req_compat_06_from_v3_hub_req_outbound_07) to decide whether default non-vision image placeholder rewriting leaves an orphan tool output literal.
+    allowed_writers: [project_v3_operation_runner_standard_provider_request, build_v3_hub_req_outbound_07_from_v3_hub_req_target_06]
+    allowed_readers: [adjust_provider_private_request, build_provider_req_compat_06_from_v3_hub_req_outbound_07, normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false

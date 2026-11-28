@@ -114,6 +114,61 @@ for (const featureId of [
     }
   }
 }
+
+const attemptProjectionCtx = array(resourceMap.resources).find(
+  (entry) => entry?.resource_id === 'v3.operation_runner.attempt_projection_context',
+);
+if (!attemptProjectionCtx) {
+  fail('v3-resource-operation-map.yml: missing v3.operation_runner.attempt_projection_context');
+} else {
+  if (!String(attemptProjectionCtx.semantic_contract?.orphan_tool_output_literals ?? '').trim()) {
+    fail('v3-resource-operation-map.yml: v3.operation_runner.attempt_projection_context must declare semantic_contract.orphan_tool_output_literals');
+  }
+  for (const writer of ['project_v3_operation_runner_standard_provider_request', 'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06']) {
+    if (!array(attemptProjectionCtx.allowed_writers).includes(writer)) {
+      fail(`v3-resource-operation-map.yml: v3.operation_runner.attempt_projection_context allowed_writers missing ${writer}`);
+    }
+  }
+  for (const reader of ['adjust_provider_private_request', 'build_provider_req_compat_06_from_v3_hub_req_outbound_07']) {
+    if (!array(attemptProjectionCtx.allowed_readers).includes(reader)) {
+      fail(`v3-resource-operation-map.yml: v3.operation_runner.attempt_projection_context allowed_readers missing ${reader}`);
+    }
+  }
+}
+
+for (const [stepId, field] of [
+  ['v3-op-runner-req-05', 'produces'],
+  ['v3-op-runner-req-05', 'side_channel_writes'],
+  ['v3-op-runner-req-06', 'consumes'],
+  ['v3-op-runner-req-06', 'side_channel_reads'],
+  ['v3-hub-req-05', 'side_channel_writes'],
+  ['v3-hub-req-06', 'consumes'],
+  ['v3-hub-req-06', 'side_channel_reads'],
+]) {
+  const edge = allEdges.find((candidate) => candidate?.step_id === stepId);
+  if (!edge || !array(edge.resource_flow?.[field]).includes('v3.operation_runner.attempt_projection_context')) {
+    fail(`v3-mainline-call-map.yml: ${stepId} resource_flow.${field} must declare v3.operation_runner.attempt_projection_context`);
+  }
+}
+
+const requestDagPath = path.join(root, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
+if (fs.existsSync(requestDagPath)) {
+  try {
+    const requestDag = JSON.parse(fs.readFileSync(requestDagPath, 'utf8'));
+    const nodesById = new Map(array(requestDag.nodes).map((node) => [node?.id, node]));
+    const projNode = nodesById.get('project_standard_provider_request');
+    const compatNode = nodesById.get('adjust_provider_private_request');
+    if (!array(projNode?.resources?.writes).includes('v3.operation_runner.attempt_projection_context')) {
+      fail('docs/architecture/dagpipe/v3.operation_runner.request.graph.json: project_standard_provider_request must write v3.operation_runner.attempt_projection_context');
+    }
+    if (!array(compatNode?.resources?.reads).includes('v3.operation_runner.attempt_projection_context')) {
+      fail('docs/architecture/dagpipe/v3.operation_runner.request.graph.json: adjust_provider_private_request must read v3.operation_runner.attempt_projection_context');
+    }
+  } catch (error) {
+    fail(`docs/architecture/dagpipe/v3.operation_runner.request.graph.json: cannot read/parse: ${error.message}`);
+  }
+}
+
 if (failures.length) {
   console.error('[verify:v3-architecture-docs] failed');
   for (const failure of failures) console.error(`- ${failure}`);

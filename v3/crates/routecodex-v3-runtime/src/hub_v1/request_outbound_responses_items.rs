@@ -286,8 +286,7 @@ fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&st
     row.get("routecodex_chat_extension")
         .and_then(|extension| extension.get("responses_item_id"))
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn responses_function_item_id(row: &Map<String, Value>, call_id: &str) -> String {

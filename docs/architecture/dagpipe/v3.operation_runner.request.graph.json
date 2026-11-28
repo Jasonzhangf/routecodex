@@ -80,6 +80,7 @@
     },
     {
       "id": "project_standard_provider_request",
+      "description": "Projects canonical Chat into standard provider semantics and writes v3.operation_runner.attempt_projection_context (including orphan_tool_output_literals for Responses-entry Relay attempts).",
       "operator": "routecodex.v3.operation.project_standard_provider_request",
       "operator_version": "1",
       "inputs": ["governed-request"],
@@ -94,6 +95,7 @@
     },
     {
       "id": "adjust_provider_private_request",
+      "description": "Applies provider-private compat and reads v3.operation_runner.attempt_projection_context (orphan_tool_output_literals) so orphan tool outputs stay literal on default non-vision attempts.",
       "operator": "routecodex.v3.operation.adjust_provider_private_request",
       "operator_version": "1",
       "inputs": ["standard-provider-request"],
@@ -102,7 +104,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.provider_semantic", "v3.hub.resolved_target", "v3.operation_runner.execution_mode"],
+        "reads": ["v3.request.provider_semantic", "v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.attempt_projection_context"],
         "writes": ["v3.hub.provider_wire_payload"]
       }
     },

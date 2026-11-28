@@ -36,6 +36,20 @@ const fixtures = [
     to: '  - v3-hub-relay-req-03_REMOVED',
     diagnostic: /binds missing mainline step v3-hub-relay-req-03_REMOVED/,
   },
+  {
+    name: 'op-runner req-06 attempt_projection_context dependency removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '      consumes: [v3.request.provider_semantic, v3.operation_runner.attempt_projection_context]',
+    to: '      consumes: [v3.request.provider_semantic]',
+    diagnostic: /v3-op-runner-req-06 resource_flow\.consumes must declare v3\.operation_runner\.attempt_projection_context/,
+  },
+  {
+    name: 'attempt_projection_context orphan_tool_output_literals reader removed',
+    file: 'docs/architecture/v3-resource-operation-map.yml',
+    from: 'allowed_readers: [adjust_provider_private_request, build_provider_req_compat_06_from_v3_hub_req_outbound_07, normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]',
+    to: 'allowed_readers: [normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]',
+    diagnostic: /attempt_projection_context allowed_readers missing adjust_provider_private_request/,
+  },
 ];
 const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-data-red-'));
 const failures = [];

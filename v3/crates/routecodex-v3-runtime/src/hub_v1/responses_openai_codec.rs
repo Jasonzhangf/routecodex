@@ -1736,7 +1736,7 @@ pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
     if let Some(signature) = item.get("thought_signature") {
         tool_call["thought_signature"] = signature.clone();
     }
-    let responses_item_id = read_v3_non_empty_str(item.get("id"));
+    let responses_item_id = read_v3_verbatim_non_empty_str(item.get("id"));
     if item_type == "custom_tool_call" || responses_item_id.is_some() {
         let mut extension = Map::new();
         if item_type == "custom_tool_call" {
@@ -1779,7 +1779,7 @@ fn build_v3_openai_chat_tool_result_message(
         .unwrap_or("function_call_output");
     let mut extension = Map::new();
     extension.insert("responses_tool_output_type".to_string(), json!(item_type));
-    if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
+    if let Some(item_id) = read_v3_verbatim_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
     }
     let decoder_captured_responses_tool_output =
@@ -2306,6 +2306,12 @@ fn read_v3_non_empty_str(value: Option<&Value>) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
+fn read_v3_verbatim_non_empty_str(value: Option<&Value>) -> Option<&str> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
 fn normalize_v3_codex_integer_tool_schema(tool: &mut Value) {
     let Some(tool_object) = tool.as_object_mut() else {
         return;
@@ -2491,7 +2497,8 @@ pub(crate) fn is_registered_codex_tool_schema(
                     .get(*name)
                     .and_then(Value::as_object)
                     .and_then(|property| property.get("type"))
-                    .and_then(Value::as_str) == Some(*expected)
+                    .and_then(Value::as_str)
+                    == Some(*expected)
             }
         })
         && required.len() == required_names.len()

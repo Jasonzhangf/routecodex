@@ -2710,10 +2710,12 @@ chains:
       produces:
       - v3.request.provider_semantic
       - v3.hub.provider_protocol
+      - v3.operation_runner.attempt_projection_context
       side_channel_reads:
       - v3.hub.execution_plan
       side_channel_writes:
       - v3.hub.provider_protocol
+      - v3.operation_runner.attempt_projection_context
   - step_id: v3-hub-req-06
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
@@ -2729,10 +2731,12 @@ chains:
       - v3.request.provider_semantic
       - v3.hub.resolved_target
       - v3.hub.provider_protocol
+      - v3.operation_runner.attempt_projection_context
       produces:
       - v3.hub.provider_wire_payload
       side_channel_reads:
       - v3.hub.provider_protocol
+      - v3.operation_runner.attempt_projection_context
       side_channel_writes: []
   - step_id: v3-hub-req-07
     from_node: ProviderReqCompat06ProviderCompat
@@ -9638,10 +9642,11 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
     status: runtime_bound
     owner_feature_id: v3.unified_operation_runner_design
+    notes: Consumes orphan_tool_output_literals via v3.operation_runner.attempt_projection_context for default non-vision image placeholder gating.
     resource_flow:
-      consumes: [v3.request.provider_semantic]
+      consumes: [v3.request.provider_semantic, v3.operation_runner.attempt_projection_context]
       produces: [v3.hub.provider_wire_payload]
-      side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
+      side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode, v3.operation_runner.attempt_projection_context]
       side_channel_writes: []
   - step_id: v3-op-runner-req-07
     from_node: V3OperationRunnerCompatRequest

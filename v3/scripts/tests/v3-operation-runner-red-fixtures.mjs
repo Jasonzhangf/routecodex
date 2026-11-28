@@ -1531,6 +1531,50 @@ const mutations = [
     },
     expect: /content union parent.*shape_children references unknown source inventory path|shape_children.*forged_shadow_field|must be source-backed and consumer-bound/u,
   },
+  {
+    name: 'compat-missing-attempt-projection-context-read',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'adjust_provider_private_request');
+      if (!node) throw new Error('missing adjust_provider_private_request node');
+      node.resources.reads = node.resources.reads.filter(
+        (id) => id !== 'v3.operation_runner.attempt_projection_context',
+      );
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /adjust_provider_private_request must read v3\.operation_runner\.attempt_projection_context/u,
+  },
+  {
+    name: 'op-runner-req-06-missing-attempt-projection-context',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      const edge = chain?.edges?.find((item) => item.step_id === 'v3-op-runner-req-06');
+      if (!edge) throw new Error('missing v3-op-runner-req-06 edge');
+      edge.resource_flow.consumes = edge.resource_flow.consumes.filter(
+        (id) => id !== 'v3.operation_runner.attempt_projection_context',
+      );
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /v3-op-runner-req-06 resource_flow\.consumes must declare v3\.operation_runner\.attempt_projection_context/u,
+  },
+  {
+    name: 'resource-map-missing-orphan-tool-output-literals-contract',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-resource-operation-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const res = doc.resources.find((item) => item.resource_id === 'v3.operation_runner.attempt_projection_context');
+      if (!res) throw new Error('missing v3.operation_runner.attempt_projection_context');
+      delete res.semantic_contract.orphan_tool_output_literals;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /attempt_projection_context must declare semantic_contract\.orphan_tool_output_literals/u,
+  },
 ];
 
 let failed = 0;

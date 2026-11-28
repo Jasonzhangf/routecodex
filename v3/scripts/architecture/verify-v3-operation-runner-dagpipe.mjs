@@ -1444,6 +1444,48 @@ for (const expected of [
   }
 }
 
+const attemptProjectionResource = (resourceMap.resources ?? []).find(
+  (entry) => entry?.resource_id === 'v3.operation_runner.attempt_projection_context',
+);
+if (!attemptProjectionResource) {
+  failures.push('v3-resource-operation-map.yml: missing v3.operation_runner.attempt_projection_context');
+} else {
+  if (!String(attemptProjectionResource.semantic_contract?.orphan_tool_output_literals ?? '').trim()) {
+    failures.push('v3-resource-operation-map.yml: v3.operation_runner.attempt_projection_context must declare semantic_contract.orphan_tool_output_literals');
+  }
+  for (const writer of ['project_v3_operation_runner_standard_provider_request', 'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06']) {
+    if (!(attemptProjectionResource.allowed_writers ?? []).includes(writer)) {
+      failures.push(`v3-resource-operation-map.yml: v3.operation_runner.attempt_projection_context allowed_writers missing ${writer}`);
+    }
+  }
+  for (const reader of ['adjust_provider_private_request', 'build_provider_req_compat_06_from_v3_hub_req_outbound_07']) {
+    if (!(attemptProjectionResource.allowed_readers ?? []).includes(reader)) {
+      failures.push(`v3-resource-operation-map.yml: v3.operation_runner.attempt_projection_context allowed_readers missing ${reader}`);
+    }
+  }
+}
+
+const projectNode = requestNodesById.get('project_standard_provider_request');
+const compatNode = requestNodesById.get('adjust_provider_private_request');
+if (!(projectNode?.resources?.writes ?? []).includes('v3.operation_runner.attempt_projection_context')) {
+  failures.push(`${requestGraphRel}: project_standard_provider_request must write v3.operation_runner.attempt_projection_context`);
+}
+if (!(compatNode?.resources?.reads ?? []).includes('v3.operation_runner.attempt_projection_context')) {
+  failures.push(`${requestGraphRel}: adjust_provider_private_request must read v3.operation_runner.attempt_projection_context`);
+}
+
+for (const [stepId, field] of [
+  ['v3-op-runner-req-05', 'produces'],
+  ['v3-op-runner-req-05', 'side_channel_writes'],
+  ['v3-op-runner-req-06', 'consumes'],
+  ['v3-op-runner-req-06', 'side_channel_reads'],
+]) {
+  const edge = (requestChain?.edges ?? []).find((candidate) => candidate?.step_id === stepId);
+  if (!edge || !(edge.resource_flow?.[field] ?? []).includes('v3.operation_runner.attempt_projection_context')) {
+    failures.push(`v3-mainline-call-map.yml: ${stepId} resource_flow.${field} must declare v3.operation_runner.attempt_projection_context`);
+  }
+}
+
 const errorGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
 // Error graph resource checks are deferred design targets: validate only
 // when the graph is present, never block Node 01.
