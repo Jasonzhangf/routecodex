@@ -150,7 +150,8 @@ where
         )),
     })?;
     trace.push("V3HubRespOutbound05ClientSemantic");
-    let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
+    let resp06 = try_build_v3_server_resp_outbound_06_with_framer(resp05, Ok)
+        .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
     let client_response = resp06.into_client_payload();
     Ok((client_response, stream_observation))

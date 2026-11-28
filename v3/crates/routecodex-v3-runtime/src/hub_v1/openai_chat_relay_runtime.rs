@@ -510,10 +510,10 @@ fn project_json_response(
     )
     .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?;
     trace.push("V3HubRespOutbound05ClientSemantic");
-    let client = resp05.client_payload().clone();
-    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
+    let resp06 = try_build_v3_server_resp_outbound_06_with_framer(resp05, Ok)
+        .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(client)
+    Ok(resp06.into_client_payload())
 }
 
 struct V3OpenAiChatRelayTypedSemanticHook<'a> {

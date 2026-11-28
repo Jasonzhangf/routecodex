@@ -742,13 +742,18 @@ fn project_json_response_with_source(
         )
         .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
     } else {
-        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03)
+        // Native Gemini SSE events are already in the client carrier at this
+        // boundary. Run the inverse node without the complete-document adapter.
+        try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
+            resp03, Ok,
+        )
+        .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
     };
     trace.push("V3HubRespOutbound05ClientSemantic");
-    let client = resp05.client_payload().clone();
-    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
+    let resp06 = try_build_v3_server_resp_outbound_06_with_framer(resp05, Ok)
+        .map_err(V3GeminiRelayRuntimeError::Target)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(client)
+    Ok(resp06.into_client_payload())
 }
 
 struct V3GeminiSseState {
