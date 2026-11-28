@@ -402,7 +402,7 @@ fn prune_stale_provider_cooldown_scope_files(
         let Some(name) = candidate.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !name.starts_with("provider-cooldowns-") {
+        if !name.starts_with("provider-cooldowns") {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
@@ -433,7 +433,7 @@ fn prune_stale_provider_cooldown_scope_files(
             }
             continue;
         }
-        if !name.ends_with(".json") {
+        if !name.starts_with("provider-cooldowns-") || !name.ends_with(".json") {
             continue;
         }
         // A listener-scoped manifest owns only the files for this listener.
