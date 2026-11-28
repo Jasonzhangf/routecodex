@@ -624,25 +624,15 @@ fn merge_responses_chat_histories(
                 reserved_source_for_decoded[dec_idx] = Some(pos);
             }
         }
-        // Pre-reserve merge-equivalent unreserved ID-less receipts before checking
-        // unmatched rows for conflicts so later equivalent twins claim their
-        // matching source row ahead of earlier distinct ID-less inputs.
-        for (dec_idx, result) in decoded.iter().enumerate() {
-            if reserved_source_for_decoded[dec_idx].is_some()
-                || tool_output_item_id(result).is_some()
-            {
-                continue;
-            }
-            if let Some(pos) = (0..original_source_len).find(|&idx| {
-                !source_reserved[idx]
-                    && same_legacy_tool_output_identity(&sanitized_source[idx], result)
-                    && tool_output_item_id(&sanitized_source[idx]).is_none()
-                    && merge_equivalent_chat_value(&sanitized_source[idx], result).is_some()
-            }) {
-                source_reserved[pos] = true;
-                reserved_source_for_decoded[dec_idx] = Some(pos);
-            }
-        }
+        // Resolve compatible unreserved ID-less receipts with maximum bipartite
+        // matching (preferring exact/more-specific matches) so one receipt cannot
+        // greedily claim a generic source row needed by a more specific sibling.
+        reserve_idless_equivalent_tool_outputs_bipartite(
+            &sanitized_source,
+            decoded,
+            &mut source_reserved,
+            &mut reserved_source_for_decoded,
+        );
         let mut merged = sanitized_source;
         let mut merged_entries: Vec<V3HubMessageHistoryProvenance> = merged
             .iter()
@@ -701,22 +691,51 @@ fn merge_responses_chat_histories(
                 matched_source_for_decoded[dec_idx] = Some(pos);
             }
         }
-        let mut source_to_merged_pos: Vec<usize> = (0..original_source_len).collect();
+        // Emit matched receipts across the matched source slots in native decoded
+        // order so out-of-order legacy pairings preserve native input order.
+        let mut matched_source_slots: Vec<usize> = matched_source_for_decoded
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+        matched_source_slots.sort_unstable();
+        let matched_in_decoded_order: Vec<(usize, Value, V3HubMessageHistoryProvenance)> =
+            matched_source_for_decoded
+                .iter()
+                .enumerate()
+                .filter_map(|(dec_idx, matched_src)| {
+                    matched_src.map(|src_pos| {
+                        (
+                            dec_idx,
+                            std::mem::take(&mut merged[src_pos]),
+                            std::mem::take(&mut merged_entries[src_pos]),
+                        )
+                    })
+                })
+                .collect();
+        let mut matched_merged_pos_for_decoded = vec![None; decoded.len()];
+        for (slot, (dec_idx, row, prov)) in matched_source_slots
+            .into_iter()
+            .zip(matched_in_decoded_order)
+        {
+            merged[slot] = row;
+            merged_entries[slot] = prov;
+            matched_merged_pos_for_decoded[dec_idx] = Some(slot);
+        }
         for (dec_idx, result) in decoded.iter().enumerate() {
-            if matched_source_for_decoded[dec_idx].is_some() {
+            if matched_merged_pos_for_decoded[dec_idx].is_some() {
                 continue;
             }
             let result_provenance = decoded_entry_provenances[dec_idx].clone();
-            if let Some(next_source_idx) = matched_source_for_decoded[dec_idx + 1..]
+            if let Some(insert_at) = matched_merged_pos_for_decoded[dec_idx + 1..]
                 .iter()
                 .flatten()
                 .copied()
                 .next()
             {
-                let insert_at = source_to_merged_pos[next_source_idx];
                 merged.insert(insert_at, result.clone());
                 merged_entries.insert(insert_at, result_provenance);
-                for pos in &mut source_to_merged_pos {
+                for pos in matched_merged_pos_for_decoded.iter_mut().flatten() {
                     if *pos >= insert_at {
                         *pos += 1;
                     }
@@ -737,6 +756,115 @@ fn merge_responses_chat_histories(
         "Responses inbound canonicalization failed: conflicting input and messages representations"
             .to_string(),
     )
+}
+
+fn idless_tool_output_match_specificity(source_row: &Value, decoded_row: &Value) -> (usize, bool) {
+    let shared_extension_fields = match (
+        source_row
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object),
+        decoded_row
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object),
+    ) {
+        (Some(source_ext), Some(decoded_ext)) => source_ext
+            .iter()
+            .filter(|(key, value)| decoded_ext.get(*key) == Some(*value))
+            .count(),
+        _ => 0,
+    };
+    (
+        shared_extension_fields,
+        source_row.get("content") == decoded_row.get("content"),
+    )
+}
+
+fn reserve_idless_equivalent_tool_outputs_bipartite(
+    sanitized_source: &[Value],
+    decoded: &[Value],
+    source_reserved: &mut [bool],
+    reserved_source_for_decoded: &mut [Option<usize>],
+) {
+    let unreserved_decoded: Vec<usize> = (0..decoded.len())
+        .filter(|&dec_idx| {
+            reserved_source_for_decoded[dec_idx].is_none()
+                && tool_output_item_id(&decoded[dec_idx]).is_none()
+        })
+        .collect();
+    if unreserved_decoded.is_empty() {
+        return;
+    }
+
+    let candidate_sources_by_decoded: Vec<Vec<usize>> = unreserved_decoded
+        .iter()
+        .map(|&dec_idx| {
+            let result = &decoded[dec_idx];
+            let mut candidates: Vec<usize> = (0..sanitized_source.len())
+                .filter(|&src_idx| {
+                    !source_reserved[src_idx]
+                        && same_legacy_tool_output_identity(&sanitized_source[src_idx], result)
+                        && tool_output_item_id(&sanitized_source[src_idx]).is_none()
+                        && merge_equivalent_chat_value(&sanitized_source[src_idx], result).is_some()
+                })
+                .collect();
+            candidates.sort_by(|&left, &right| {
+                idless_tool_output_match_specificity(&sanitized_source[right], result)
+                    .cmp(&idless_tool_output_match_specificity(
+                        &sanitized_source[left],
+                        result,
+                    ))
+                    .then_with(|| left.cmp(&right))
+            });
+            candidates
+        })
+        .collect();
+
+    fn try_augment(
+        local_dec_idx: usize,
+        candidate_sources_by_decoded: &[Vec<usize>],
+        visited_sources: &mut [bool],
+        matched_decoded_for_source: &mut [Option<usize>],
+    ) -> bool {
+        for &src_idx in &candidate_sources_by_decoded[local_dec_idx] {
+            if visited_sources[src_idx] {
+                continue;
+            }
+            visited_sources[src_idx] = true;
+            let can_claim = match matched_decoded_for_source[src_idx] {
+                None => true,
+                Some(prev_local_dec_idx) => try_augment(
+                    prev_local_dec_idx,
+                    candidate_sources_by_decoded,
+                    visited_sources,
+                    matched_decoded_for_source,
+                ),
+            };
+            if can_claim {
+                matched_decoded_for_source[src_idx] = Some(local_dec_idx);
+                return true;
+            }
+        }
+        false
+    }
+
+    let mut matched_decoded_for_source = vec![None; sanitized_source.len()];
+    for local_dec_idx in 0..unreserved_decoded.len() {
+        let mut visited_sources = vec![false; sanitized_source.len()];
+        try_augment(
+            local_dec_idx,
+            &candidate_sources_by_decoded,
+            &mut visited_sources,
+            &mut matched_decoded_for_source,
+        );
+    }
+
+    for (src_idx, matched_local_dec) in matched_decoded_for_source.into_iter().enumerate() {
+        if let Some(local_dec_idx) = matched_local_dec {
+            let dec_idx = unreserved_decoded[local_dec_idx];
+            source_reserved[src_idx] = true;
+            reserved_source_for_decoded[dec_idx] = Some(src_idx);
+        }
+    }
 }
 
 fn merge_equivalent_chat_value(source_val: &Value, decoded_val: &Value) -> Option<Value> {
@@ -2754,6 +2882,123 @@ mod tests {
         );
         let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(lone_conflict)
             .expect_err("lone conflicting ID-less twin must still fail");
+        assert!(
+            err.contains("conflicting tool output representations"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dual_two_idless_legacy_status_and_two_idless_input_bipartite_matches_and_preserves_order() {
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "done"
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "done",
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_status": "completed"
+                        }
+                    }
+                ],
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "done",
+                        "status": "completed"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "done",
+                        "status": "incomplete"
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw).expect(
+            "bipartite matching must pair completed-with-completed and incomplete-with-statusless",
+        );
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(messages.len(), 2, "{messages:#?}");
+        assert_eq!(
+            messages[0]["routecodex_chat_extension"]["responses_tool_output_status"],
+            json!("completed")
+        );
+        assert_eq!(
+            messages[1]["routecodex_chat_extension"]["responses_tool_output_status"],
+            json!("incomplete")
+        );
+        assert!(messages[0]
+            .pointer("/routecodex_chat_extension/responses_item_id")
+            .is_none());
+        assert!(messages[1]
+            .pointer("/routecodex_chat_extension/responses_item_id")
+            .is_none());
+        assert_eq!(
+            normalized.explicit_history_pairing.message_order(0),
+            Some(0)
+        );
+        assert_eq!(
+            normalized.explicit_history_pairing.message_order(1),
+            Some(1)
+        );
+
+        let conflicting_dual = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "done",
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_status": "completed"
+                        }
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "done",
+                        "routecodex_chat_extension": {
+                            "responses_tool_output_status": "completed"
+                        }
+                    }
+                ],
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "done",
+                        "status": "completed"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "done",
+                        "status": "incomplete"
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(conflicting_dual)
+            .expect_err("unmatchable conflicting status twin must still fail");
         assert!(
             err.contains("conflicting tool output representations"),
             "unexpected error: {err}"
