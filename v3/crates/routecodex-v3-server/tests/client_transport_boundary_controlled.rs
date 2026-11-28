@@ -629,8 +629,7 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
     );
 
     let mut received = Vec::new();
-    while let Ok(Some(Ok(chunk))) =
-        tokio::time::timeout(Duration::from_secs(5), body.next()).await
+    while let Ok(Some(Ok(chunk))) = tokio::time::timeout(Duration::from_secs(5), body.next()).await
     {
         received.extend_from_slice(&chunk);
     }

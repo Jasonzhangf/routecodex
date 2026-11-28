@@ -1929,7 +1929,7 @@ fn terminal_projection_for(
     Ok(Some(projected))
 }
 
-fn find_matching_provider_error_policy<'manifest>(
+pub(crate) fn find_matching_provider_error_policy<'manifest>(
     manifest: &'manifest V3Config05ManifestPublished,
     routing_group: &str,
     provider_id: &str,
@@ -1962,7 +1962,7 @@ fn find_matching_provider_error_policy<'manifest>(
         })
 }
 
-fn provider_failure_policy_from_error_policy_directive(
+pub(crate) fn provider_failure_policy_from_error_policy_directive(
     policy: &V3ProviderErrorActionPolicyManifest,
     status: u16,
     recovery: V3ProviderRecoveryKind,
@@ -1981,13 +1981,15 @@ fn provider_failure_policy_from_error_policy_directive(
             scope,
             duration_ms,
             until_restart,
+            failure_threshold: step_threshold,
             ..
-        } => Some((*scope, *duration_ms, *until_restart)),
+        } => Some((*scope, *duration_ms, *until_restart, *step_threshold)),
         _ => None,
     }) else {
         return Ok(None);
     };
-    let (scope, duration_ms, until_restart) = cooldown;
+    let (scope, duration_ms, until_restart, step_threshold) = cooldown;
+    let failure_threshold = step_threshold.unwrap_or(failure_threshold);
     if !matches!(
         scope,
         V3ProviderErrorActionScope::AuthKey | V3ProviderErrorActionScope::ProviderModel

@@ -341,6 +341,8 @@ pub enum V3ProviderDispositionStepAuthoringConfig {
         until_restart: Option<bool>,
         #[serde(default)]
         provider_global_failure: bool,
+        #[serde(default)]
+        failure_threshold: Option<u32>,
     },
     Project {
         reason_code: String,
@@ -1390,6 +1392,7 @@ pub enum V3ProviderDispositionStepManifest {
         duration_ms: Option<u64>,
         until_restart: Option<bool>,
         provider_global_failure: bool,
+        failure_threshold: Option<u32>,
     },
     Project {
         reason_code: String,

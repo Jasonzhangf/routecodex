@@ -1,10 +1,12 @@
 use super::{is_v3_deepseek_v4_compat_model, V3HubProviderWireProtocol, V3ProviderCompatError};
+use crate::projection_drop_log::V3ProjectionDropRecord;
 use serde_json::Value;
 
-pub(super) fn project_reasoning_effort_for_selected_target(
+pub(super) fn project_reasoning_effort_for_selected_target_with_drops(
     payload: &mut Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), V3ProviderCompatError> {
     if selected.reasoning_effort.is_some() {
         return Ok(());
@@ -82,45 +84,76 @@ pub(super) fn project_reasoning_effort_for_selected_target(
 
     let projected = if is_opencode_go_zen {
         match effort.as_str() {
-            "low" | "minimal" | "medium" => "low",
-            "high" | "xhigh" => "high",
-            "max" => "max",
+            "low" | "minimal" | "medium" => Some("low"),
+            "high" | "xhigh" => Some("high"),
+            "max" => Some("max"),
             // OpenCode Zen always thinks. Its provider contract rejects the
             // standard `none` value and explicitly requires low/high/max;
             // low is the deterministic provider-compatible representation.
-            "none" => "low",
-            _ => {
-                return Err(V3ProviderCompatError::other(
-                    "request_reasoning_effort_projection",
-                    selected
-                        .compatibility_profile
-                        .clone()
-                        .unwrap_or_else(|| "compat:passthrough".to_string()),
-                    format!(
-                        "opencode-go-zen does not support reasoning effort {effort}; supported values are low/high/max"
-                    ),
-                ));
-            }
+            "none" => Some("low"),
+            _ => None,
         }
     } else if is_deepseek {
-        match effort.as_str() {
+        Some(match effort.as_str() {
             "none" => "none",
             "xhigh" | "max" => "max",
             "ultra" => "max",
             _ => "high",
-        }
+        })
     } else {
         match provider_protocol {
             V3HubProviderWireProtocol::Responses | V3HubProviderWireProtocol::OpenAiChat => {
-                match effort.as_str() {
+                Some(match effort.as_str() {
                     "none" | "minimal" | "low" | "medium" | "high" | "xhigh" => effort.as_str(),
                     "max" => "xhigh",
                     _ => "medium",
-                }
+                })
             }
             V3HubProviderWireProtocol::Anthropic => unreachable!(),
             V3HubProviderWireProtocol::Gemini => unreachable!(),
         }
+    };
+
+    let Some(projected) = projected else {
+        let (target_protocol, json_path) = match provider_protocol {
+            V3HubProviderWireProtocol::Responses => ("responses", "$.reasoning.effort"),
+            V3HubProviderWireProtocol::OpenAiChat => ("openai_chat", "$.reasoning_effort"),
+            V3HubProviderWireProtocol::Anthropic => ("anthropic", "$.output_config.effort"),
+            V3HubProviderWireProtocol::Gemini => {
+                ("gemini", "$.generationConfig.thinkingConfig.thinkingLevel")
+            }
+        };
+        drops.push(V3ProjectionDropRecord::new(
+            target_protocol,
+            json_path,
+            "unmapped_target_protocol_field_unrepresentable",
+            raw_effort,
+            "project_reasoning_effort_for_selected_target_with_drops",
+        ));
+        match provider_protocol {
+            V3HubProviderWireProtocol::Responses => {
+                if let Some(root) = payload.as_object_mut() {
+                    let remove_reasoning = root
+                        .get_mut("reasoning")
+                        .and_then(Value::as_object_mut)
+                        .map(|reasoning| {
+                            reasoning.remove("effort");
+                            reasoning.is_empty()
+                        })
+                        .unwrap_or(false);
+                    if remove_reasoning {
+                        root.remove("reasoning");
+                    }
+                }
+            }
+            V3HubProviderWireProtocol::OpenAiChat => {
+                if let Some(root) = payload.as_object_mut() {
+                    root.remove("reasoning_effort");
+                }
+            }
+            V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::Gemini => {}
+        }
+        return Ok(());
     };
 
     match provider_protocol {

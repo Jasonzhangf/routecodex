@@ -1302,7 +1302,8 @@ targets = [
   { kind = "provider_model", provider = "leading", model = "model", key = "key", priority = 2 },
   { kind = "provider_model", provider = "healthy", model = "model", key = "key", priority = 1 }
 ]
-"#.to_string();
+"#
+    .to_string();
     let handle = spawn_v3_server_aggregate(manifest(
         free_port(),
         &[

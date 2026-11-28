@@ -430,9 +430,9 @@ impl V3ProviderActionGate {
         let now = Instant::now();
         let removed = {
             let mut states = self.lock_states()?;
-            let keys = states.keys().filter_map(|key| {
-                    (key.provider_scope == *provider_scope).then_some(key.clone())
-                })
+            let keys = states
+                .keys()
+                .filter_map(|key| (key.provider_scope == *provider_scope).then_some(key.clone()))
                 .collect::<Vec<_>>();
             let mut removed = Vec::new();
             for key in keys {
@@ -857,7 +857,9 @@ impl V3ProviderActionWaiter {
                     return Ok(V3ProviderActionRecoveryTransition::Admitted(admission));
                 }
                 states.get(&self.key).and_then(|state| {
-                    if state.waiter_queue.front() != Some(&self.ticket) || exact_has_active_admission {
+                    if state.waiter_queue.front() != Some(&self.ticket)
+                        || exact_has_active_admission
+                    {
                         None
                     } else {
                         Some(state.next_admission_at.saturating_duration_since(now))

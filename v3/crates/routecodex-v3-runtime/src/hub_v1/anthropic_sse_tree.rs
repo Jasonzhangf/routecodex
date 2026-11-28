@@ -224,6 +224,9 @@ impl V3AnthropicSseReducerState {
                 self.terminal = Some(V3AnthropicSseTerminalState::MessageStop);
                 Ok(())
             }
+            _ if protocol.event_type.starts_with("response.") => Err(
+                V3AnthropicSseTreeError::CrossProtocolEvent(protocol.event_type),
+            ),
             _ => {
                 self.extensions.extend(object_extensions(
                     event,
@@ -308,19 +311,19 @@ impl V3AnthropicSseReducerState {
             };
             if let Some(kind) = kind {
                 e.insert(V3AnthropicSseBlock {
-                        index,
-                        kind,
-                        id: None,
-                        name: None,
-                        text: String::new(),
-                        input_json: String::new(),
-                        input: None,
-                        thinking: String::new(),
-                        signature: None,
-                        redacted_data: None,
-                        stopped: false,
-                        extensions: Vec::new(),
-                    });
+                    index,
+                    kind,
+                    id: None,
+                    name: None,
+                    text: String::new(),
+                    input_json: String::new(),
+                    input: None,
+                    thinking: String::new(),
+                    signature: None,
+                    redacted_data: None,
+                    stopped: false,
+                    extensions: Vec::new(),
+                });
             }
         }
         let block = self
@@ -442,8 +445,12 @@ impl V3AnthropicSseReducerState {
                         Value::String(block.redacted_data.clone().unwrap_or_default()),
                     );
                 }
-                V3AnthropicSseBlockKind::ToolUse => {
-                    item.insert("type".to_owned(), Value::String("tool_use".to_owned()));
+                V3AnthropicSseBlockKind::ToolUse | V3AnthropicSseBlockKind::ServerToolUse => {
+                    let kind_name = match &block.kind {
+                        V3AnthropicSseBlockKind::ServerToolUse => "server_tool_use",
+                        _ => "tool_use",
+                    };
+                    item.insert("type".to_owned(), Value::String(kind_name.to_owned()));
                     if let Some(id) = &block.id {
                         item.insert("id".to_owned(), Value::String(id.clone()));
                     }
@@ -460,14 +467,17 @@ impl V3AnthropicSseReducerState {
                     };
                     item.insert("input".to_owned(), input);
                 }
-                V3AnthropicSseBlockKind::ServerToolUse
-                | V3AnthropicSseBlockKind::WebSearchToolResult
+                V3AnthropicSseBlockKind::WebSearchToolResult
                 | V3AnthropicSseBlockKind::Extension(_) => {
                     item.insert(
                         "type".to_owned(),
                         Value::String(block_kind_name(&block.kind)),
                     );
-                    item.insert("text".to_owned(), Value::String(block.text.clone()));
+                    if !block.text.is_empty()
+                        && !block.extensions.iter().any(|ext| ext.name == "text")
+                    {
+                        item.insert("text".to_owned(), Value::String(block.text.clone()));
+                    }
                 }
             }
             for extension in &block.extensions {
@@ -602,11 +612,13 @@ fn parse_block(
     let object = value
         .as_object()
         .ok_or(V3AnthropicSseTreeError::ContentBlockNotObject)?;
-    let kind = match object
+    let content_type = object
         .get("type")
         .and_then(Value::as_str)
-        .unwrap_or("extension")
-    {
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(V3AnthropicSseTreeError::MissingContentBlockType(index))?;
+    let kind = match content_type {
         "text" => V3AnthropicSseBlockKind::Text,
         "tool_use" => V3AnthropicSseBlockKind::ToolUse,
         "thinking" => V3AnthropicSseBlockKind::Thinking,
@@ -621,17 +633,15 @@ fn parse_block(
     // extensions instead of rejecting the whole stream. Required reasoning
     // content stays a typed error in the canonical projection.
     let native_fields: &[&str] = match kind {
+        V3AnthropicSseBlockKind::Text => &["type", "text"],
+        V3AnthropicSseBlockKind::ToolUse | V3AnthropicSseBlockKind::ServerToolUse => {
+            &["type", "id", "name", "input"]
+        }
         V3AnthropicSseBlockKind::Thinking => &["type", "thinking", "signature"],
         V3AnthropicSseBlockKind::RedactedThinking => &["type", "data"],
-        _ => &[
-            "type",
-            "id",
-            "name",
-            "input",
-            "text",
-            "thinking",
-            "signature",
-        ],
+        V3AnthropicSseBlockKind::WebSearchToolResult | V3AnthropicSseBlockKind::Extension(_) => {
+            &["type"]
+        }
     };
     Ok(V3AnthropicSseBlock {
         index,
@@ -760,6 +770,10 @@ pub(crate) enum V3AnthropicSseTreeError {
     ThinkingDeltaRequired,
     #[error("Anthropic signature_delta requires signature")]
     SignatureDeltaRequired,
+    #[error("Anthropic content_block[{0}] is missing non-empty string type")]
+    MissingContentBlockType(usize),
+    #[error("Anthropic SSE stream received cross-protocol event '{0}'")]
+    CrossProtocolEvent(String),
     #[error("Anthropic provider error: {0}")]
     ProviderError(String),
 }
@@ -837,5 +851,129 @@ mod tests {
             Err(V3AnthropicSseTreeError::ProviderError(_))
         ));
         assert_eq!(state.terminal, Some(V3AnthropicSseTerminalState::Error));
+    }
+
+    #[test]
+    fn missing_content_block_type_and_cross_protocol_event_are_rejected() {
+        let mut missing_type_state = V3AnthropicSseReducerState::default();
+        missing_type_state
+            .apply_event(&json!({
+                "type": "message_start",
+                "message": {"id": "m1", "type": "message", "role": "assistant", "content": []}
+            }))
+            .unwrap();
+        missing_type_state
+            .apply_event(&json!({
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": "valid"}
+            }))
+            .unwrap();
+        let err = missing_type_state
+            .apply_event(&json!({
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"text": "missing type"}
+            }))
+            .expect_err("content_block without non-empty string type must fail SSE reducer");
+        assert!(matches!(
+            err,
+            V3AnthropicSseTreeError::MissingContentBlockType(1)
+        ));
+
+        let cross_err = missing_type_state
+            .apply_event(&json!({
+                "type": "response.output_text.delta",
+                "delta": "foreign frame"
+            }))
+            .expect_err("cross-protocol response.* event must fail Anthropic SSE reducer");
+        assert!(matches!(
+            cross_err,
+            V3AnthropicSseTreeError::CrossProtocolEvent(_)
+        ));
+    }
+
+    #[test]
+    fn server_tool_use_web_search_and_extension_blocks_preserve_fields_without_fake_text() {
+        let mut state = V3AnthropicSseReducerState::default();
+        let events = [
+            json!({
+                "type": "message_start",
+                "message": {"id": "msg_ws_1", "type": "message", "role": "assistant", "content": []}
+            }),
+            json!({
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_1",
+                    "name": "web_search",
+                    "input": {}
+                }
+            }),
+            json!({
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": "{\"query\":\"rust proxy\"}"}
+            }),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_1",
+                    "content": [{"type": "web_search_result", "url": "https://example.com"}]
+                }
+            }),
+            json!({"type": "content_block_stop", "index": 1}),
+            json!({
+                "type": "content_block_start",
+                "index": 2,
+                "content_block": {
+                    "type": "container_upload",
+                    "id": "cu_1",
+                    "name": "artifact",
+                    "input": {"path": "/tmp/a.txt"},
+                    "file_id": "file_123"
+                }
+            }),
+            json!({"type": "content_block_stop", "index": 2}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}}),
+            json!({"type": "message_stop"}),
+        ];
+        for event in &events {
+            state.apply_event(event).unwrap();
+        }
+        let message = state.to_message_value().unwrap();
+        let content = message["content"].as_array().unwrap();
+        assert_eq!(content.len(), 3);
+        assert_eq!(
+            content[0],
+            json!({
+                "type": "server_tool_use",
+                "id": "srvtoolu_1",
+                "name": "web_search",
+                "input": {"query": "rust proxy"}
+            })
+        );
+        assert_eq!(
+            content[1],
+            json!({
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": [{"type": "web_search_result", "url": "https://example.com"}]
+            })
+        );
+        assert_eq!(
+            content[2],
+            json!({
+                "type": "container_upload",
+                "id": "cu_1",
+                "name": "artifact",
+                "input": {"path": "/tmp/a.txt"},
+                "file_id": "file_123"
+            })
+        );
     }
 }

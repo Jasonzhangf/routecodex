@@ -1534,12 +1534,28 @@ async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_
         output.error_chain.is_some(),
         "a reasoning block missing its native payload must stay a typed internal error: {output:?}"
     );
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 599);
+    assert_eq!(
+        output
+            .diagnostic_source
+            .as_ref()
+            .map(|source| source.source_kind.clone()),
+        Some(routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure)
+    );
+    assert_eq!(
+        output
+            .diagnostic_source
+            .as_ref()
+            .map(|source| source.source_stage),
+        Some("V3ProviderResp14Raw")
+    );
     let observability = output.observability.as_ref().expect("observability");
+    assert_eq!(observability.provider_status, Some(200));
     let failure = observability
         .provider_failure_events
         .first()
         .unwrap_or_else(|| panic!("provider failure event missing: {output:?}"));
+    assert_eq!(failure.status, 502);
     assert!(
         failure
             .message

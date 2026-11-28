@@ -10,9 +10,8 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError,
-    V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
-    V3Transport13ResponsesHttpRequest,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderSseStream,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -398,9 +397,13 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             let mut outcome = outcome;
             return Ok(Box::pin(futures_util::stream::once(async move {
                 let projected = async {
-                    let value = super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
-                        provider_wire_protocol, provider,
-                    ).await.map_err(|error| error.to_string())?;
+                    let value = super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response_with_observation(
+                        provider_wire_protocol,
+                        provider,
+                        &outcome.response_control,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
                     let projection = project_json_response_with_source(
                         value, Some(&request_id), provider_wire_protocol, &Value::Null,
                         V3HubTransportIntent::Sse, &mut Vec::new(),
@@ -1115,8 +1118,14 @@ mod tests {
             ));
             assert!(output.error_chain.is_none());
             assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
-            assert_eq!(output.diagnostic_source, Some((*fault.policy_failure).clone()));
-            assert_eq!(output.diagnostic_cause, fault.original_source.clone().map(|s| *s));
+            assert_eq!(
+                output.diagnostic_source,
+                Some((*fault.policy_failure).clone())
+            );
+            assert_eq!(
+                output.diagnostic_cause,
+                fault.original_source.clone().map(|s| *s)
+            );
             assert_eq!(
                 fault.policy_failure.source_kind,
                 routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure

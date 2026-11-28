@@ -58,7 +58,7 @@ for (const [id, storage, projections] of [
   ['request.metadata', 'routecodex_chat_extension.responses_request.metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
   ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'unmapped' }],
   ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'unmapped' }],
-  ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
+  ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_omitted_with_diagnostic', gemini: 'unmapped' }],
   ['request.reasoning_effort', 'reasoning_effort', { responses: 'reasoning.effort_known_domain_unknown_to_medium', openai_chat: 'reasoning_effort_provider_compatible_domain', anthropic: 'output_config.effort_or_minimax_adaptive_thinking', gemini: 'generationConfig.thinkingConfig.thinkingLevel_shared_domain_only' }],
   ['request.reasoning_budget_tokens', 'reasoning_budget_tokens', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.budget_tokens_with_thinking_constraints', gemini: 'generationConfig.thinkingConfig.thinkingBudget_with_model_constraints' }],
   ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher', anthropic: 'static_compatible_full_native_thinking_summary', gemini: 'unmapped' }],
@@ -259,8 +259,20 @@ for (const test of [
   'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input',
   'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input',
   'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
+  'map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks',
+  'map001_map002_public_hard_errors_reject_malformed_cross_protocol_and_empty_attempts',
 ]) {
   if (!(verification?.required_blackbox ?? []).some((entry) => String(entry).includes(test))) failures.push(`${paths.verificationMap}: missing required_blackbox ${test}`);
+}
+const packageJson = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8'),
+);
+const parityGateCmd = String(packageJson?.scripts?.['test:v3-protocol-conversion-field-parity'] ?? '');
+if (!parityGateCmd.includes('protocol_mapping_ontology_public')) {
+  failures.push('v3/package.json: test:v3-protocol-conversion-field-parity must execute protocol_mapping_ontology_public');
+}
+if (!String(verification?.governance_clauses?.ontology_public_command ?? '').includes('protocol_mapping_ontology_public')) {
+  failures.push(`${paths.verificationMap}: v3.protocol_conversion_field_parity governance_clauses.ontology_public_command must reference protocol_mapping_ontology_public`);
 }
 
 for (const [protocol, section, fields] of [

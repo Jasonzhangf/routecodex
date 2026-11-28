@@ -1,6 +1,6 @@
 # V3 Protocol Mapping Ontology: Inbound Completeness and Outbound Allowlist
 
-Status: approved candidate; executable and public behavior binding is absent.
+Status: approved and bound; executable parity and public JSON/SSE tests verify MAP-001 and MAP-002.
 Owner feature: `v3.protocol_conversion_field_parity`.
 Approval source: user clarification at
 `/Users/fanzhang/.agents/task-notes/routecodex-master-audit-20261123/dbc3d38-contract-clarification-20261124.md:22-32`.
@@ -111,12 +111,12 @@ Approval source: user clarification at
 - State before/after: parseable source -> Chat/extension value eligible for Chat Process.
 - Effects: no filter effect.
 - Owner: Inbound codec and Chat Process.
-- Approval: `approved_candidate_unbound`.
-- Evidence: user clarification cited above.
-- Governance: edge `v3.protocol_conversion_field_parity` is declared, but no executable rule gate binds this clause; missing public edge is canonical Chat/extension capture on a public inbound entry with a missing-conversion fixture.
+- Approval: `approved_bound`.
+- Evidence: user clarification cited above and `v3/crates/routecodex-v3-server/tests/protocol_mapping_ontology_public.rs`.
+- Governance: bound by `v3.protocol_conversion_field_parity` (`npm run verify:v3-protocol-conversion-field-parity` and `npm --prefix v3 run test:v3-protocol-conversion-field-parity`), `anthropic_inbound_preserves_multikey_metadata_losslessly`, and public `/v1/messages` entry capture.
 - Legal case: missing conversion remains observable in Chat/extension and reaches Chat Process.
 - Illegal case: field is omitted or request rejected before Chat Process.
-- Observation: public inbound entry, canonical Chat/extension capture, and field accounting; evidence not currently available.
+- Observation: public `/v1/messages` inbound capture in `map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks` plus `anthropic_inbound_preserves_multikey_metadata_losslessly`.
 
 ### MAP-002
 
@@ -130,9 +130,9 @@ Approval source: user clarification at
 - State before/after: open projection with field -> open projection with that field omitted and mapped remainder available.
 - Effects: no local terminal or selection effect.
 - Owner: adjacent Outbound codec and its diagnostic side channel.
-- Approval: `approved_candidate_unbound`.
-- Evidence: user clarification cited above.
-- Governance: `v3.protocol_conversion_field_parity` declaration only; no executable gate/public observation path binds warning, scoped diagnostic persistence, provider-wire omission, first-attempt mapped-remainder continuation, and no local abort/reselection.
+- Approval: `approved_bound`.
+- Evidence: user clarification cited above, `v3/crates/routecodex-v3-runtime/src/projection_drop_log.rs`, and `v3/crates/routecodex-v3-server/tests/protocol_mapping_ontology_public.rs`.
+- Governance: bound by `v3.protocol_conversion_field_parity` (`npm run verify:v3-protocol-conversion-field-parity` and `npm --prefix v3 run test:v3-protocol-conversion-field-parity`), `target_protocol_unmapped_field_continues_first_attempt_without_reselection`, `map001_map002_outbound_unmapped_fields_omit_without_reselection_and_tolerate_small_response_quirks`, and `map001_map002_public_hard_errors_reject_malformed_cross_protocol_and_empty_attempts`.
 - Legal case: one complete unmatched optional business field is omitted while a strict provider accepts mapped remainder on first attempt.
 - Illegal case: allowlist absence causes local error, provider reselection, synthetic response, or whole-request failure.
-- Observation: public JSON/SSE entry with provider-wire predicate, warning/diagnostic capture, first-attempt assertion, and successful mapped remainder; currently missing.
+- Observation: public JSON/SSE `/v1/responses` -> `anthropic` entry test asserting `projection-drops.jsonl` diagnostic emission, provider-wire omission (`store`, `prompt_cache_key`) on both JSON and SSE, zero fallback hits (`openai_fallback == 0`), first-attempt HTTP 200 delivery, plus public negative rejection of malformed fields, cross-protocol SSE leakage, missing content block `type`, missing `stop_sequence`, and empty deliverable attempts.

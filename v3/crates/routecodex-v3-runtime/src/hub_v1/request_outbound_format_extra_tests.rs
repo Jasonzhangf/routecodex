@@ -597,9 +597,7 @@ fn openai_chat_wire_preserves_preflattened_apply_patch_function_schema() {
 }
 
 #[test]
-fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
-    // custom 工具含非 type/name/description/format 字段：拒绝（UnmappedOutboundFields），
-    // 禁止降级为 function 静默丢失（opencode-go 等上游以 unknown variant 'custom' 拒绝）。
+fn openai_chat_wire_flattens_custom_tool_and_drops_extra_unmapped_fields() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "apply"}],
@@ -611,21 +609,29 @@ fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
             "schema": {"type": "object"}
         }]
     });
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("custom tool with unmapped field must be rejected, not downgraded");
-    let message = error.to_string();
+    let (request, drops) = build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+        &payload,
+        &V3ProjectionDropContext::disabled(),
+    )
+    .expect(
+        "custom tool extra unmapped field must emit drop record and preserve mapped function tool",
+    );
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
     assert!(
-        message.contains("UnmappedOutboundFields") && message.contains("schema"),
-        "unexpected rejection: {message}"
+        request["tools"][0]["function"].get("schema").is_none(),
+        "{request}"
     );
     assert!(
-        !message.contains("function"),
-        "must not fall back to function: {message}"
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0].schema"),
+        "expected drop record for $.tools[0].schema: {drops:?}"
     );
 }
 
 #[test]
-fn openai_chat_wire_rejects_unknown_web_search_content_type() {
+fn openai_chat_wire_omits_unknown_web_search_content_type_with_drop_record() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "search"}],
@@ -636,11 +642,19 @@ fn openai_chat_wire_rejects_unknown_web_search_content_type() {
         }]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("unknown search content type must fail before provider send");
+    let (request, drops) = build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+        &payload,
+        &V3ProjectionDropContext::disabled(),
+    )
+    .expect("unknown search_content_types element must emit drop record without blocking web_search_options");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.tools[0].search_content_types"), "{error}");
+    assert_eq!(request["web_search_options"], json!({}));
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0].search_content_types"),
+        "expected drop record for $.tools[0].search_content_types: {drops:?}"
+    );
 }
 
 #[test]
@@ -994,17 +1008,24 @@ fn anthropic_wire_preserves_service_tier_request_field() {
 }
 
 #[test]
-fn anthropic_wire_rejects_chat_store_true_without_silent_semantic_loss() {
+fn anthropic_wire_omits_chat_store_true_with_drop_record() {
     let payload = json!({
         "model": "claude-test",
         "messages": [{"role": "user", "content": "hello"}],
         "store": true
     });
 
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Anthropic)
-            .expect_err("store=true has no Anthropic equivalent");
-    assert!(error.contains("$.request.store"), "{error}");
+    let (wire, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Anthropic,
+    )
+    .expect("store=true without Anthropic slot must warn/omit while preserving message payload");
+    assert!(wire.get("store").is_none(), "{wire}");
+    assert_eq!(wire["messages"][0]["content"], "hello");
+    assert!(
+        drops.iter().any(|drop| drop.json_path == "$.store"),
+        "expected drop record for $.store: {drops:?}"
+    );
 }
 
 #[test]
@@ -1353,16 +1374,24 @@ fn codex_client_metadata_does_not_reach_responses_wire() {
 }
 
 #[test]
-fn relay_responses_wire_rejects_unconsumed_previous_response_id() {
+fn relay_responses_wire_omits_unconsumed_previous_response_id_with_drop_record() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
         "previous_response_id": "unsupported_previous_response_id"
     });
-    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("Responses continuation must not cross into Relay outbound");
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.previous_response_id"), "{error}");
+    let (wire, drops) = build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+        &payload, true,
+    )
+    .expect("unconsumed previous_response_id must emit drop record and omit instead of aborting Relay outbound");
+    assert!(wire.get("previous_response_id").is_none(), "{wire}");
+    assert_eq!(wire["input"][0]["content"][0]["text"], "hello");
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.previous_response_id"),
+        "expected drop record for $.previous_response_id: {drops:?}"
+    );
 }
 
 #[test]
@@ -1699,5 +1728,384 @@ fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residu
         );
         assert_eq!(residual["extra"], json!({"keep":true}));
         assert_eq!(source, original);
+    }
+}
+
+#[test]
+fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
+    let bad_external = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [{"type": "web_search", "external_web_access": "yes"}]
+    });
+    let err = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &bad_external,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect_err("non-bool external_web_access must remain MalformedOutboundField");
+    assert!(err.contains("external_web_access"), "{err}");
+
+    let bad_content_types = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [{"type": "web_search", "search_content_types": ["text", 123]}]
+    });
+    let err = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &bad_content_types,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect_err("non-string member in search_content_types must fail MalformedOutboundField");
+    assert!(err.contains("search_content_types"), "{err}");
+
+    let bad_tool_search_exec = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search tools"}],
+        "tools": [{"type": "tool_search", "execution": 7}]
+    });
+    let err = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &bad_tool_search_exec,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect_err("non-string tool_search.execution must fail MalformedOutboundField");
+    assert!(err.contains("execution"), "{err}");
+
+    let (text_image_wire, text_image_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [{
+                    "type": "web_search",
+                    "external_web_access": true,
+                    "search_content_types": ["text", "image"]
+                }]
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("standard text+image search_content_types must project web_search_options cleanly");
+    assert!(text_image_wire.get("web_search_options").is_some());
+    assert!(
+        text_image_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0].search_content_types"),
+        "image search_content_types omission must emit scoped drop record: {text_image_drops:?}"
+    );
+
+    let (offline_search_wire, offline_search_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "web_search", "external_web_access": false, "search_context_size": "high"},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": {"type": "web_search"}
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("external_web_access=false must omit hosted web_search cleanly without blocking remaining tools");
+    assert!(
+        offline_search_wire.get("web_search_options").is_none(),
+        "external_web_access=false must not emit web_search_options (would enable live search): {offline_search_wire}"
+    );
+    assert!(
+        offline_search_wire.get("tool_choice").is_none(),
+        "hosted web_search tool_choice must be removed alongside external_web_access=false: {offline_search_wire}"
+    );
+    assert_eq!(offline_search_wire["tools"].as_array().unwrap().len(), 1);
+    assert!(
+        offline_search_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0]"),
+        "expected drop record for omitted external_web_access=false web_search: {offline_search_drops:?}"
+    );
+    assert!(
+        offline_search_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "expected drop record for removed hosted web_search tool_choice: {offline_search_drops:?}"
+    );
+
+    let (offline_with_preexisting_wire, offline_with_preexisting_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "web_search_options": {"search_context_size": "high"},
+                "tools": [{"type": "web_search", "external_web_access": false}],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("external_web_access=false must remove preexisting web_search_options and unsatisfiable required choice");
+    assert!(
+        offline_with_preexisting_wire.get("web_search_options").is_none(),
+        "preexisting web_search_options must be removed alongside external_web_access=false: {offline_with_preexisting_wire}"
+    );
+    assert!(
+        offline_with_preexisting_wire.get("tool_choice").is_none(),
+        "unsatisfiable tool_choice='required' must be removed when hosted search was the only tool: {offline_with_preexisting_wire}"
+    );
+    assert!(
+        offline_with_preexisting_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.web_search_options"),
+        "expected drop record for removed preexisting web_search_options: {offline_with_preexisting_drops:?}"
+    );
+    assert!(
+        offline_with_preexisting_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "expected drop record for removed unsatisfiable required choice: {offline_with_preexisting_drops:?}"
+    );
+
+    let (offline_with_fn_required_wire, _) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "web_search", "external_web_access": false},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("tool_choice='required' remains valid when another callable function tool survives");
+    assert_eq!(offline_with_fn_required_wire["tool_choice"], "required");
+
+    let (server_tool_search_wire, server_tool_search_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "tool_search", "execution": "server"},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": {"type": "tool_search"}
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("server-executed tool_search without Chat target must be omitted cleanly");
+    assert!(
+        server_tool_search_wire["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["function"]["name"] != "tool_search"),
+        "server-executed tool_search must not become client-callable function: {server_tool_search_wire}"
+    );
+    assert!(server_tool_search_wire.get("tool_choice").is_none());
+    assert!(
+        server_tool_search_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0]"),
+        "expected drop record for unrepresentable server tool_search: {server_tool_search_drops:?}"
+    );
+
+    let (mixed_fn_wire, mixed_fn_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "tool_search", "execution": "server"},
+                    {"type": "function", "function": {"name": "tool_search", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": {"type": "function", "function": {"name": "tool_search"}}
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("omitting hosted server tool_search must preserve colocated function named tool_search and its forced tool_choice");
+    let mixed_tools = mixed_fn_wire["tools"].as_array().unwrap();
+    assert_eq!(mixed_tools.len(), 1, "{mixed_fn_wire}");
+    assert_eq!(mixed_tools[0]["function"]["name"], "tool_search");
+    assert_eq!(
+        mixed_fn_wire["tool_choice"],
+        json!({"type": "function", "function": {"name": "tool_search"}}),
+        "ordinary function tool_choice must be preserved when hosted tool_search is omitted: {mixed_fn_wire}"
+    );
+    assert!(
+        mixed_fn_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tools[0]"),
+        "{mixed_fn_drops:?}"
+    );
+    assert!(
+        !mixed_fn_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "ordinary function tool_choice must not be dropped: {mixed_fn_drops:?}"
+    );
+
+    let (hosted_only_required_wire, hosted_only_required_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [{"type": "tool_search", "execution": "server"}],
+                "tool_choice": "required"
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("hosted-only tool_search with required tool_choice must omit orphaned choice");
+    assert!(hosted_only_required_wire.get("tools").is_none());
+    assert!(
+        hosted_only_required_wire.get("tool_choice").is_none(),
+        "orphaned required tool_choice must be omitted when no callable tools remain: {hosted_only_required_wire}"
+    );
+    assert!(
+        hosted_only_required_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "{hosted_only_required_drops:?}"
+    );
+
+    let (mixed_required_wire, mixed_required_drops) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "lookup"}],
+                "tools": [
+                    {"type": "tool_search", "execution": "server"},
+                    {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("hosted tool_search alongside callable tool must retain required tool_choice");
+    assert_eq!(mixed_required_wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(mixed_required_wire["tool_choice"], "required");
+    assert!(
+        !mixed_required_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "{mixed_required_drops:?}"
+    );
+
+    // Incapable target (`has_web_search_capability = false`) must still honor
+    // `external_web_access = false` and omit preexisting `web_search_options`
+    // and orphaned `tool_choice = "required"` while recording both drops.
+    let (incapable_offline_wire, incapable_offline_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": "answer offline"}],
+                "web_search_options": {"search_context_size": "high"},
+                "tools": [{"type": "web_search", "external_web_access": false}],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::None,
+            false,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("incapable target with external_web_access=false must omit preexisting web_search_options");
+    assert!(incapable_offline_wire.get("web_search_options").is_none());
+    assert!(incapable_offline_wire.get("tool_choice").is_none());
+    assert!(incapable_offline_wire.get("tools").is_none());
+    assert!(
+        incapable_offline_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.web_search_options"),
+        "{incapable_offline_drops:?}"
+    );
+    assert!(
+        incapable_offline_drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice"),
+        "{incapable_offline_drops:?}"
+    );
+
+    // Offline restriction must apply deterministically regardless of declaration order
+    // (before or after conflicting live declarations), record every omitted hosted
+    // declaration, and preserve the colocated callable `read_file` function.
+    let (offline_after_conflict_wire, offline_after_conflict_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "read file offline"}],
+                "tools": [
+                    {"type": "web_search", "search_context_size": "high"},
+                    {"type": "web_search_preview", "search_context_size": "low"},
+                    {"type": "web_search", "external_web_access": false},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("offline declaration after conflicting live sizes must still omit all hosted searches");
+    assert!(offline_after_conflict_wire
+        .get("web_search_options")
+        .is_none());
+    assert_eq!(offline_after_conflict_wire["tool_choice"], "required");
+    assert_eq!(
+        offline_after_conflict_wire["tools"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        offline_after_conflict_wire["tools"][0]["function"]["name"],
+        "read_file"
+    );
+    for path in ["$.tools[0]", "$.tools[1]", "$.tools[2]"] {
+        assert!(
+            offline_after_conflict_drops
+                .iter()
+                .any(|drop| drop.json_path == path),
+            "expected drop for {path}: {offline_after_conflict_drops:?}"
+        );
+    }
+
+    let (offline_first_wire, offline_first_drops) =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+            &json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "read file offline"}],
+                "tools": [
+                    {"type": "web_search", "external_web_access": false},
+                    {"type": "web_search", "search_context_size": "high"},
+                    {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+                ],
+                "tool_choice": "required"
+            }),
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+        )
+        .expect("offline declaration first must omit all later hosted declarations with drops");
+    assert!(offline_first_wire.get("web_search_options").is_none());
+    assert_eq!(offline_first_wire["tool_choice"], "required");
+    assert_eq!(offline_first_wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        offline_first_wire["tools"][0]["function"]["name"],
+        "read_file"
+    );
+    for path in ["$.tools[0]", "$.tools[1]"] {
+        assert!(
+            offline_first_drops
+                .iter()
+                .any(|drop| drop.json_path == path),
+            "expected drop for {path}: {offline_first_drops:?}"
+        );
     }
 }

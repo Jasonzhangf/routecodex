@@ -303,6 +303,13 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3ProviderMatchedPolicyRule<'a> {
+    pub policy_id: &'a str,
+    pub failure_threshold: u32,
+    pub cooldown_ms: u64,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct V3ProviderHealthState {
     last_probe_acquisition_id: u64,
@@ -339,6 +346,9 @@ struct V3ProviderAdaptiveHistory {
     /// The last failure fingerprint is diagnostic evidence only. The shared
     /// failure streak is keyed by the complete provider identity.
     failure_fingerprint: Option<V3ProviderErrorFingerprint>,
+    /// Separate consecutive failure streak per matched internal/declared policy
+    /// id so unrelated HTTP failures cannot piggyback toward a lower threshold.
+    policy_streaks: BTreeMap<String, u32>,
     success_streak: u32,
     last_success_at_ms: Option<u64>,
     score_generation: u64,
@@ -355,6 +365,7 @@ impl Default for V3ProviderAdaptiveHistory {
             score_milli: 100,
             failure_streak: 0,
             failure_fingerprint: None,
+            policy_streaks: BTreeMap::new(),
             success_streak: 0,
             last_success_at_ms: None,
             score_generation: 0,
@@ -688,6 +699,34 @@ impl V3ProviderHealthStore {
         now_ms: u64,
         policy_override: Option<V3ProviderFailurePolicy>,
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
+        self.record_provider_failure_in_session_with_matched_policy_for_interface(
+            failure_session_scope,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            reason,
+            failure_fingerprint,
+            now_ms,
+            None,
+            policy_override,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_provider_failure_in_session_with_matched_policy_for_interface(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        reason: Option<&str>,
+        failure_fingerprint: Option<V3ProviderErrorFingerprint>,
+        now_ms: u64,
+        matched_policy_id: Option<&str>,
+        policy_override: Option<V3ProviderFailurePolicy>,
+    ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
         let provider_key = provider_key_label(provider_id, interface_id, auth_alias, model_id);
         let key = provider_failure_session_key_for_interface(
             failure_session_scope,
@@ -740,16 +779,30 @@ impl V3ProviderHealthStore {
                 action.cooldown_ms = policy.cooldown_ms;
                 action.long_probe_backoff = policy.long_probe_backoff;
                 action.advisory_probe = policy.advisory_probe;
-                let projection = self
-                    .record_provider_failure_action_for_interface(
-                        provider_id,
+                let matched_rule =
+                    matched_policy_id
+                        .zip(policy_override)
+                        .map(|(policy_id, override_policy)| V3ProviderMatchedPolicyRule {
+                            policy_id,
+                            failure_threshold: override_policy.failure_threshold,
+                            cooldown_ms: override_policy.cooldown_ms,
+                        });
+                let (projection, active_policy_streak) = self
+                    .record_provider_failure_action_impl(
+                        V3ProviderKeyRef::new(provider_id, alias, model),
                         interface_id,
-                        alias,
-                        model,
                         &action,
                         now_ms,
+                        false,
+                        matched_rule,
                     )
-                    .map_err(V3ProviderHealthError::Poisoned)?;
+                    .map_err(V3ProviderHealthError::Poisoned)?
+                    .ok_or_else(|| {
+                        V3ProviderHealthError::Poisoned(
+                            "unconditional provider failure observation was not applied".into(),
+                        )
+                    })?;
+                let failure_count = active_policy_streak.unwrap_or(projection.failure_streak);
                 return Ok(V3ProviderFailureRecord {
                     scope_label,
                     provider_key,
@@ -759,7 +812,7 @@ impl V3ProviderHealthStore {
                         "healthy"
                     }
                     .into(),
-                    failure_count: projection.failure_streak,
+                    failure_count,
                     cooldown_until_ms: projection.cooldown_until_ms,
                     reason: reason.map(str::to_string),
                 });
@@ -1582,13 +1635,37 @@ impl V3ProviderHealthStore {
         action: &V3ProviderFailureAction,
         now_ms: u64,
     ) -> Result<V3ProviderKeyHealthProjection, String> {
+        self.record_provider_failure_action_with_matched_policy_for_interface(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            action,
+            now_ms,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_provider_failure_action_with_matched_policy_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        action: &V3ProviderFailureAction,
+        now_ms: u64,
+        matched_policy: Option<V3ProviderMatchedPolicyRule<'_>>,
+    ) -> Result<V3ProviderKeyHealthProjection, String> {
         self.record_provider_failure_action_impl(
             V3ProviderKeyRef::new(provider_id, auth_alias, model_id),
             interface_id,
             action,
             now_ms,
             false,
+            matched_policy,
         )?
+        .map(|(projection, _)| projection)
         .ok_or_else(|| "unconditional provider failure observation was not applied".into())
     }
 
@@ -1603,15 +1680,41 @@ impl V3ProviderHealthStore {
         action: &V3ProviderFailureAction,
         now_ms: u64,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
-        self.record_provider_failure_action_impl(
-            V3ProviderKeyRef::new(provider_id, auth_alias, model_id),
+        self.record_provider_failure_action_if_cooled_with_matched_policy_for_interface(
+            provider_id,
             interface_id,
+            auth_alias,
+            model_id,
             action,
             now_ms,
-            true,
+            None,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_provider_failure_action_if_cooled_with_matched_policy_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        action: &V3ProviderFailureAction,
+        now_ms: u64,
+        matched_policy: Option<V3ProviderMatchedPolicyRule<'_>>,
+    ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
+        Ok(self
+            .record_provider_failure_action_impl(
+                V3ProviderKeyRef::new(provider_id, auth_alias, model_id),
+                interface_id,
+                action,
+                now_ms,
+                true,
+                matched_policy,
+            )?
+            .map(|(projection, _)| projection))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn record_provider_failure_action_impl(
         &self,
         key_ref: V3ProviderKeyRef<'_>,
@@ -1619,7 +1722,8 @@ impl V3ProviderHealthStore {
         action: &V3ProviderFailureAction,
         now_ms: u64,
         only_if_cooled: bool,
-    ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
+        matched_policy: Option<V3ProviderMatchedPolicyRule<'_>>,
+    ) -> Result<Option<(V3ProviderKeyHealthProjection, Option<u32>)>, String> {
         let V3ProviderKeyRef {
             provider_id,
             auth_alias,
@@ -1640,7 +1744,7 @@ impl V3ProviderHealthStore {
         // circuit before the cooled-only check so an `if_cooled` caller cannot
         // route a health-disabled provider into the pre-cool probe path.
         if state.health_disabled.contains(provider_id) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            return Ok(Some((key_health_projection(&state, &key, now_ms), None)));
         }
         if only_if_cooled
             && !state
@@ -1659,10 +1763,10 @@ impl V3ProviderHealthStore {
             V3ProviderRecoveryKind::NotProviderHealth
                 | V3ProviderRecoveryKind::HealthNeutralTransient
         ) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            return Ok(Some((key_health_projection(&state, &key, now_ms), None)));
         }
         if state.health_disabled.contains(provider_id) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            return Ok(Some((key_health_projection(&state, &key, now_ms), None)));
         }
         let configured_max_probe_interval_ms = state
             .failure_policies
@@ -1677,11 +1781,22 @@ impl V3ProviderHealthStore {
                 .failure_policies
                 .get(provider_id)
                 .is_some_and(|policy| policy.advisory_probe);
+        let active_policy_rule = matched_policy.filter(|_| {
+            action.recovery == V3ProviderRecoveryKind::RecoverableCounted
+                && action.scope == V3ProviderHealthScope::GlobalProviderKey
+        });
         let failure_threshold = match action.recovery {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 1,
-            V3ProviderRecoveryKind::RecoverableCounted => V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
+            V3ProviderRecoveryKind::RecoverableCounted => active_policy_rule
+                .map_or(V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD, |rule| {
+                    rule.failure_threshold
+                }),
             _ => 0,
         };
+        let cooldown_duration_ms = active_policy_rule
+            .map_or(V3_PROVIDER_HEALTH_COOLDOWN_MS, |rule| {
+                rule.cooldown_ms.max(1)
+            });
         let probe_cooldown_active = state
             .provider_cooldown_probes
             .get(&key)
@@ -1699,27 +1814,47 @@ impl V3ProviderHealthStore {
             record_health_delta(history, action.score_delta_milli);
         }
         history.success_streak = 0;
-        let is_http_403 = action
-            .failure_fingerprint
-            .as_ref()
-            .is_some_and(|fingerprint| fingerprint.http_status == 403);
+        let is_http_403 = active_policy_rule.is_none()
+            && action
+                .failure_fingerprint
+                .as_ref()
+                .is_some_and(|fingerprint| fingerprint.http_status == 403);
+        let mut active_policy_streak = None;
         match action.recovery {
             V3ProviderRecoveryKind::RecoverableCounted
                 if action.scope == V3ProviderHealthScope::GlobalProviderKey =>
             {
-                // HTTP 403 must form its own uninterrupted streak. The
-                // previous outcome is persisted alongside the count.
-                let previous_was_http_403 = history
-                    .rate_limit_episode
-                    .as_ref()
-                    .is_some_and(|episode| episode.failure_streak_is_http_403);
-                if is_http_403 != previous_was_http_403 {
-                    history.failure_streak = 0;
+                if let Some(rule) = active_policy_rule {
+                    // Each matched provider error policy owns an uninterrupted consecutive
+                    // streak without clearing or relabeling generic HTTP/403 streaks.
+                    let next = history
+                        .policy_streaks
+                        .get(rule.policy_id)
+                        .copied()
+                        .unwrap_or(0)
+                        .saturating_add(1);
+                    history.policy_streaks.retain(|id, _| id == rule.policy_id);
+                    history
+                        .policy_streaks
+                        .insert(rule.policy_id.to_string(), next);
+                    active_policy_streak = Some(next);
+                } else {
+                    history.policy_streaks.clear();
+                    // HTTP 403 must form its own uninterrupted streak. The
+                    // previous outcome is persisted alongside the count.
+                    let previous_was_http_403 = history
+                        .rate_limit_episode
+                        .as_ref()
+                        .is_some_and(|episode| episode.failure_streak_is_http_403);
+                    if is_http_403 != previous_was_http_403 {
+                        history.failure_streak = 0;
+                    }
+                    history.failure_streak = history.failure_streak.saturating_add(1);
+                    history.failure_fingerprint = action.failure_fingerprint.clone();
                 }
-                history.failure_streak = history.failure_streak.saturating_add(1);
-                history.failure_fingerprint = action.failure_fingerprint.clone();
             }
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
+                history.policy_streaks.clear();
                 history.failure_streak = 1;
                 history.failure_fingerprint = action.failure_fingerprint.clone();
             }
@@ -1733,8 +1868,9 @@ impl V3ProviderHealthStore {
             history.attempts = history.attempts.saturating_add(1);
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
-            let failure_streak = history.failure_streak;
-            let is_http_429 = action.recovery == V3ProviderRecoveryKind::RecoverableCounted
+            let failure_streak = active_policy_streak.unwrap_or(history.failure_streak);
+            let is_http_429 = active_policy_rule.is_none()
+                && action.recovery == V3ProviderRecoveryKind::RecoverableCounted
                 && action
                     .failure_fingerprint
                     .as_ref()
@@ -1742,12 +1878,15 @@ impl V3ProviderHealthStore {
             let episode = history
                 .rate_limit_episode
                 .get_or_insert_with(Default::default);
-            episode.failure_count = failure_streak;
-            episode.failure_streak_is_http_403 = is_http_403;
+            if active_policy_rule.is_none() {
+                episode.failure_count = failure_streak;
+                episode.failure_streak_is_http_403 = is_http_403;
+            }
             episode.last_failure_at_ms = Some(now_ms);
             let interval = configured_max_probe_interval_ms
                 .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
-                .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
+                .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS)
+                .min(cooldown_duration_ms);
             let start_probe_cooldown = action.scope == V3ProviderHealthScope::GlobalProviderKey
                 && if is_http_429 {
                     history
@@ -1761,7 +1900,7 @@ impl V3ProviderHealthStore {
                 let blocked_until_ms = episode
                     .not_before_ms
                     .unwrap_or(0)
-                    .max(now_ms.saturating_add(V3_PROVIDER_HEALTH_COOLDOWN_MS));
+                    .max(now_ms.saturating_add(cooldown_duration_ms));
                 episode.not_before_ms = Some(blocked_until_ms);
                 episode.probe_required = true;
                 episode.short_cooldown_until_ms = None;
@@ -1782,7 +1921,7 @@ impl V3ProviderHealthStore {
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
         self.publish_availability_change();
-        Ok(Some(projection))
+        Ok(Some((projection, active_policy_streak)))
     }
 
     pub fn record_provider_key_success(
@@ -1847,6 +1986,7 @@ impl V3ProviderHealthStore {
         record_health_delta(history, 1);
         history.failure_streak = 0;
         history.failure_fingerprint = None;
+        history.policy_streaks.clear();
         history.success_streak = history.success_streak.saturating_add(1);
         history.last_success_at_ms = Some(now_ms);
         history.score_generation = history.score_generation.saturating_add(1);

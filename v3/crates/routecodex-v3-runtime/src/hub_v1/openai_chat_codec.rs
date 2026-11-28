@@ -258,6 +258,11 @@ pub(crate) fn project_v3_openai_chat_client_response_with_source_terminal(
                     );
                 }
             }
+            Some("refusal") => {
+                if let Some(text) = item.get("refusal").and_then(Value::as_str) {
+                    refusal.get_or_insert_with(String::new).push_str(text);
+                }
+            }
             _ => {}
         }
     }
@@ -386,6 +391,8 @@ impl V3OpenAiChatAnthropicSseTransducer {
         let event_type = object
             .get("type")
             .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
             .ok_or_else(|| "Anthropic SSE event is missing type".to_string())?;
         if self.message_stopped && event_type != "ping" {
             return Err("Anthropic SSE emitted data after message_stop".to_string());
@@ -405,7 +412,15 @@ impl V3OpenAiChatAnthropicSseTransducer {
                 .and_then(Value::as_str)
                 .unwrap_or("Anthropic SSE provider error")
                 .to_string()),
-            other => Err(format!("Anthropic SSE event type {other} is unsupported")),
+            other if other.starts_with("response.") => Err(format!(
+                "Anthropic SSE stream received cross-protocol event {other:?}"
+            )),
+            other => {
+                eprintln!(
+                    "[v3-sse-warning] protocol=anthropic stage=openai_chat_anthropic_sse_transducer event_type={other:?} reason=unregistered_event_ignored"
+                );
+                Ok(Vec::new())
+            }
         }
     }
 
@@ -1068,6 +1083,9 @@ impl V3OpenAiChatResponsesSseTransducer {
                 self.record_delta(object, "reasoning_content", &delta);
                 Ok(vec![self.chunk(json!({"reasoning_content": delta}), None)])
             }
+            other if super::is_v3_cross_protocol_anthropic_sse_event_type(other) => Err(format!(
+                "Responses SSE stream received cross-protocol Anthropic event {other:?}"
+            )),
             other => {
                 let Some(extension) = table_map_value(
                     V3TableKind::ProviderResponseEvent,
@@ -1076,7 +1094,10 @@ impl V3OpenAiChatResponsesSseTransducer {
                     V3TableDirection::Inbound,
                 )?
                 else {
-                    return Err(format!("Responses SSE event type {other} is unsupported"));
+                    eprintln!(
+                        "[v3-sse-warning] protocol=responses stage=openai_chat_responses_sse_transducer event_type={other:?} reason=unregistered_event_ignored"
+                    );
+                    return Ok(Vec::new());
                 };
                 let mut chunk = self.chunk(json!({}), None);
                 chunk[extension] = event;
