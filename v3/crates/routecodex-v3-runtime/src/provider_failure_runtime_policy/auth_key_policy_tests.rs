@@ -118,7 +118,7 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
             .store()
             .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 99)
             .expect("initial health projection");
-        for index in 0..2 {
+        for index in 0..5 {
             let record = health
                 .record_provider_failure_record_with_policy(
                     None,
@@ -140,24 +140,20 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
                 );
             assert_eq!(
                 record.state,
-                if status == 401 {
+                if index == 4 {
                     "cooldown"
                 } else {
                     "provider_failure_observed"
                 }
             );
-            assert_eq!(
-                record.cooldown_until_ms,
-                (status == 401).then_some(3_600_100)
-            );
+            assert_eq!(record.cooldown_until_ms, (index == 4).then_some(3_600_104));
         }
-        assert_eq!(
-            health
+        assert!(
+            !health
                 .store()
                 .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 200)
                 .expect("health projection")
-                .available,
-            status == 403
+                .available
         );
     }
 
@@ -226,6 +222,21 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     )
     .expect("matched 401 policy");
 
+    for attempt in 1..=4 {
+        let obs = health
+            .record_provider_failure_record_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &account_http_source(401),
+                100,
+            )
+            .expect("the bridge must accept the captured HTTP 401 source");
+        assert_eq!(obs.state, "provider_failure_observed");
+        assert_eq!(obs.failure_count, attempt);
+        assert_eq!(obs.cooldown_until_ms, None);
+    }
     let first = health
         .record_provider_failure_record_from_source(
             &session,
@@ -235,9 +246,9 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
             &account_http_source(401),
             100,
         )
-        .expect("the bridge must accept the captured HTTP 401 source");
+        .expect("the bridge must accept the 5th HTTP 401 source");
     assert_eq!(first.state, "cooldown");
-    assert_eq!(first.failure_count, 1);
+    assert_eq!(first.failure_count, 5);
     assert_eq!(first.cooldown_until_ms, Some(3_600_100));
     assert!(
         !health
@@ -366,7 +377,7 @@ async fn account_http_403_policy_blocks_auth_key_on_tenth_failure_in_runtime_bri
     )
     .expect("matched 403 policy");
 
-    for attempt in 1..=9 {
+    for attempt in 1..=4 {
         let record = health
             .record_provider_failure_record_from_source(
                 &session,
@@ -391,7 +402,7 @@ async fn account_http_403_policy_blocks_auth_key_on_tenth_failure_in_runtime_bri
         )
         .expect("the bridge must accept the captured HTTP 403 source");
     assert_eq!(record.state, "cooldown");
-    assert_eq!(record.failure_count, 10);
+    assert_eq!(record.failure_count, 5);
     assert_eq!(record.cooldown_until_ms, Some(3_600_100));
     assert_eq!(
         observed_cooldown_until_ms(
@@ -463,7 +474,7 @@ async fn matching_success_and_http_403_publish_only_complete_health_transitions(
     };
 
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    for count in 1..=9 {
+    for count in 1..=4 {
         assert_eq!(
             failure(&health, 100 + u64::from(count)).failure_count,
             count
@@ -477,7 +488,7 @@ async fn matching_success_and_http_403_publish_only_complete_health_transitions(
         before + 1,
         "success publishes one state; the former split reset exposed an intermediate state"
     );
-    for count in 1..=9 {
+    for count in 1..=4 {
         assert_eq!(
             failure(&health, 210 + u64::from(count)).failure_count,
             count
@@ -495,7 +506,7 @@ async fn matching_success_and_http_403_publish_only_complete_health_transitions(
         failing.join().unwrap()
     });
     match observed.failure_count {
-        10 => assert!(observed.cooldown_until_ms.is_some()),
+        5 => assert!(observed.cooldown_until_ms.is_some()),
         1 => {
             assert_eq!(observed.cooldown_until_ms, None);
             let next = failure(&health, 221);

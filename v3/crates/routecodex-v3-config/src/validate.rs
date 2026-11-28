@@ -30,6 +30,7 @@ pub(crate) fn validate_schema(
 pub(crate) fn build_resource_registry(
     validated: V3Config03SchemaValidated,
 ) -> Result<V3Config04ResourceRegistryBuilt, V3ConfigError> {
+    crate::operation_runner_manifest::validate_and_compile_embedded_operation_runner_manifest()?;
     let authoring = validated.authoring;
     let hub_v1 = compile_hub_v1(authoring.pipelines.hub_v1)?;
     let providers_using_default_model =
@@ -78,6 +79,7 @@ pub(crate) fn build_resource_registry(
 pub(crate) fn publish_manifest(
     registry: V3Config04ResourceRegistryBuilt,
 ) -> Result<V3Config05ManifestPublished, V3ConfigError> {
+    crate::operation_runner_manifest::validate_and_compile_embedded_operation_runner_manifest()?;
     Ok(V3Config05ManifestPublished {
         version: registry.version,
         hub_v1: registry.hub_v1,

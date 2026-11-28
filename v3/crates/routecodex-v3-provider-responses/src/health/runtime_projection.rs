@@ -105,7 +105,7 @@ fn key_health_projection(
 }
 
 fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
-    history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
+    history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(10, 150) as u32;
 }
 
 /// A cooled identity can be selected for a business recovery trial after the

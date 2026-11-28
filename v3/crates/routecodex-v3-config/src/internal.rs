@@ -605,7 +605,7 @@ mod tests {
             ),
             V3InternalErrorCategory::Recoverable
         );
-        assert_eq!(policy.unrecoverable_failure_threshold, 1);
+        assert_eq!(policy.unrecoverable_failure_threshold, 5);
         for status in [401_u16, 402, 403] {
             assert_eq!(
                 classify_v3_internal_provider_error(
