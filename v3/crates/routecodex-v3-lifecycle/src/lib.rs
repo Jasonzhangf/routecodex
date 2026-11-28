@@ -645,6 +645,11 @@ impl V3ManagedLifecycle {
             recover_exited_front_control_handoff(&instance_dir, &declaration).await?;
             reap_inactive_runtime_files(&instance_dir, &declaration)?;
             Self::prepare_fresh_launch(&instance_dir, &declaration)?;
+            prune_stale_stopped_instance_dirs(
+                &self.state_root,
+                &declaration.instance_id,
+                &declaration.config_path,
+            );
         }
         exec_foreground_start(executable_path.as_ref(), &declaration, self)
     }
@@ -1030,6 +1035,11 @@ impl V3ManagedLifecycle {
                         ));
                     }
                     reap_inactive_runtime_files(&instance_dir, &declaration)?;
+                    prune_stale_stopped_instance_dirs(
+                        &self.state_root,
+                        &declaration.instance_id,
+                        &declaration.config_path,
+                    );
                     return tokio::time::timeout_at(
                         deadline,
                         self.launch_managed_child(
@@ -1149,6 +1159,11 @@ impl V3ManagedLifecycle {
                 validate_auth_handles(&manifest)?;
                 recover_exited_front_control_handoff(&instance_dir, &declaration).await?;
                 reap_inactive_runtime_files(&instance_dir, &declaration)?;
+                prune_stale_stopped_instance_dirs(
+                    &self.state_root,
+                    &declaration.instance_id,
+                    &declaration.config_path,
+                );
                 trace(&mut observe, "launching recovered owner");
                 return tokio::time::timeout_at(
                     deadline,
@@ -1222,6 +1237,11 @@ impl V3ManagedLifecycle {
                         previous_start_nonce.as_deref(),
                     )?;
                     if restart_transition_observed || nonce_changed {
+                        prune_stale_stopped_instance_dirs(
+                            &self.state_root,
+                            &declaration.instance_id,
+                            &declaration.config_path,
+                        );
                         observe_status_if_changed(&mut observe, &mut last_observed_status, &status);
                         return Ok(status);
                     }
