@@ -343,6 +343,7 @@ pub enum V3ResponsesSseOutputItemKind {
     /// Explicit compatibility node for legacy provider projections that
     /// expose output text as an output item instead of message content.
     OutputText,
+    Refusal,
     Message,
     Reasoning,
     FunctionCall,
@@ -461,6 +462,7 @@ impl V3ResponsesSseResponseContainer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ResponsesSseTypedOutputItem {
     OutputText(V3ResponsesSseOutputItem),
+    Refusal(V3ResponsesSseOutputItem),
     Message(V3ResponsesSseOutputItem),
     Reasoning(V3ResponsesSseOutputItem),
     FunctionCall(V3ResponsesSseOutputItem),
@@ -481,6 +483,7 @@ impl V3ResponsesSseTypedOutputItem {
     pub fn from_item(item: V3ResponsesSseOutputItem) -> Self {
         match item.kind() {
             V3ResponsesSseOutputItemKind::OutputText => Self::OutputText(item),
+            V3ResponsesSseOutputItemKind::Refusal => Self::Refusal(item),
             V3ResponsesSseOutputItemKind::Message => Self::Message(item),
             V3ResponsesSseOutputItemKind::Reasoning => Self::Reasoning(item),
             V3ResponsesSseOutputItemKind::FunctionCall => Self::FunctionCall(item),
@@ -501,6 +504,7 @@ impl V3ResponsesSseTypedOutputItem {
     pub fn item(&self) -> &V3ResponsesSseOutputItem {
         match self {
             Self::OutputText(item)
+            | Self::Refusal(item)
             | Self::Message(item)
             | Self::Reasoning(item)
             | Self::FunctionCall(item)
@@ -521,6 +525,7 @@ impl V3ResponsesSseTypedOutputItem {
     fn item_mut(&mut self) -> &mut V3ResponsesSseOutputItem {
         match self {
             Self::OutputText(item)
+            | Self::Refusal(item)
             | Self::Message(item)
             | Self::Reasoning(item)
             | Self::FunctionCall(item)
@@ -547,10 +552,10 @@ pub enum V3ResponsesSseTerminalState {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct V3ResponsesSseReducerState {
     pub response: Option<V3ResponsesSseResponseContainer>,
+    pub response_output_slots: Vec<usize>,
     pub items: Vec<V3ResponsesSseTypedOutputItem>,
     pub output_text: String,
     pub terminal: Option<V3ResponsesSseTerminalState>,
@@ -645,7 +650,6 @@ impl V3ResponsesJsonDocument {
     }
 }
 
-
 impl V3ResponsesSseReducerState {
     pub fn apply_event(&mut self, event: &Value) -> Result<(), V3ResponsesSseTreeError> {
         let metadata = V3ResponsesSseProtocolMetadata::from_event(event)?;
@@ -654,6 +658,7 @@ impl V3ResponsesSseReducerState {
             "response.created" | "response.in_progress" => {
                 if let Some(response) = event.get("response") {
                     self.response = Some(parse_response_container(response)?);
+                    self.response_output_slots.clear();
                 }
             }
             "response.output_item.added" | "response.output_item.done" => {
@@ -798,6 +803,7 @@ impl V3ResponsesSseOutputItemKind {
     fn parse(value: &str) -> Result<Self, V3ResponsesSseTreeError> {
         match value {
             "output_text" => Ok(Self::OutputText),
+            "refusal" => Ok(Self::Refusal),
             "message" => Ok(Self::Message),
             "reasoning" => Ok(Self::Reasoning),
             "function_call" => Ok(Self::FunctionCall),
@@ -845,6 +851,9 @@ pub struct V3ResponsesSseReasoningSummary {
 pub enum V3ResponsesSseItemPayload {
     OutputText {
         text: Option<String>,
+    },
+    Refusal {
+        refusal: Option<String>,
     },
     Message {
         content: Vec<V3ResponsesSseMessageContentPart>,
@@ -1003,6 +1012,11 @@ impl V3ResponsesSseOutputItem {
             V3ResponsesSseItemPayload::OutputText { text } => {
                 if let Some(text) = text {
                     value.insert("text".to_owned(), Value::String(text.clone()));
+                }
+            }
+            V3ResponsesSseItemPayload::Refusal { refusal } => {
+                if let Some(refusal) = refusal {
+                    value.insert("refusal".to_owned(), Value::String(refusal.clone()));
                 }
             }
             V3ResponsesSseItemPayload::Message {
@@ -1212,6 +1226,7 @@ impl fmt::Display for V3ResponsesSseOutputItemKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::OutputText => "output_text",
+            Self::Refusal => "refusal",
             Self::Message => "message",
             Self::Reasoning => "reasoning",
             Self::FunctionCall => "function_call",
@@ -1246,6 +1261,9 @@ pub fn classify_v3_responses_sse_output_item(
         V3ResponsesSseOutputItemKind::OutputText => V3ResponsesSseItemPayload::OutputText {
             text: string_field(object, "text"),
         },
+        V3ResponsesSseOutputItemKind::Refusal => V3ResponsesSseItemPayload::Refusal {
+            refusal: string_field(object, "refusal"),
+        },
         V3ResponsesSseOutputItemKind::Message => V3ResponsesSseItemPayload::Message {
             content: parse_message_content(object.get("content"))?,
             content_present: object.contains_key("content"),
@@ -1275,6 +1293,7 @@ pub fn classify_v3_responses_sse_output_item(
     // rather than the OutputText variant's typed text field.
     let payload_fields: &[&str] = match kind {
         V3ResponsesSseOutputItemKind::OutputText => &["text"],
+        V3ResponsesSseOutputItemKind::Refusal => &["refusal"],
         V3ResponsesSseOutputItemKind::Message => &["content"],
         V3ResponsesSseOutputItemKind::Reasoning => &["summary", "content"],
         V3ResponsesSseOutputItemKind::FunctionCall => &["call_id", "name", "arguments"],

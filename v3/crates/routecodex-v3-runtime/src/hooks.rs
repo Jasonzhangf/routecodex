@@ -3,7 +3,8 @@ use crate::direct_response_hooks::{
     V3DirectResponseCompatContext, V3DirectResponseHookFailure,
 };
 use crate::kernel::direct_request_key_hooks::{
-    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog, V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
+    V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
@@ -19,9 +20,9 @@ use crate::shared::{
     V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3InternalErrorCode,
+    V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -633,8 +634,8 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             )
             .map(|(_, source)| source)
         })?;
-    let (compat_body, custom_tool_function_binding) =
-        crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
+    let (compat_body, custom_tool_function_binding, mut compat_drops) =
+        crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload_with_drops(
             request_body,
             candidate,
             provider_protocol,
@@ -650,6 +651,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             )
             .map(|(_, source)| source)
         })?;
+    drop_context.restamp_and_emit(&mut compat_drops);
     request_body = compat_body;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
         candidate.oauth_declaration.as_ref(),
@@ -929,22 +931,24 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
     );
-    let (compat_body, _) = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
-        wire_body,
-        candidate,
-        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
-        &profile,
-    )
-    .map_err(|error| {
-        raise_v3_source_via_err01(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ChatDirect11Policy",
-            "chat_direct_provider_compat_failed",
-            error.to_string(),
-            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+    let (compat_body, _, mut compat_drops) =
+        crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload_with_drops(
+            wire_body,
+            candidate,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            &profile,
         )
-        .map(|(_, source)| source)
-    })?;
+        .map_err(|error| {
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ChatDirect11Policy",
+                "chat_direct_provider_compat_failed",
+                error.to_string(),
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+            )
+            .map(|(_, source)| source)
+        })?;
+    drop_context.restamp_and_emit(&mut compat_drops);
     wire_body = compat_body;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
         candidate.oauth_declaration.as_ref(),
@@ -1168,9 +1172,17 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             provider_id,
             reason,
             ..
-        }
-        | V3ProviderError::ResponseBodyUnreadable {
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Transport,
+            status: None,
+            code: Some("TRANSPORT_ERROR".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.clone()),
+        },
+        V3ProviderError::ResponseBodyUnreadable {
             provider_id,
+            headers,
             reason,
             ..
         } => V3ExternalErrorLink {
@@ -1178,7 +1190,7 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             status: None,
             code: Some("TRANSPORT_ERROR".to_string()),
             provider_id: Some(provider_id.clone()),
-            upstream_request_id: None,
+            upstream_request_id: upstream_request_id_from_headers(headers),
             message: Some(reason.clone()),
         },
         V3ProviderError::WebSocketProtocol {

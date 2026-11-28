@@ -4,7 +4,9 @@ use serde_json::Value;
 use super::{V3HubProviderWireProtocol, V3RuntimeStreamObservation};
 #[path = "provider_responses_event_classification.rs"]
 mod provider_responses_event_classification;
-pub(crate) use provider_responses_event_classification::classify_v3_provider_responses_json_event;
+pub(crate) use provider_responses_event_classification::{
+    classify_v3_provider_responses_json_event, is_v3_cross_protocol_anthropic_sse_event_type,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3ProviderResponsesJsonFrameOutcome {
@@ -386,7 +388,12 @@ pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<boo
     let item = item
         .as_object()
         .ok_or_else(|| "provider Responses output item must be an object".to_string())?;
-    match item.get("type").and_then(Value::as_str) {
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match item_type {
         Some("message") => {
             if item.get("content").is_none()
                 && ["text", "reasoning", "reasoning_content", "reasoning_text"]
@@ -460,9 +467,12 @@ pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<boo
                 .iter()
                 .any(|field| has_non_empty_string(item.get(*field))))
         }
-        Some(output_type) => Err(format!(
-            "provider Responses output item type {output_type:?} is not registered"
-        )),
+        Some(output_type) => {
+            eprintln!(
+                "[v3-sse-warning] protocol=responses stage=response_output_item output_type={output_type:?} reason=unregistered_item_ignored"
+            );
+            Ok(false)
+        }
         None => Err("provider Responses output item requires a non-empty type".to_string()),
     }
 }
@@ -511,9 +521,10 @@ pub(super) fn response_message_part_has_client_output(part: &Value) -> Result<bo
         "output_audio" => "transcript",
         "encrypted_content" => return Ok(false),
         other => {
-            return Err(format!(
-                "provider Responses message content part type {other:?} is not registered"
-            ));
+            eprintln!(
+                "[v3-sse-warning] protocol=responses stage=response_message_part part_type={other:?} reason=unregistered_part_ignored"
+            );
+            return Ok(false);
         }
     };
     let text = part.get(field).and_then(Value::as_str).ok_or_else(|| {
@@ -531,9 +542,10 @@ pub(super) fn response_reasoning_part_has_client_output(part: &Value) -> Result<
         .and_then(Value::as_str)
         .ok_or_else(|| "provider Responses reasoning content part requires type".to_string())?;
     if !matches!(part_type, "reasoning_text" | "summary_text") {
-        return Err(format!(
-            "provider Responses reasoning content part type {part_type:?} is not registered"
-        ));
+        eprintln!(
+            "[v3-sse-warning] protocol=responses stage=response_reasoning_part part_type={part_type:?} reason=unregistered_part_ignored"
+        );
+        return Ok(false);
     }
     let text = part.get("text").and_then(Value::as_str).ok_or_else(|| {
         format!("provider Responses {part_type} content part requires string field text")
@@ -622,9 +634,10 @@ fn classify_v3_provider_anthropic_json_event(
                 "signature_delta" => has_string(delta.get("signature"))?,
                 "citations_delta" => delta.get("citation").is_some(),
                 other => {
-                    return Err(format!(
-                        "provider Anthropic content_block_delta type {other:?} is not registered"
-                    ));
+                    eprintln!(
+                        "[v3-sse-warning] protocol=anthropic stage=content_block_delta delta_type={other:?} reason=unregistered_delta_ignored"
+                    );
+                    false
                 }
             };
             Ok(if has_output {
@@ -638,9 +651,17 @@ fn classify_v3_provider_anthropic_json_event(
         }
         "message_stop" => Ok(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput),
         "ping" => Err("provider Anthropic ping must be classified as keepalive".to_string()),
-        other => Err(format!(
-            "provider Anthropic SSE event type {other:?} is not registered"
-        )),
+        other => {
+            if other.starts_with("response.") {
+                return Err(format!(
+                    "provider Anthropic SSE event type {other:?} belongs to Responses protocol"
+                ));
+            }
+            eprintln!(
+                "[v3-sse-warning] protocol=anthropic stage=provider_sse_json_codec event_type={other:?} reason=unregistered_event_ignored"
+            );
+            Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        }
     }
 }
 
@@ -671,9 +692,12 @@ fn anthropic_content_block_has_client_output(block: &Value) -> Result<bool, Stri
             }
             Ok(true)
         }
-        other => Err(format!(
-            "provider Anthropic content block type {other:?} is not registered"
-        )),
+        other => {
+            eprintln!(
+                "[v3-sse-warning] protocol=anthropic stage=content_block block_type={other:?} reason=unregistered_block_ignored"
+            );
+            Ok(false)
+        }
     }
 }
 
@@ -1016,7 +1040,12 @@ fn direct_responses_item_has_visible_text(item: &Value) -> bool {
     if !direct_responses_item_is_complete(item) {
         return false;
     }
-    match item.get("type").and_then(Value::as_str) {
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match item_type {
         Some("text" | "output_text") => item
             .get("text")
             .and_then(Value::as_str)
@@ -1143,11 +1172,14 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn unknown_responses_extension_namespace_still_fails_closed() {
+    fn unknown_responses_extension_namespace_continues_buffering_without_commit() {
         let data = serde_json::json!({"type":"provider_private.websocket_timing"});
-        let error = classify_v3_provider_responses_json_event(&data)
-            .expect_err("unregistered provider namespace must remain explicit");
-        assert!(error.contains("not registered"));
+        let outcome = classify_v3_provider_responses_json_event(&data)
+            .expect("unknown non-error provider namespace must not abort stream");
+        assert_eq!(
+            outcome,
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+        );
     }
 
     #[test]
@@ -1196,34 +1228,30 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn responses_unknown_response_metadata_sibling_still_fails_closed() {
-        // Registering `response.metadata` must not open the `response.*`
-        // namespace: a near-miss sibling and an unregistered `responsesapi.*`
-        // style namespace both stay fail-closed.
+    fn responses_unknown_response_metadata_sibling_continues_buffering_without_commit() {
         for data in [
             r#"{"type":"response.metadat","sequence_number":6}"#,
             r#"{"type":"provider_private.websocket_timing"}"#,
         ] {
-            let error =
+            let outcome =
                 classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap())
-                    .expect_err("unregistered provider event must remain explicit");
-            assert!(
-                error.contains("is not registered"),
-                "unexpected error for {data}: {error}"
+                    .expect("unknown non-error provider event must not abort stream");
+            assert_eq!(
+                outcome,
+                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering,
+                "unknown non-error event must neither start client stream nor terminate {data}"
             );
         }
     }
 
     #[test]
-    fn responses_unknown_codex_extension_namespace_still_fails_closed() {
-        // Only explicitly declared provider extensions are accepted; unknown
-        // namespaces remain fail-closed.
+    fn responses_unknown_codex_extension_namespace_continues_buffering_without_commit() {
         let data = serde_json::json!({"type":"codex.response.metadat"});
-        let error = classify_v3_provider_responses_json_event(&data)
-            .expect_err("unregistered codex namespace must remain explicit");
-        assert!(
-            error.contains("is not registered"),
-            "unexpected error: {error}"
+        let outcome = classify_v3_provider_responses_json_event(&data)
+            .expect("unknown non-error codex extension must not abort stream");
+        assert_eq!(
+            outcome,
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
         );
     }
 

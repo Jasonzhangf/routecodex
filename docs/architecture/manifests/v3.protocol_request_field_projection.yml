@@ -20,7 +20,7 @@ nodes:
     owner: adjacent_outbound_codec
   - id: ProtocolField05TargetWire
     owner: V3ProviderReqOutbound08WirePayload
-  - id: ProtocolFieldErr01Unmapped
+  - id: ProtocolFieldDiag01UnmappedOmitted
     owner: adjacent_outbound_codec
 edges:
   - from: ProtocolField01SourceWire
@@ -36,8 +36,8 @@ edges:
     to: ProtocolField05TargetWire
     transform: exact_conditional_or_field_specific_compatible
   - from: ProtocolField04TargetProjection
-    to: ProtocolFieldErr01Unmapped
-    transform: explicit_unmapped_outbound_fields
+    to: ProtocolFieldDiag01UnmappedOmitted
+    transform: nonblocking_omission_with_diagnostic
 payload_semantics:
   - request.metadata
   - request.client_metadata
@@ -89,7 +89,7 @@ semantic_registry:
     projections:
       responses: store
       openai_chat: store
-      anthropic: false_consumed_true_unsupported
+      anthropic: false_consumed_true_omitted_with_diagnostic
       gemini: unmapped
   - semantic_id: request.text.output_config
     chat_storage: routecodex_chat_extension.responses_request.text

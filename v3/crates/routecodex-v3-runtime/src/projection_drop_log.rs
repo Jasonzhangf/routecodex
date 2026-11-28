@@ -18,6 +18,8 @@ use std::sync::Arc;
 
 /// stage-3 target output-protocol whitelist projection 的 stage 标签。
 pub const V3_PROJECTION_DROP_STAGE3: &str = "outbound_target_protocol_projection";
+/// 响应侧目标协议投影省略诊断的 stage 标签。
+pub const V3_PROJECTION_DROP_STAGE_RESPONSE: &str = "response_target_protocol_projection";
 
 /// 一条 stage-3 出站投影丢弃记录。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,6 +31,12 @@ pub struct V3ProjectionDropRecord {
     pub request_id: String,
     /// 入口监听端口（入口身份；不可得时为空串）。
     pub entry_port: String,
+    /// 本次尝试所属路由名（例如 `"default"` / `"search"`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_name: Option<String>,
+    /// 本次尝试选中的 Provider 标识。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     pub target_protocol: String,
     pub stage: String,
     pub json_path: String,
@@ -58,11 +66,38 @@ impl V3ProjectionDropRecord {
             ts: 0,
             request_id: String::new(),
             entry_port: String::new(),
+            route_name: None,
+            provider_id: None,
             target_protocol: target_protocol.into(),
             stage: V3_PROJECTION_DROP_STAGE3.to_string(),
             json_path: json_path.into(),
             reason: reason.into(),
             source_value: Value::Null,
+            canonical_value,
+            drop_site: drop_site.into(),
+        }
+    }
+
+    /// 响应侧不可表示字段省略记录：保留 Provider 原样 `source_value`（而非请求原值）。
+    pub fn new_response_drop(
+        target_protocol: impl Into<String>,
+        json_path: impl Into<String>,
+        reason: impl Into<String>,
+        source_value: Value,
+        canonical_value: Value,
+        drop_site: impl Into<String>,
+    ) -> Self {
+        Self {
+            ts: 0,
+            request_id: String::new(),
+            entry_port: String::new(),
+            route_name: None,
+            provider_id: None,
+            target_protocol: target_protocol.into(),
+            stage: V3_PROJECTION_DROP_STAGE_RESPONSE.to_string(),
+            json_path: json_path.into(),
+            reason: reason.into(),
+            source_value,
             canonical_value,
             drop_site: drop_site.into(),
         }
@@ -79,12 +114,20 @@ impl V3ProjectionDropRecord {
 ///
 /// `client_original` 是 ReqInbound01 的客户端原始 payload 句柄（Arc），因此
 /// stage 3 只看到 canonical payload 时仍能取到 `source_value`。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct V3ProjectionDropContext {
     pub request_id: String,
     pub entry_port: String,
+    pub route_name: Option<String>,
+    pub provider_id: Option<String>,
     pub log_file: Option<String>,
     client_original: Arc<Value>,
+}
+
+impl Default for V3ProjectionDropContext {
+    fn default() -> Self {
+        Self::disabled()
+    }
 }
 
 impl V3ProjectionDropContext {
@@ -97,9 +140,23 @@ impl V3ProjectionDropContext {
         Self {
             request_id: request_id.into(),
             entry_port: entry_port.into(),
+            route_name: None,
+            provider_id: None,
             log_file,
             client_original,
         }
+    }
+
+    pub fn with_attempt_target(
+        mut self,
+        route_name: impl Into<String>,
+        provider_id: impl Into<String>,
+    ) -> Self {
+        let route_name = route_name.into();
+        let provider_id = provider_id.into();
+        self.route_name = (!route_name.trim().is_empty()).then_some(route_name);
+        self.provider_id = (!provider_id.trim().is_empty()).then_some(provider_id);
+        self
     }
 
     /// 从已编译 manifest 构建：请求身份 + 入口端口 + 独立丢弃日志路径 +
@@ -127,6 +184,8 @@ impl V3ProjectionDropContext {
         Self {
             request_id: String::new(),
             entry_port: String::new(),
+            route_name: None,
+            provider_id: None,
             log_file: None,
             client_original: Arc::new(Value::Null),
         }
@@ -154,7 +213,31 @@ impl V3ProjectionDropContext {
         for record in records.iter_mut() {
             record.request_id = self.request_id.clone();
             record.entry_port = self.entry_port.clone();
+            if record.route_name.is_none() {
+                record.route_name = self.route_name.clone();
+            }
+            if record.provider_id.is_none() {
+                record.provider_id = self.provider_id.clone();
+            }
             record.source_value = self.source_value_at(&record.json_path);
+        }
+        self.emit(records);
+    }
+
+    /// 用请求身份补齐响应侧省略记录并落盘（保留响应原样 `source_value`）。
+    pub fn restamp_response_and_emit(&self, records: &mut [V3ProjectionDropRecord]) {
+        if records.is_empty() {
+            return;
+        }
+        for record in records.iter_mut() {
+            record.request_id = self.request_id.clone();
+            record.entry_port = self.entry_port.clone();
+            if record.route_name.is_none() {
+                record.route_name = self.route_name.clone();
+            }
+            if record.provider_id.is_none() {
+                record.provider_id = self.provider_id.clone();
+            }
         }
         self.emit(records);
     }
@@ -254,9 +337,7 @@ pub fn split_v3_json_path(json_path: &str) -> Option<Vec<V3JsonPathSegment>> {
             return Some(segments);
         }
         if let Some(stripped) = rest.strip_prefix('.') {
-            let end = stripped
-                .find(['.', '['])
-                .unwrap_or(stripped.len());
+            let end = stripped.find(['.', '[']).unwrap_or(stripped.len());
             let key = &stripped[..end];
             if key.is_empty() {
                 return None;

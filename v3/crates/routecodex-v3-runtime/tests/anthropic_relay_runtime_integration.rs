@@ -218,19 +218,39 @@ data: {"type":"message_stop"}
 }
 
 #[tokio::test]
-async fn anthropic_json_and_sse_reject_unknown_terminal_without_success_projection() {
-    let json_error = project_v3_anthropic_message_as_responses_response(&json!({
+async fn anthropic_json_and_sse_reject_unknown_terminal_and_tolerate_contradictory_stop_sequence() {
+    let json_err = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_unknown_terminal",
         "type":"message",
         "role":"assistant",
         "model":"MiniMax-M3",
-        "content":[{"type":"text","text":"must fail"}],
+        "content":[{"type":"text","text":"preserved text"}],
         "stop_reason":"future_terminal"
     }))
-    .expect_err("unknown Anthropic JSON stop_reason must fail at the terminal owner");
-    assert!(json_error.to_string().contains("future_terminal"));
+    .expect_err("unknown Anthropic JSON stop_reason must fail explicitly instead of falling back to EndTurn");
+    assert!(
+        json_err.to_string().contains("stop_reason")
+            && json_err.to_string().contains("future_terminal"),
+        "expected InvalidTerminalField stop_reason error, got: {json_err}"
+    );
 
-    let stream = futures_util::stream::iter([
+    let json_response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_extra_stop_seq",
+        "type":"message",
+        "role":"assistant",
+        "model":"MiniMax-M3",
+        "content":[{"type":"text","text":"preserved text"}],
+        "stop_reason":"end_turn",
+        "stop_sequence":"extra_omitted"
+    }))
+    .expect("contradictory optional stop_sequence with end_turn must warn and preserve deliverable text");
+    assert_eq!(json_response["status"], "completed");
+    assert_eq!(
+        json_response["output"][0]["content"][0]["text"],
+        "preserved text"
+    );
+
+    let unknown_stream = futures_util::stream::iter([
         Ok(br#"event: message_start
 data: {"type":"message_start","message":{"id":"msg_unknown_terminal","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"stop_reason":null}}
 
@@ -240,7 +260,7 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"text","te
 
 "#.to_vec()),
         Ok(br#"event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"must fail"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"preserved sse text"}}
 
 "#.to_vec()),
         Ok(br#"event: content_block_stop
@@ -256,13 +276,55 @@ data: {"type":"message_stop"}
 
 "#.to_vec()),
     ]);
-    let sse_error = materialize_v3_provider_sse_as_canonical_response(
+    let sse_err = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Anthropic,
+        Box::pin(unknown_stream),
+    )
+    .await
+    .expect_err("unknown Anthropic SSE stop_reason must fail explicitly");
+    assert!(
+        sse_err.to_string().contains("stop_reason")
+            || sse_err.to_string().contains("future_terminal"),
+        "expected unknown stop_reason failure in SSE, got: {sse_err}"
+    );
+
+    let stream = futures_util::stream::iter([
+        Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_extra_stop_seq","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"stop_reason":null}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"preserved sse text"}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+        Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":"extra_omitted"}}
+
+"#.to_vec()),
+        Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+    ]);
+    let sse_response = materialize_v3_provider_sse_as_canonical_response(
         V3HubProviderWireProtocol::Anthropic,
         Box::pin(stream),
     )
     .await
-    .expect_err("unknown Anthropic SSE stop_reason must fail at the same terminal owner");
-    assert!(sse_error.to_string().contains("future_terminal"));
+    .expect("contradictory optional stop_sequence with end_turn in SSE must warn and preserve deliverable text");
+    assert_eq!(sse_response["status"], "completed");
+    assert_eq!(
+        sse_response["output"][0]["content"][0]["text"],
+        "preserved sse text"
+    );
 }
 
 #[async_trait]

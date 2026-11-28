@@ -2389,12 +2389,20 @@ fn provider_error_characterization_is_explicit_and_protocol_bound() {
     ));
     assert!(matches!(
         characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
-            json!({"type":"invented_event"}),
+            json!({}),
             V3HubProviderWireProtocol::Anthropic,
             V3HubTransportIntent::Sse,
         ),
         Err(V3AnthropicCodecError::MalformedSseEvent)
     ));
+    assert!(
+        characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
+            json!({"type":"invented_event"}),
+            V3HubProviderWireProtocol::Anthropic,
+            V3HubTransportIntent::Sse,
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -2488,8 +2496,8 @@ fn anthropic_thinking_fields_require_valid_exact_shape() {
 }
 
 #[test]
-fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_and_rejects_unknown(
-) {
+fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_and_omits_unknown()
+{
     let mut exact = base_chat_for_field_projection();
     exact["routecodex_chat_extension"] = json!({
         "responses_request":{"client_metadata":{"user_id":"opaque-user"}}
@@ -2508,9 +2516,79 @@ fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_
     let mut unsupported = base_chat_for_field_projection();
     unsupported["routecodex_chat_extension"] =
         json!({"responses_request":{"client_metadata":{"turn":"unsupported"}}});
-    let error = encode_v3_responses_semantic_as_anthropic_request(unsupported)
-        .expect_err("unknown client_metadata must remain fail-fast");
-    assert!(error.to_string().contains("client_metadata.turn"));
+    let wire = encode_v3_responses_semantic_as_anthropic_request(unsupported).expect(
+        "unknown client_metadata without target slot must warn/omit without blocking request",
+    );
+    assert!(wire.get("metadata").is_none(), "{wire}");
+    assert_eq!(wire["messages"][0]["content"][0]["text"], "hello");
+}
+
+#[test]
+fn anthropic_inbound_preserves_multikey_metadata_losslessly() {
+    let canonical = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model": "claude-test",
+        "max_tokens": 128,
+        "metadata": {
+            "user_id": "  u-1  ",
+            "session_tag": "s-2",
+            "custom_flag": true
+        },
+        "messages": [{"role": "user", "content": "hello"}]
+    }))
+    .expect("Inbound Anthropic conversion must preserve all metadata keys losslessly");
+
+    let metadata = &canonical["routecodex_chat_extension"]["responses_request"]["metadata"];
+    assert_eq!(metadata["user_id"], "  u-1  ");
+    assert_eq!(metadata["session_tag"], "s-2");
+    assert_eq!(metadata["custom_flag"], true);
+
+    let with_null_and_empty = [
+        json!({
+            "model": "claude-test",
+            "max_tokens": 128,
+            "metadata": {"user_id": null, "trace": "t-1"},
+            "messages": [{"role": "user", "content": "hello"}]
+        }),
+        json!({
+            "model": "claude-test",
+            "max_tokens": 128,
+            "metadata": {},
+            "messages": [{"role": "user", "content": "hello"}]
+        }),
+    ];
+    for payload in with_null_and_empty {
+        let encoded = encode_v3_anthropic_request_as_responses_semantic(payload.clone()).expect(
+            "Inbound Anthropic conversion must preserve null user_id and empty metadata losslessly",
+        );
+        assert_eq!(
+            encoded["routecodex_chat_extension"]["responses_request"]["metadata"],
+            payload["metadata"]
+        );
+    }
+
+    let history_with_empty_unsigned = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model": "claude-test",
+        "max_tokens": 128,
+        "messages": [{
+            "role": "assistant",
+            "content": [{"type": "thinking", "thinking": "", "cache_control": {"type": "ephemeral"}}]
+        }]
+    }))
+    .expect("Inbound Anthropic request history must preserve empty unsigned thinking with extension fields losslessly");
+    assert_eq!(
+        history_with_empty_unsigned["input"],
+        json!([{
+            "type": "reasoning",
+            "summary": [],
+            "routecodex_chat_extension": {
+                "anthropic_reasoning": {
+                    "type": "thinking",
+                    "thinking": "",
+                    "cache_control": {"type": "ephemeral"}
+                }
+            }
+        }])
+    );
 }
 
 #[test]
@@ -2559,9 +2637,10 @@ fn anthropic_consumes_registered_responses_cache_verbosity_store_false_and_rejec
 
     let mut stored = base_chat_for_field_projection();
     stored["routecodex_chat_extension"] = json!({"responses_request":{"store":true}});
-    let error = encode_v3_responses_semantic_as_anthropic_request(stored)
-        .expect_err("store=true has no Anthropic equivalent");
-    assert!(error.to_string().contains("$.request.store"), "{error}");
+    let wire = encode_v3_responses_semantic_as_anthropic_request(stored)
+        .expect("store=true without Anthropic slot must warn/omit without blocking request");
+    assert!(wire.get("store").is_none(), "{wire}");
+    assert_eq!(wire["messages"][0]["content"][0]["text"], "hello");
 
     let mut malformed_cache_key = base_chat_for_field_projection();
     malformed_cache_key["routecodex_chat_extension"] =
@@ -2808,7 +2887,7 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
 }
 
 #[test]
-fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values() {
+fn anthropic_terminal_projection_rejects_missing_or_non_string_and_tolerates_quirks() {
     let malformed = [
         json!({
             "id":"msg_missing_stop",
@@ -2820,12 +2899,6 @@ fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_value
             "role":"assistant",
             "content":[{"type":"text","text":"null"}],
             "stop_reason":null
-        }),
-        json!({
-            "id":"msg_unknown_stop",
-            "role":"assistant",
-            "content":[{"type":"text","text":"unknown"}],
-            "stop_reason":"future_reason"
         }),
         json!({
             "id":"msg_non_string_stop",
@@ -2840,22 +2913,34 @@ fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_value
             "stop_reason":"stop_sequence"
         }),
         json!({
-            "id":"msg_contradictory_sequence",
+            "id":"msg_unknown_stop",
             "role":"assistant",
-            "content":[{"type":"text","text":"done"}],
-            "stop_reason":"end_turn",
-            "stop_sequence":"unexpected"
+            "content":[{"type":"text","text":"unknown"}],
+            "stop_reason":"future_reason"
         }),
     ];
 
     for payload in malformed {
         let error = project_v3_anthropic_message_as_responses_response(&payload)
-            .expect_err("malformed terminal truth must fail at the Anthropic codec owner");
+            .expect_err("missing/non-string/unknown stop_reason or missing stop_sequence must fail at the Anthropic codec owner");
+        let message = error.to_string();
         assert!(
-            error.to_string().contains("stop_reason")
-                || error.to_string().contains("stop_sequence"),
-            "{error}"
+            message.contains("stop_reason") || message.contains("stop_sequence"),
+            "{message}"
         );
+    }
+
+    for tolerated in [json!({
+        "id":"msg_contradictory_sequence",
+        "role":"assistant",
+        "content":[{"type":"text","text":"done"}],
+        "stop_reason":"end_turn",
+        "stop_sequence":"unexpected"
+    })] {
+        let projected = project_v3_anthropic_message_as_responses_response(&tolerated)
+            .expect("terminal quirk must not block deliverable content");
+        assert_eq!(projected["status"], "completed");
+        assert!(!projected["output"].as_array().unwrap().is_empty());
     }
 }
 
@@ -2974,7 +3059,7 @@ fn responses_tool_result_status_rejects_nonterminal_or_unknown_values() {
 }
 
 #[test]
-fn anthropic_response_content_block_enum_is_closed_and_diagnostic() {
+fn anthropic_response_content_block_omits_unknown_and_roundtrip_only_while_preserving_text() {
     for content_type in [
         "web_fetch_tool_result",
         "code_execution_tool_result",
@@ -2984,19 +3069,23 @@ fn anthropic_response_content_block_enum_is_closed_and_diagnostic() {
         "container_upload",
         "future_content_block",
     ] {
-        let error = project_v3_anthropic_message_as_responses_response(&json!({
-            "id":"msg_unsupported_content",
+        let response = project_v3_anthropic_message_as_responses_response(&json!({
+            "id":"msg_partial_supported_content",
             "role":"assistant",
-            "content":[{"type":content_type}],
+            "content":[
+                {"type":content_type},
+                {"type":"thinking","thinking":""},
+                {"type":"text","text":"preserved answer"}
+            ],
             "stop_reason":"end_turn"
         }))
-        .expect_err("source-roundtrip-only or unknown content must fail in cross-protocol Relay");
-        let diagnostic = error.to_string();
-        assert!(
-            diagnostic.contains("response.content[0].type"),
-            "{diagnostic}"
+        .expect("unknown, roundtrip-only, and empty unsigned thinking blocks must not block text delivery");
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            response["output"][0]["content"][0]["text"],
+            "preserved answer"
         );
-        assert!(diagnostic.contains(content_type), "{diagnostic}");
     }
 
     let missing = project_v3_anthropic_message_as_responses_response(&json!({
@@ -3005,7 +3094,7 @@ fn anthropic_response_content_block_enum_is_closed_and_diagnostic() {
         "content":[{}],
         "stop_reason":"end_turn"
     }))
-    .expect_err("missing content type must be distinct and explicit");
+    .expect_err("missing content type must remain malformed");
     assert!(
         missing.to_string().contains("response.content[0].type"),
         "{missing}"
@@ -3013,23 +3102,29 @@ fn anthropic_response_content_block_enum_is_closed_and_diagnostic() {
 }
 
 #[test]
-fn anthropic_web_search_result_requires_exact_pairing() {
+fn anthropic_unpaired_web_search_result_fails_explicitly() {
     let error = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_unpaired_search_result",
         "role":"assistant",
-        "content":[{
-            "type":"web_search_tool_result",
-            "tool_use_id":"srvtoolu_missing",
-            "content":[]
-        }],
+        "content":[
+            {
+                "type":"web_search_tool_result",
+                "tool_use_id":"srvtoolu_missing",
+                "content":[]
+            },
+            {
+                "type":"text",
+                "text":"search fallback answer"
+            }
+        ],
         "stop_reason":"end_turn"
     }))
-    .expect_err("unpaired hosted search result must not be silently stripped");
+    .expect_err("unpaired registered web_search_tool_result must remain explicit pairing failure");
 
+    let message = error.to_string();
     assert!(
-        error.to_string().contains("web_search_tool_result")
-            && error.to_string().contains("srvtoolu_missing"),
-        "{error}"
+        message.contains("web_search_tool_result") && message.contains("srvtoolu_missing"),
+        "unexpected error: {message}"
     );
 }
 

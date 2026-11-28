@@ -945,7 +945,10 @@ pub(crate) fn v3_client_sse_body(
             if done {
                 return None;
             }
-            stream.next().await.map(|chunk| (Ok::<Vec<u8>, io::Error>(chunk), (stream, false)))
+            stream
+                .next()
+                .await
+                .map(|chunk| (Ok::<Vec<u8>, io::Error>(chunk), (stream, false)))
         },
     ));
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
@@ -1412,12 +1415,14 @@ pub(crate) async fn read_json_payload(
     }
     let bytes = to_bytes(request.into_body(), V3_MAX_REQUEST_BODY_BYTES)
         .await
-        .map_err(|error| Box::new({
-            project_http_input_error(
-                V3HttpBoundaryErrorKind::BodyTooLarge,
-                format!("request body exceeds {V3_MAX_REQUEST_BODY_BYTES} bytes: {error}"),
-            )
-        }))?;
+        .map_err(|error| {
+            Box::new({
+                project_http_input_error(
+                    V3HttpBoundaryErrorKind::BodyTooLarge,
+                    format!("request body exceeds {V3_MAX_REQUEST_BODY_BYTES} bytes: {error}"),
+                )
+            })
+        })?;
     serde_json::from_slice(&bytes).map_err(|error| Box::new({
         let content_length = content_length
             .map(|value| value.to_string())
@@ -1492,18 +1497,20 @@ pub(crate) fn project_http_input_error(
 fn resolve_http_input_error_projection(
     projection: V3HttpInputErrorProjection,
 ) -> Result<routecodex_v3_error::V3Error06ClientProjected, Box<Response<Body>>> {
-    projection.map_err(|fault| Box::new({
-        let stage = fault
-            .original_source
-            .as_ref()
-            .map_or("V3Server03HttpRequestRaw", |source| source.source_stage);
-        foundation_output_response(foundation_output_from_error_sdk_result(
-            stage,
-            vec![stage],
-            None,
-            Err(fault),
-        ))
-    }))
+    projection.map_err(|fault| {
+        Box::new({
+            let stage = fault
+                .original_source
+                .as_ref()
+                .map_or("V3Server03HttpRequestRaw", |source| source.source_stage);
+            foundation_output_response(foundation_output_from_error_sdk_result(
+                stage,
+                vec![stage],
+                None,
+                Err(fault),
+            ))
+        })
+    })
 }
 
 pub(crate) fn error_output_response_for_server(

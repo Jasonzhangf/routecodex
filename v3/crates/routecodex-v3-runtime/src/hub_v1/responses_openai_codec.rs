@@ -1805,7 +1805,8 @@ pub(crate) fn is_registered_codex_tool_schema(
                     .get(*name)
                     .and_then(Value::as_object)
                     .and_then(|property| property.get("type"))
-                    .and_then(Value::as_str) == Some(*expected)
+                    .and_then(Value::as_str)
+                    == Some(*expected)
             }
         })
         && required.len() == required_names.len()

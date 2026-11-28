@@ -27,6 +27,7 @@ use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
 pub(crate) use reasoning_projection::project_v3_responses_reasoning_item_as_anthropic_content;
 use response_projection::{
+    anthropic_history_reasoning_part_as_responses_reasoning,
     anthropic_reasoning_part_as_responses_reasoning,
     flush_v3_anthropic_text_content_as_responses_message,
     project_v3_anthropic_terminal_as_responses_terminal, V3AnthropicResponseContentBlockKind,
@@ -36,7 +37,7 @@ pub(crate) use responses_to_anthropic::responses_web_search_tool_as_anthropic_to
 use responses_to_anthropic::{
     chat_messages_as_anthropic_messages, responses_input_as_anthropic_messages,
     responses_system_as_anthropic_system, responses_tool_choice_as_anthropic_tool_choice,
-    responses_tools_for_anthropic_wire,
+    responses_tools_for_anthropic_wire_with_drops,
 };
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
@@ -149,8 +150,6 @@ pub enum V3AnthropicCodecError {
     UnsupportedServerToolUse { index: usize, name: String },
     #[error("Anthropic provider response.content[{index}].type 'web_search_tool_result' tool_use_id '{tool_use_id}' has no matching server_tool_use")]
     UnpairedWebSearchToolResult { index: usize, tool_use_id: String },
-    #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
-    UnmappedOutboundFields { paths: String },
 }
 
 pub fn validate_v3_anthropic_client_input_payload(
@@ -351,21 +350,7 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
         let metadata = metadata
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
-        if metadata.keys().any(|key| key != "user_id") {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "metadata.unsupported",
-            });
-        }
-        if let Some(user_id) = metadata.get("user_id").filter(|value| !value.is_null()) {
-            let user_id = user_id
-                .as_str()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "metadata.user_id",
-                })?;
-            responses_request_extension.insert("metadata".to_string(), json!({"user_id": user_id}));
-        }
+        responses_request_extension.insert("metadata".to_string(), Value::Object(metadata.clone()));
     }
     if let Some(format) = object
         .get("output_config")
@@ -458,7 +443,7 @@ pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
     let responses_request_extension = responses_request_chat_extension(object)?;
-    reject_unmapped_anthropic_payload_extensions(object, responses_request_extension)?;
+    record_unmapped_anthropic_payload_extensions(responses_request_extension, &mut drops)?;
     reject_responses_reasoning_summary_for_anthropic(object)?;
     let mut output = Map::new();
     output.insert(
@@ -494,7 +479,7 @@ pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
         );
     }
     output.insert("messages".to_string(), Value::Array(messages));
-    let tools = responses_tools_for_anthropic_wire(object)?;
+    let tools = responses_tools_for_anthropic_wire_with_drops(object, &mut drops)?;
     if !tools.is_empty() {
         output.insert("tools".to_string(), Value::Array(tools));
     }
@@ -517,7 +502,7 @@ pub(crate) fn encode_v3_responses_semantic_as_anthropic_request_with_drops(
         responses_request_extension,
         &mut drops,
     )?;
-    validate_responses_cache_and_store_for_anthropic(responses_request_extension)?;
+    validate_responses_cache_and_store_for_anthropic(responses_request_extension, &mut drops)?;
     project_chat_reasoning_effort_as_anthropic_output_config(&mut output, object)?;
     for key in ["temperature", "top_p", "top_k", "service_tier"] {
         if let Some(value) = object.get(key) {
@@ -847,61 +832,74 @@ fn strip_unmapped_responses_reasoning_extensions(input: &mut Value) {
     }
 }
 
-fn reject_unmapped_anthropic_payload_extensions(
-    _object: &Map<String, Value>,
+fn record_unmapped_anthropic_payload_extensions(
     extension: Option<&Map<String, Value>>,
+    drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), V3AnthropicCodecError> {
-    let mut paths = Vec::new();
-    if let Some(extension) = extension {
-        for key in extension.keys() {
-            if !matches!(
-                key.as_str(),
-                "metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"
-            ) {
-                paths.push(format!("$.request.{key}"));
-            }
+    let Some(extension) = extension else {
+        return Ok(());
+    };
+    for (key, value) in extension {
+        if !matches!(
+            key.as_str(),
+            "metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"
+        ) {
+            drops.push(V3ProjectionDropRecord::new(
+                "anthropic",
+                format!("$.{key}"),
+                "unmapped_target_protocol_field_unrepresentable",
+                value.clone(),
+                "record_unmapped_anthropic_payload_extensions",
+            ));
         }
-        if extension
-            .get("metadata")
-            .is_some_and(|metadata| !metadata.is_object())
-        {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "routecodex_chat_extension.responses_request.metadata",
-            });
-        }
-        if let Some(client_metadata) = extension.get("client_metadata") {
-            let client_metadata =
-                client_metadata
-                    .as_object()
-                    .ok_or(V3AnthropicCodecError::MalformedField {
-                        field: "routecodex_chat_extension.responses_request.client_metadata",
-                    })?;
-            if client_metadata.is_empty() {
-                paths.push("$.request.client_metadata".to_string());
-            }
-            paths.extend(unsupported_client_metadata_paths(client_metadata));
-        }
-        if let Some(text) = extension.get("text") {
-            let text = text
+    }
+    if extension
+        .get("metadata")
+        .is_some_and(|metadata| !metadata.is_object())
+    {
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension.responses_request.metadata",
+        });
+    }
+    if let Some(client_metadata) = extension.get("client_metadata") {
+        let client_metadata =
+            client_metadata
                 .as_object()
                 .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "routecodex_chat_extension.responses_request.text",
+                    field: "routecodex_chat_extension.responses_request.client_metadata",
                 })?;
-            for key in text
-                .keys()
-                .filter(|key| !matches!(key.as_str(), "format" | "verbosity"))
-            {
-                paths.push(format!("$.request.text.output_config.{key}"));
+        for path in unsupported_client_metadata_paths(client_metadata) {
+            let key = path
+                .strip_prefix("$.request.client_metadata.")
+                .unwrap_or(path.as_str());
+            drops.push(V3ProjectionDropRecord::new(
+                "anthropic",
+                format!("$.client_metadata.{key}"),
+                "unmapped_target_protocol_field_unrepresentable",
+                client_metadata.get(key).cloned().unwrap_or(Value::Null),
+                "record_unmapped_anthropic_payload_extensions",
+            ));
+        }
+    }
+    if let Some(text) = extension.get("text") {
+        let text = text
+            .as_object()
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "routecodex_chat_extension.responses_request.text",
+            })?;
+        for (key, value) in text {
+            if !matches!(key.as_str(), "format" | "verbosity") {
+                drops.push(V3ProjectionDropRecord::new(
+                    "anthropic",
+                    format!("$.text.{key}"),
+                    "unmapped_target_protocol_field_unrepresentable",
+                    value.clone(),
+                    "record_unmapped_anthropic_payload_extensions",
+                ));
             }
         }
     }
-    if paths.is_empty() {
-        Ok(())
-    } else {
-        Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: paths.join(","),
-        })
-    }
+    Ok(())
 }
 
 fn project_chat_reasoning_effort_as_anthropic_output_config(
@@ -977,19 +975,15 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         .iter()
         .any(|(_, kind, _)| *kind == V3AnthropicResponseContentBlockKind::ToolUse);
     if terminal.kind == V3AnthropicTerminalKind::ToolUse && !has_client_tool_use {
-        return Err(V3AnthropicCodecError::InvalidTerminalField {
-            field: "stop_reason",
-            reason: "tool_use requires at least one response.content[].type=tool_use".to_string(),
-        });
+        eprintln!(
+            "[v3-response-warning] protocol=anthropic stage=responses_projection stop_reason=tool_use reason=missing_client_tool_use_block_preserving_output"
+        );
     }
     if terminal.kind != V3AnthropicTerminalKind::ToolUse && has_client_tool_use {
-        return Err(V3AnthropicCodecError::InvalidTerminalField {
-            field: "stop_reason",
-            reason: format!(
-                "{:?} contradicts response.content[].type=tool_use",
-                terminal.kind
-            ),
-        });
+        eprintln!(
+            "[v3-response-warning] protocol=anthropic stage=responses_projection terminal={:?} reason=tool_use_present_without_tool_use_stop_reason",
+            terminal.kind
+        );
     }
     let mut output_items = Vec::new();
     let mut message_content = Vec::new();
@@ -1036,12 +1030,26 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         }
     }
     let mut consumed_hosted_result_ids = HashSet::new();
+    let mut response_drops = Vec::<V3ProjectionDropRecord>::new();
     for (index, kind, part) in &classified_blocks {
-        if kind.is_source_roundtrip_only() {
-            return Err(V3AnthropicCodecError::UnsupportedResponseContentBlock {
-                index: *index,
-                content_type: kind.source_type().to_string(),
-            });
+        if *kind == V3AnthropicResponseContentBlockKind::Unknown || kind.is_source_roundtrip_only()
+        {
+            let content_type = part
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or(kind.source_type());
+            eprintln!(
+                "[v3-response-warning] protocol=anthropic stage=responses_projection index={index} content_type={content_type:?} reason=unrepresentable_block_omitted"
+            );
+            response_drops.push(V3ProjectionDropRecord::new_response_drop(
+                "responses",
+                format!("$.content[{index}]"),
+                "unrepresentable_target_protocol_field_omitted",
+                (*part).clone(),
+                json!({ "type": content_type }),
+                "project_v3_anthropic_message_as_responses_response_with_context",
+            ));
+            continue;
         }
         match kind {
             V3AnthropicResponseContentBlockKind::Text => {
@@ -1059,15 +1067,17 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             }
             V3AnthropicResponseContentBlockKind::Thinking
             | V3AnthropicResponseContentBlockKind::RedactedThinking => {
-                flush_v3_anthropic_text_content_as_responses_message(
-                    &mut output_items,
-                    &mut message_content,
-                    &message_role,
-                );
-                output_items.push(anthropic_reasoning_part_as_responses_reasoning(
+                if let Some(reasoning_item) = anthropic_reasoning_part_as_responses_reasoning(
                     part,
                     context.reasoning_summary_policy(),
-                )?);
+                )? {
+                    flush_v3_anthropic_text_content_as_responses_message(
+                        &mut output_items,
+                        &mut message_content,
+                        &message_role,
+                    );
+                    output_items.push(reasoning_item);
+                }
             }
             V3AnthropicResponseContentBlockKind::ToolUse => {
                 flush_v3_anthropic_text_content_as_responses_message(
@@ -1097,10 +1107,18 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                         reason: "name must be a non-empty string".to_string(),
                     })?;
                 if name != "web_search" {
-                    return Err(V3AnthropicCodecError::UnsupportedServerToolUse {
-                        index: *index,
-                        name: name.to_string(),
-                    });
+                    eprintln!(
+                        "[v3-response-warning] protocol=anthropic stage=responses_projection index={index} server_tool_use_name={name:?} reason=unsupported_server_tool_use_omitted"
+                    );
+                    response_drops.push(V3ProjectionDropRecord::new_response_drop(
+                        "responses",
+                        format!("$.content[{index}]"),
+                        "unrepresentable_target_protocol_field_omitted",
+                        (*part).clone(),
+                        json!({ "type": "server_tool_use", "name": name }),
+                        "project_v3_anthropic_message_as_responses_response_with_context",
+                    ));
+                    continue;
                 }
                 let call_id = part
                     .get("id")
@@ -1206,8 +1224,9 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             | V3AnthropicResponseContentBlockKind::BashCodeExecutionToolResult
             | V3AnthropicResponseContentBlockKind::TextEditorCodeExecutionToolResult
             | V3AnthropicResponseContentBlockKind::ToolSearchToolResult
-            | V3AnthropicResponseContentBlockKind::ContainerUpload => {
-                unreachable!("source-roundtrip-only content blocks fail before the mapped match")
+            | V3AnthropicResponseContentBlockKind::ContainerUpload
+            | V3AnthropicResponseContentBlockKind::Unknown => {
+                unreachable!("unknown and source-roundtrip-only content blocks are skipped above")
             }
         }
     }
@@ -1273,6 +1292,15 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     }
     if let Some(stop_sequence) = terminal.stop_sequence {
         response.insert("stop_sequence".to_string(), Value::String(stop_sequence));
+    } else if let Some(extra_stop_sequence) = object.get("stop_sequence").filter(|v| !v.is_null()) {
+        response_drops.push(V3ProjectionDropRecord::new_response_drop(
+            "responses",
+            "$.stop_sequence",
+            "unrepresentable_target_protocol_field_omitted",
+            extra_stop_sequence.clone(),
+            extra_stop_sequence.clone(),
+            "project_v3_anthropic_message_as_responses_response_with_context",
+        ));
     }
     if let Some(stop_details) = terminal.stop_details {
         response.insert("stop_details".to_string(), stop_details);
@@ -1280,6 +1308,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     if let Some(metadata) = context.metadata() {
         response.insert("metadata".to_string(), metadata.clone());
     }
+    context.record_response_drops(&mut response_drops);
     Ok(Value::Object(response))
 }
 
@@ -1475,7 +1504,15 @@ fn validate_sse_event(value: &Value) -> Result<(), V3AnthropicCodecError> {
         | "message_stop"
         | "ping" => Ok(()),
         "error" => validate_provider_error(value),
-        _ => Err(V3AnthropicCodecError::MalformedSseEvent),
+        other => {
+            if other.trim().is_empty() || other.starts_with("response.") {
+                return Err(V3AnthropicCodecError::MalformedSseEvent);
+            }
+            eprintln!(
+                "[v3-sse-warning] protocol=anthropic stage=validate_sse_event event_type={other:?} reason=unregistered_event_tolerated"
+            );
+            Ok(())
+        }
     }
 }
 

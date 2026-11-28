@@ -587,8 +587,7 @@ fn rewrite_snapshot(
     true
 }
 
-type V3DirectDsmlRewriteResult =
-    Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure>;
+type V3DirectDsmlRewriteResult = Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure>;
 
 pub(crate) fn rewrite_v3_direct_dsml_attempt(
     frames: &[Vec<u8>],
@@ -804,9 +803,10 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
                         plan,
                         delivered.get(&plan.old),
                         kinds.get(&plan.old),
-                    ) {
-                        return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
-                    }
+                    )
+                {
+                    return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
+                }
             }
             event["response"] = response.clone();
             terminal_index = output.len();
@@ -1357,9 +1357,9 @@ fn resume_emitted_items(
                         sequence,
                         json!({"type":"response.output_text.delta","output_index":index,"item_id":first["id"],"content_index":content_index,"delta":remaining}),
                     ))
-                {
-                    return false;
-                }
+            {
+                return false;
+            }
             if kinds.text_done
                 && !part_state.is_some_and(|part_state| part_state.text_done)
                 && !push_event(

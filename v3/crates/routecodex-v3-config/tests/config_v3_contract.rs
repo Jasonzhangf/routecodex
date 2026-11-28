@@ -2329,3 +2329,19 @@ targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", pr
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn provider_error_policy_rejects_failure_threshold_combined_with_until_restart() {
+    let source = format!(
+        "{FULL_CONFIG}\n\n[error]\nprovider_error_default_path = [\n  {{ step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 }},\n  {{ step = \"cooldown\", scope = \"provider_model\", until_restart = true, provider_global_failure = false, failure_threshold = 3 }},\n  {{ step = \"project\", reason_code = \"provider_failure\" }},\n]\n"
+    );
+    let authoring = parse_v3_config_02_authoring(&source).unwrap();
+    let error = compile_v3_config_05_manifest(authoring)
+        .expect_err("until_restart=true must reject failure_threshold");
+    assert!(
+        error
+            .to_string()
+            .contains("failure_threshold cannot be combined with until_restart=true"),
+        "unexpected error: {error}"
+    );
+}

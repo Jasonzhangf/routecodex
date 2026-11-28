@@ -61,6 +61,11 @@ pub fn project_v3_responses_json_as_anthropic_message(
                     content.push(json!({"type":"text","text":text}));
                 }
             }
+            Some("refusal") => {
+                if let Some(text) = item.get("refusal").and_then(Value::as_str) {
+                    content.push(json!({"type":"text","text":text}));
+                }
+            }
             Some("message") => {
                 if let Some(parts) = item.get("content").and_then(Value::as_array) {
                     for part in parts {
@@ -665,6 +670,29 @@ mod tests {
             if with_text {
                 assert_eq!(message["content"][0]["text"], " retained text ");
             }
+        }
+
+        // Top-level Responses `{"type":"refusal","refusal":"..."}` item shape.
+        for with_text in [false, true] {
+            let mut response = json!({
+                "id":"resp_top_refusal", "status":"completed",
+                "output":[{"type":"refusal","refusal":" TOP_LEVEL_REFUSAL "}]
+            });
+            if with_text {
+                response["output"]
+                    .as_array_mut()
+                    .unwrap()
+                    .insert(0, json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":" lead text "}]}));
+            }
+            let message = project_v3_responses_json_as_anthropic_message(&response).unwrap();
+            assert_eq!(
+                message["content"].as_array().unwrap().len(),
+                if with_text { 2 } else { 1 }
+            );
+            assert_eq!(
+                message["content"][usize::from(with_text)]["text"],
+                " TOP_LEVEL_REFUSAL "
+            );
         }
     }
 

@@ -2,8 +2,7 @@ use super::relay_runtime_shared::bind_v3_selected_business_auth_kind;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::*;
 use crate::operation_runner::plan_execution::{
-    V3PlanExecutionModePolicy, V3PlanExecutionStop,
-    V3PlanExecutionTargetSource,
+    V3PlanExecutionModePolicy, V3PlanExecutionStop, V3PlanExecutionTargetSource,
 };
 use serde_json::{json, Value};
 
@@ -404,9 +403,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             V3AnthropicResponsesProjectionContext::from_chat_canonical_request(
                 &provider_semantic_body,
             )
-            .map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
-            })?;
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string()))?
+            .with_projection_drop_context(projection_drop_context.clone());
         let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
         let request_tool_thinking_turn_context =
             request_outcome.tool_thinking_turn_context().clone();
@@ -798,7 +796,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             request_execution_control.begin_actual_send();
             active_attempt_dispatched = true;
             let transport_result = match tokio::time::timeout(
-                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
+                v3_relay_transport_send_timeout(
+                    manifest,
+                    &selected_target_provider_id,
+                    transport_request.stream_intent(),
+                ),
                 transport.send(transport_request),
             )
             .await
@@ -944,6 +946,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
             }
             let provider_status = provider_raw.status();
+            let sse_first_frame_elapsed =
+                std::time::Duration::from_millis(provider_raw.sse_first_frame_elapsed_ms());
             selected_observability.provider_status = Some(provider_status);
             let provider_id = provider_raw.provider_id().to_string();
             match provider_raw.into_body() {
@@ -991,22 +995,56 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             continue;
                         }
                     };
-                    let hook_provider_value =
-                        if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                            handle_error_before_resp03!(
-                                project_v3_anthropic_message_as_responses_response_with_context(
-                                    &provider_value,
-                                    &anthropic_response_projection_context,
-                                )
-                                .map_err(|error| {
-                                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                                        error.to_string(),
+                    let hook_provider_value = if provider_wire_protocol
+                        == V3HubProviderWireProtocol::Anthropic
+                    {
+                        match project_v3_anthropic_message_as_responses_response_with_context(
+                            &provider_value,
+                            &anthropic_response_projection_context,
+                        ) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                let failure = handle_error_before_resp03!(
+                                    provider_response_stream_relay_failure(
+                                        V3ResponsesRelayRuntimeError::ProviderResponseProjection(
+                                            error.to_string(),
+                                        ),
+                                        &input.request_id,
+                                        &selected_target_provider_id,
+                                        Some(selected_observability.clone()),
                                     )
-                                })
-                            )
-                        } else {
-                            provider_value.clone()
-                        };
+                                );
+                                let terminal_failure = handle_error_before_resp03!(
+                                    handle_v3_responses_relay_provider_failure(
+                                        &failure_context,
+                                        selected,
+                                        failure,
+                                        &mut V3ResponsesRelayProviderRetryState {
+                                            failed_candidates: &mut failed_candidates,
+                                            same_candidate_retries: &mut same_candidate_retries,
+                                            retry_selected: &mut retry_selected,
+                                            provider_failure_events: &mut provider_failure_events,
+                                            provider_failure_event_sink:
+                                                provider_failure_event_sink.as_ref(),
+                                            selected_observability: &selected_observability,
+                                            trace: &mut trace,
+                                            last_external_http: &mut last_external_http,
+                                            active_keys: active_keys.as_deref(),
+                                            active_episode: active_episode.as_mut(),
+                                            active_attempt_dispatched,
+                                        },
+                                    )
+                                    .await
+                                );
+                                if let Some(failure) = terminal_failure {
+                                    return Ok(provider_failure_output(failure, trace, 0));
+                                }
+                                continue;
+                            }
+                        }
+                    } else {
+                        provider_value.clone()
+                    };
                     let hook_provider_protocol =
                         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                             V3HubProviderWireProtocol::Responses
@@ -1258,13 +1296,23 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     } else {
                         stream
                     };
-                    let stream_observation = V3RuntimeStreamObservation::default();
-                    let stream = crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        sse_idle_timeout,
-                    );
+                    let attempt_drop_context = projection_drop_context
+                        .clone()
+                        .with_attempt_target(&selected.route.pool_id, &selected_target_provider_id);
+                    let stream_observation = V3RuntimeStreamObservation::default()
+                        .with_projection_drop_context(attempt_drop_context.clone());
+                    let attempt_anthropic_response_projection_context =
+                        anthropic_response_projection_context
+                            .clone()
+                            .with_projection_drop_context(attempt_drop_context);
+                    let stream =
+                        crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle_with_first_frame_elapsed(
+                            &input.request_id,
+                            &selected_target_provider_id,
+                            stream,
+                            sse_idle_timeout,
+                            sse_first_frame_elapsed,
+                        );
                     let local_failure = std::sync::Arc::new(std::sync::Mutex::new(None));
                     let stream = crate::hub_v1::relay_runtime_core::guard_v3_relay_sse_payload(
                         &input.request_id,
@@ -1278,7 +1326,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         provider_wire_protocol,
                         stream,
                         &stream_observation,
-                        &anthropic_response_projection_context,
+                        &attempt_anthropic_response_projection_context,
                     )
                     .await;
                     if let Some(error) = local_failure

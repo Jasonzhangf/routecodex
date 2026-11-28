@@ -216,26 +216,49 @@ fn gemini_wire_reasoning_effort_overrides_existing_thinking_level() {
 }
 
 #[test]
-fn gemini_selected_target_rejects_reasoning_effort_without_reasoning_capability() {
-    let payload = json!({
+fn gemini_selected_target_omits_unmapped_effort_and_rejects_mapped_effort_without_reasoning_capability(
+) {
+    let unmapped = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "reasoning_effort": "ultra"
+    });
+    let (request, drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &unmapped,
+        V3OutboundTargetProtocol::Gemini,
+        &["text".to_string(), "tools".to_string()],
+    )
+    .expect("Gemini unmapped reasoning_effort must warn/omit instead of blocking request");
+    assert!(request.get("reasoning_effort").is_none(), "{request}");
+    assert!(
+        request
+            .pointer("/generationConfig/thinkingConfig")
+            .is_none(),
+        "{request}"
+    );
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.reasoning_effort"),
+        "expected drop record for $.reasoning_effort: {drops:?}"
+    );
+
+    let mapped = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "reasoning_effort": "high"
     });
-    let error = project_outbound_payload_for_selected_target_protocol(
-        &payload,
+    let err = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &mapped,
         V3OutboundTargetProtocol::Gemini,
         &["text".to_string(), "tools".to_string()],
     )
-    .expect_err("Gemini thinkingLevel projection must require selected target capability");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_effort missing_capability=reasoning"
-    );
+    .expect_err("mapped reasoning_effort on non-reasoning target must preserve capability error");
+    assert!(err.contains("missing_capability=reasoning"), "{err}");
 }
 
 #[test]
-fn gemini_selected_target_rejects_thinking_budget_without_reasoning_capability() {
+fn gemini_selected_target_rejects_mapped_thinking_budget_without_reasoning_capability() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
@@ -245,16 +268,13 @@ fn gemini_selected_target_rejects_thinking_budget_without_reasoning_capability()
             }
         }
     });
-    let error = project_outbound_payload_for_selected_target_protocol(
+    let err = project_outbound_payload_for_selected_target_protocol_with_drops(
         &payload,
         V3OutboundTargetProtocol::Gemini,
         &["text".to_string(), "tools".to_string()],
     )
-    .expect_err("Gemini thinkingBudget projection must require selected target capability");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.generationConfig.thinkingConfig.thinkingBudget missing_capability=reasoning"
-    );
+    .expect_err("mapped thinkingBudget without reasoning capability must fail explicitly");
+    assert!(err.contains("missing_capability=reasoning"), "{err}");
 }
 
 #[test]
@@ -277,18 +297,29 @@ fn gemini_selected_target_projects_reasoning_with_reasoning_capability() {
 }
 
 #[test]
-fn gemini_wire_rejects_reasoning_effort_without_a_shared_level() {
+fn gemini_wire_omits_reasoning_effort_without_a_shared_level_and_records_drop() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "reasoning_effort": "xhigh"
     });
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("an effort without a Gemini equivalent must fail explicitly");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_effort"
+    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Gemini,
+    )
+    .expect("unmapped reasoning_effort level must emit drop record and omit");
+    assert!(request.get("reasoning_effort").is_none(), "{request}");
+    assert!(
+        request
+            .pointer("/generationConfig/thinkingConfig")
+            .is_none(),
+        "{request}"
+    );
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.reasoning_effort"),
+        "expected drop record for $.reasoning_effort: {drops:?}"
     );
 }
 
@@ -357,18 +388,27 @@ fn gemini_wire_preserves_parallel_tool_calls_false_opaquely() {
 }
 
 #[test]
-fn gemini_wire_rejects_unknown_routecodex_chat_extension() {
+fn gemini_wire_omits_unknown_routecodex_chat_extension_with_drop_record() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "routecodex_chat_extension": {"route": "search"}
     });
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("unknown Chat extensions must not be stripped for Gemini");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.route"
+    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Gemini,
+    )
+    .expect("unknown Chat extension without Gemini slot must omit with drop record");
+    assert!(
+        request.get("routecodex_chat_extension").is_none(),
+        "{request}"
+    );
+    assert_eq!(request["contents"][0]["parts"][0]["text"], "think");
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.routecodex_chat_extension.route"),
+        "expected drop record for $.routecodex_chat_extension.route: {drops:?}"
     );
 }
 
@@ -425,18 +465,30 @@ fn gemini_wire_rejects_function_tool_choice_missing_name() {
 }
 
 #[test]
-fn gemini_wire_rejects_unknown_tool_choice_member() {
+fn gemini_wire_omits_unknown_tool_choice_member_while_preserving_tool_config() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "go"}]}],
         "tool_choice": {"type": "function", "function": {"name": "lookup"}, "route": "shadow"}
     });
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("unknown tool_choice members must not be stripped");
+    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Gemini,
+    )
+    .expect("unknown tool_choice member must emit drop record and preserve functionCallingConfig");
     assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.tool_choice.route"
+        request.pointer("/toolConfig/functionCallingConfig/mode"),
+        Some(&json!("ANY"))
+    );
+    assert_eq!(
+        request.pointer("/toolConfig/functionCallingConfig/allowedFunctionNames"),
+        Some(&json!(["lookup"]))
+    );
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.tool_choice.route"),
+        "expected drop record for $.tool_choice.route: {drops:?}"
     );
 }
 
@@ -536,7 +588,7 @@ fn gemini_wire_consumes_false_responses_store_extension() {
 }
 
 #[test]
-fn gemini_wire_rejects_responses_origin_reasoning_summary_policy_extension() {
+fn gemini_wire_omits_responses_origin_reasoning_summary_policy_extension_with_drop_record() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
@@ -547,27 +599,44 @@ fn gemini_wire_rejects_responses_origin_reasoning_summary_policy_extension() {
             }
         }
     });
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini has no declared Responses summary-policy projection");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.reasoning_summary_policy"
+    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Gemini,
+    )
+    .expect("unmapped responses_request policy extension must omit with drop record");
+    assert!(
+        request.get("routecodex_chat_extension").is_none(),
+        "{request}"
+    );
+    assert!(
+        drops.iter().any(|drop| {
+            drop.json_path
+                == "$.routecodex_chat_extension.responses_request.reasoning_summary_policy"
+        }),
+        "expected drop record for reasoning_summary_policy: {drops:?}"
     );
 }
 
 #[test]
-fn gemini_wire_rejects_true_responses_store_extension() {
+fn gemini_wire_omits_true_responses_store_extension_with_drop_record() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
         "routecodex_chat_extension": {"responses_request": {"store": true}}
     });
-    let error =
-        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini cannot honor a true Responses store request");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.store"
+    let (request, drops) = project_outbound_payload_for_target_protocol_with_drops(
+        &payload,
+        V3OutboundTargetProtocol::Gemini,
+    )
+    .expect("store=true without Gemini slot must omit with drop record");
+    assert!(
+        request.get("routecodex_chat_extension").is_none(),
+        "{request}"
+    );
+    assert!(
+        drops
+            .iter()
+            .any(|drop| drop.json_path == "$.routecodex_chat_extension.responses_request.store"),
+        "expected drop record for store: {drops:?}"
     );
 }

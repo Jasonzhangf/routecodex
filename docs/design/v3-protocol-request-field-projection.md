@@ -300,10 +300,13 @@ terminality on the wire is `status` (plus `incomplete_details` /
 
 `stop_reason=null` is valid only on the Anthropic streaming `message_start`
 shape. A materialized final message, whether sourced from JSON or SSE, requires
-a listed non-null value. Unknown/non-string values, contradictory
-`stop_sequence`, and non-object `stop_details` fail at the same terminal owner.
-The SSE transport may only frame the resulting canonical response; it does not
-own another stop-reason mapping.
+a listed non-null value. When `stop_reason=stop_sequence`, a non-empty string
+`stop_sequence` is required and fails at the terminal owner if missing or
+malformed. Extraneous `stop_sequence` on other terminal kinds warns and is
+omitted without blocking deliverable output; unknown/non-string `stop_reason`
+and non-object `stop_details` fail at the same terminal owner. The SSE
+transport may only frame the resulting canonical response; it does not own
+another stop-reason mapping.
 
 ### Typed tool-result error projection
 
@@ -332,19 +335,22 @@ MetadataCenter are forbidden inference sources.
 | `thinking` | Responses reasoning summary/signature projection | `mapped_compatible_registered` |
 | `redacted_thinking` | opaque Responses reasoning encrypted content | `mapped_compatible_registered` |
 | `tool_use` | typed Responses function/custom tool call | `mapped_exact` or governed custom compatibility wrapper |
-| `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; other names fail |
-| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; missing/duplicate/unpaired identity or unsupported result shape fails |
-| `web_fetch_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `bash_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `text_editor_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `tool_search_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
-| `container_upload` | no registered Responses mapping | `unsupported_fail_fast` |
+| `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; unsupported non-empty `name` warns and omits block |
+| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; invalid unpaired `tool_use_id` fails explicitly with `UnpairedWebSearchToolResult` |
+| `web_fetch_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `bash_code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `text_editor_code_execution_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `tool_search_tool_result` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| `container_upload` | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
+| unknown complete block (`type` is non-empty string) | no registered Responses mapping | `unmapped_tolerant`: warn and omit block while retaining deliverable content |
 
-Missing and unknown `content[].type` values are distinct malformed/unknown
-errors. Every unsupported diagnostic includes the exact
-`response.content[index].type` path and source type; silent skip, generic
-`provider response content type`, and text fallback are forbidden.
+Missing or non-string `content[].type` values remain hard errors at the
+response block parser (`MalformedResponseContentBlockType` /
+`MissingContentBlockType`). If after tolerating unknown/roundtrip-only/empty
+unsigned blocks an attempt carries no deliverable business result, the complete
+attempt fails via `GovernedAttemptEmpty` into the typed Error chain without
+fabricating an empty completion.
 
 ## Exact protocol projections
 

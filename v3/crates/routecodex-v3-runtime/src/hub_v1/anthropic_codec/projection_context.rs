@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 use super::V3AnthropicCodecError;
+use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct V3AnthropicResponsesProjectionContext {
@@ -15,6 +16,7 @@ pub struct V3AnthropicResponsesProjectionContext {
     /// the native kind from the declaration and never from a provider name.
     native_tool_search: bool,
     reasoning_summary_policy: Option<String>,
+    projection_drop_context: V3ProjectionDropContext,
 }
 
 impl V3AnthropicResponsesProjectionContext {
@@ -67,7 +69,18 @@ impl V3AnthropicResponsesProjectionContext {
             mcp_tool_identities,
             native_tool_search,
             reasoning_summary_policy,
+            projection_drop_context: V3ProjectionDropContext::disabled(),
         })
+    }
+
+    pub fn with_projection_drop_context(mut self, context: V3ProjectionDropContext) -> Self {
+        self.projection_drop_context = context;
+        self
+    }
+
+    pub(super) fn record_response_drops(&self, records: &mut [V3ProjectionDropRecord]) {
+        self.projection_drop_context
+            .restamp_response_and_emit(records);
     }
 
     pub(crate) fn governed_custom_tool_client_name(&self, name: &str) -> Option<&str> {

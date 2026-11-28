@@ -1452,7 +1452,7 @@ mod request_invalid_compat_tests {
         let error = crate::hub_v1::classify_v3_provider_compat_error(
             "request_protocol",
             &profile,
-            "UnmappedOutboundFields target_protocol=anthropic paths=$.tools[0].parameters"
+            "MalformedOutboundField target_protocol=anthropic path=$.tools[0].parameters"
                 .to_string(),
         );
         let source = compat_source("V3HubReqOutbound07ProviderSemantic", &error)

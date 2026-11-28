@@ -25,10 +25,10 @@ pub(crate) use provider_request_dry_run::{
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
     build_v3_provider_transport_request_for_protocol,
-    build_v3_provider_transport_request_from_parts,
-    is_v3_retain_response_cipher, provider_protocol_compat_id,
-    provider_wire_protocol_for_provider_type, provider_wire_protocol_for_selected_candidate,
-    v3_provider_profile_requires_upstream_sse, V3ProviderWireTransportContext,
+    build_v3_provider_transport_request_from_parts, is_v3_retain_response_cipher,
+    provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
+    provider_wire_protocol_for_selected_candidate, v3_provider_profile_requires_upstream_sse,
+    V3ProviderWireTransportContext,
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
@@ -37,15 +37,15 @@ pub(crate) use relay_runtime_shared::{
     build_v3_runtime_provider_failed_attempt_evidence_from_response,
     build_v3_runtime_provider_failure_observation_from_policy_event, error_output,
     external_http_witness_from_provider_error, external_http_witness_head,
-    extract_error_type_style, extract_message_type_style,
-    provider_pool_exhausted_source, provider_request_failure, provider_runtime_failure,
-    provider_target, push_sse_response_chain_trace, server_routing_group,
-    terminalize_provider_failure, wrap_v3_relay_client_sse_usage_observation,
-    V3RelayCommittedSseStream, V3RelayProjectedSseStream, V3RelayProviderFailure,
+    extract_error_type_style, extract_message_type_style, provider_pool_exhausted_source,
+    provider_request_failure, provider_runtime_failure, provider_target,
+    push_sse_response_chain_trace, server_routing_group, terminalize_provider_failure,
+    wrap_v3_relay_client_sse_usage_observation, V3RelayCommittedSseStream,
+    V3RelayProjectedSseStream, V3RelayProviderFailure,
 };
 mod relay_runtime_core;
 pub(crate) use relay_runtime_core::{
-    v3_relay_transport_response_timeout, V3RelayCoreError,
+    v3_relay_transport_response_timeout, v3_relay_transport_send_timeout, V3RelayCoreError,
     V3RelayProtocolCodec,
 };
 mod responses_openai_codec;

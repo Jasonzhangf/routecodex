@@ -39,9 +39,11 @@ async fn direct_ordinary_429_streak_uses_the_failure_observation_time() {
     for offset in 0..9 {
         record_v3_direct_provider_failure_record(
             &health,
+            None,
             &scope,
             &selected,
             &source,
+            429,
             now - 125_000 + offset * 1_000,
         )
         .unwrap();
@@ -49,6 +51,7 @@ async fn direct_ordinary_429_streak_uses_the_failure_observation_time() {
     let availability = health.session_bound_availability(&scope);
     let result = run_v3_direct_provider_failure_policy(
         &V3DirectProviderFailurePolicyContext {
+            manifest: Some(&manifest),
             failure_session_scope: &scope,
             provider_health: &health,
             recovery_control: None,
@@ -147,6 +150,7 @@ async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
     let mut trace = Vec::new();
     let result = run_v3_direct_provider_failure_policy(
         &V3DirectProviderFailurePolicyContext {
+            manifest: Some(&manifest),
             failure_session_scope: &scope,
             provider_health: &health,
             recovery_control: None,
@@ -382,6 +386,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
     let mut trace = vec![];
     let result = run_v3_direct_provider_failure_policy(
         &V3DirectProviderFailurePolicyContext {
+            manifest: Some(&manifest),
             failure_session_scope: &scope,
             provider_health: &health,
             recovery_control: None,
@@ -721,9 +726,11 @@ async fn direct_provider_failure_counts_until_matching_success_or_cooldown() {
 
     let record = record_v3_direct_provider_failure_record(
         &health,
+        None,
         &session,
         &plan.decision.target,
         &source,
+        502,
         100,
     )
     .expect("direct failure must be observed");
@@ -751,9 +758,11 @@ async fn direct_provider_failure_counts_until_matching_success_or_cooldown() {
         .unwrap();
     let second = record_v3_direct_provider_failure_record(
         &health,
+        None,
         &session,
         &plan.decision.target,
         &source,
+        502,
         102,
     )
     .expect("second direct failure");
@@ -774,9 +783,11 @@ async fn direct_provider_failure_counts_until_matching_success_or_cooldown() {
     for count in 1..=10 {
         let record = record_v3_direct_provider_failure_record(
             &health,
+            None,
             &session,
             &plan.decision.target,
             &source,
+            502,
             104,
         )
         .expect("new streak after matching success");
@@ -847,9 +858,11 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         for offset in 0..threshold {
             let record = record_v3_direct_provider_failure_record(
                 &health,
+                None,
                 &session,
                 &plan.decision.target,
                 &source,
+                status,
                 100 + u64::from(offset),
             )
             .expect("direct failure must be recorded");

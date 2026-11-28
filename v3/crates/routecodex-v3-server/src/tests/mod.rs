@@ -5969,7 +5969,7 @@ async fn responses_relay_json_error_returns_typed_no_response() {
         client_body: V3ResponsesRelayClientBody::Json(json!({
             "error": {
                 "code": "provider_request_payload_invalid",
-                "message": "UnmappedOutboundFields target_protocol=anthropic paths=$.request.text.output_config.format.name"
+                "message": "MalformedOutboundField target_protocol=anthropic path=$.request.text.output_config.format.name"
             }
         })),
         node_trace: vec!["V3HubReqChatProcess04Governed", "V3Error06ClientProjected"],

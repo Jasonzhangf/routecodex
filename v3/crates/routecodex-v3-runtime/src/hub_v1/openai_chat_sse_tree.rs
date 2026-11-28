@@ -90,8 +90,7 @@ pub enum V3OpenAiChatSseTerminalState {
     Opaque,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct V3OpenAiChatSseReducerState {
     pub id: Option<String>,
     pub model: Option<String>,
@@ -322,7 +321,6 @@ impl V3OpenAiChatSseMaterializedChoice {
         Ok(Value::Object(choice))
     }
 }
-
 
 impl V3OpenAiChatSseReducerState {
     pub fn has_tool_calls(&self) -> bool {

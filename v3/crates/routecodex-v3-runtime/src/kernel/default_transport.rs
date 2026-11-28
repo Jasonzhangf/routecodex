@@ -11,6 +11,14 @@ pub(super) fn responses_direct_transport_response_timeout(
     crate::hub_v1::v3_relay_transport_response_timeout(manifest, provider_id)
 }
 
+pub(super) fn responses_direct_transport_send_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+    stream_intent: routecodex_v3_provider_responses::V3ResponsesStreamIntent,
+) -> std::time::Duration {
+    crate::hub_v1::v3_relay_transport_send_timeout(manifest, provider_id, stream_intent)
+}
+
 static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
 
 pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
