@@ -1374,6 +1374,7 @@ fn build_responses_input_from_chat_messages_with_provenance_and_drops_and_litera
                     if let Some(item) = chat_tool_call_to_responses_input_item_with_provenance(
                         call,
                         suppress_hosted_call,
+                        preserve_responses_entry_tool_output_id,
                     )? {
                         let call_order = provenance
                             .and_then(|provenance| provenance.tool_call_order(msg_idx, call_idx));

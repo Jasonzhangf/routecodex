@@ -316,6 +316,92 @@ fn responses_entry_omits_id_for_idless_legacy_receipt_alongside_native_fc_callid
 }
 
 #[test]
+fn responses_entry_keeps_absent_id_absent_on_function_and_custom_tool_calls() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "receipt42",
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"}
+                    },
+                    {
+                        "id": "custom42",
+                        "type": "function",
+                        "function": {"name": "apply_patch", "arguments": "{\"input\":\"patch\"}"},
+                        "routecodex_chat_extension": {"responses_tool_call_type": "custom_tool_call"}
+                    },
+                    {
+                        "id": "explicit42",
+                        "type": "function",
+                        "function": {"name": "inspect", "arguments": "{}"},
+                        "routecodex_chat_extension": {"responses_item_id": "item_explicit42"}
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "receipt42",
+                "content": "done",
+                "routecodex_chat_extension": {"responses_item_id": "fc_receipt42"}
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "custom42",
+                "content": "patched",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_type": "custom_tool_call_output",
+                    "responses_item_id": "fc_custom42"
+                }
+            }
+        ]
+    });
+    let provenance = super::super::V3HubExplicitHistoryProvenance {
+        message_entries: vec![
+            super::super::V3HubMessageHistoryProvenance::default(),
+            super::super::V3HubMessageHistoryProvenance {
+                preserve_native_tool_output_id: true,
+                ..Default::default()
+            },
+            super::super::V3HubMessageHistoryProvenance {
+                preserve_native_tool_output_id: true,
+                ..Default::default()
+            },
+        ],
+    };
+    let (wire, _, _) =
+        super::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+            &payload,
+            false,
+            false,
+            Some(&provenance),
+            true,
+        )
+        .expect("Responses entry must keep absent optional call ids absent");
+    let input = wire["input"].as_array().expect("Responses input array");
+    assert_eq!(input.len(), 5, "{wire}");
+    assert_eq!(input[0]["type"], "function_call");
+    assert!(input[0].get("id").is_none(), "{wire}");
+    assert_eq!(input[0]["call_id"], "receipt42");
+    assert_eq!(input[1]["type"], "custom_tool_call");
+    assert!(input[1].get("id").is_none(), "{wire}");
+    assert_eq!(input[1]["call_id"], "custom42");
+    assert_eq!(input[2]["type"], "function_call");
+    assert_eq!(input[2]["id"], "item_explicit42");
+    assert_eq!(input[2]["call_id"], "explicit42");
+    assert_eq!(input[3]["type"], "function_call_output");
+    assert_eq!(input[3]["id"], "fc_receipt42");
+    assert_eq!(input[3]["call_id"], "receipt42");
+    assert_eq!(input[4]["type"], "custom_tool_call_output");
+    assert_eq!(input[4]["id"], "fc_custom42");
+    assert_eq!(input[4]["call_id"], "custom42");
+}
+
+#[test]
 fn responses_wire_preserves_custom_tool_item_ids() {
     let payload = json!({
         "model": "gpt-test",

@@ -122,12 +122,13 @@ pub(super) fn chat_content_to_responses_content(
 pub(super) fn chat_tool_call_to_responses_input_item(
     call: &Value,
 ) -> Result<Option<Value>, String> {
-    chat_tool_call_to_responses_input_item_with_provenance(call, false)
+    chat_tool_call_to_responses_input_item_with_provenance(call, false, false)
 }
 
 pub(super) fn chat_tool_call_to_responses_input_item_with_provenance(
     call: &Value,
     suppress_responses_hosted_call: bool,
+    preserve_responses_entry_item_id: bool,
 ) -> Result<Option<Value>, String> {
     let Some(row) = call.as_object() else {
         return Ok(None);
@@ -178,16 +179,21 @@ pub(super) fn chat_tool_call_to_responses_input_item_with_provenance(
         None => None,
     };
     if responses_tool_call_type == "custom_tool_call" {
-        let item_id = responses_custom_item_id(row, call_id);
         let mut item = Map::from_iter([
             (
                 "type".to_string(),
                 Value::String("custom_tool_call".to_string()),
             ),
-            ("id".to_string(), Value::String(item_id)),
             ("call_id".to_string(), Value::String(call_id.to_string())),
             ("name".to_string(), Value::String(name.clone())),
         ]);
+        insert_responses_tool_call_item_id(
+            row,
+            call_id,
+            preserve_responses_entry_item_id,
+            true,
+            &mut item,
+        );
         if let Some(arguments_text) = arguments_text.as_deref() {
             let input = serde_json::from_str::<Value>(arguments_text)
                 .ok()
@@ -225,21 +231,45 @@ pub(super) fn chat_tool_call_to_responses_input_item_with_provenance(
         return Ok(Some(Value::Object(item)));
     }
 
-    let item_id = responses_function_item_id(row, call_id);
     let mut item = Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call".to_string()),
         ),
-        ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name)),
     ]);
+    insert_responses_tool_call_item_id(
+        row,
+        call_id,
+        preserve_responses_entry_item_id,
+        false,
+        &mut item,
+    );
     if let Some(arguments_text) = arguments_text {
         item.insert("arguments".to_string(), Value::String(arguments_text));
     }
     project_responses_call_signature(row, &mut item);
     Ok(Some(Value::Object(item)))
+}
+
+fn insert_responses_tool_call_item_id(
+    row: &Map<String, Value>,
+    call_id: &str,
+    preserve_responses_entry_item_id: bool,
+    is_custom_tool_call: bool,
+    item: &mut Map<String, Value>,
+) {
+    let item_id = if preserve_responses_entry_item_id {
+        responses_item_id_from_chat_extension(row).map(str::to_string)
+    } else if is_custom_tool_call {
+        Some(responses_custom_item_id(row, call_id))
+    } else {
+        Some(responses_function_item_id(row, call_id))
+    };
+    if let Some(item_id) = item_id {
+        item.insert("id".to_string(), Value::String(item_id));
+    }
 }
 
 /// Same-protocol opaque business extension: preserve the exact call-local value.

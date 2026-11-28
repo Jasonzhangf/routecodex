@@ -10008,6 +10008,101 @@ async fn issue4a0b3aa_r23_dual_idless_legacy_and_native_fc_callid_no_collision_p
 }
 
 #[tokio::test]
+async fn issue4a0b3aa_r24_paired_idless_call_and_explicit_fc_output_no_id_collision_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r24_paired_idless_call_and_fc_output",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r24-no-collision-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    let res = client
+        .post(&resp_endpoint)
+        .json(&json!({
+            "model": "test",
+            "stream": false,
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "receipt42",
+                    "name": "lookup",
+                    "arguments": "{}"
+                },
+                {
+                    "type": "function_call_output",
+                    "id": "fc_receipt42",
+                    "call_id": "receipt42",
+                    "output": "done"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect(
+            "ID-less function_call and explicit fc_receipt42 output must succeed without collision",
+        );
+    assert_eq!(res.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+        .await
+        .expect("r24 paired idless call capture timeout")
+        .expect("r24 paired idless call capture");
+    let input = capture.body["input"]
+        .as_array()
+        .expect("provider input array");
+    assert_eq!(
+        input.len(),
+        2,
+        "both ID-less function_call and explicit fc_receipt42 output must reach first provider: {}",
+        capture.body
+    );
+    assert!(
+        input[0].get("id").is_none(),
+        "ID-less function_call must keep id absent so it cannot collide with fc_receipt42: {}",
+        capture.body
+    );
+    assert_eq!(
+        input[0],
+        json!({
+            "type": "function_call",
+            "call_id": "receipt42",
+            "name": "lookup",
+            "arguments": "{}"
+        })
+    );
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "function_call_output",
+            "id": "fc_receipt42",
+            "call_id": "receipt42",
+            "output": "done"
+        })
+    );
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_does_not_restore_missing_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
