@@ -212,14 +212,16 @@ fn no_first_failure_local_response_source_never_becomes_transport_health() {
         .unwrap();
     assert_eq!(projection.success_streak, 1);
     assert_eq!(
-        projection.score_milli, 101,
+        projection.score_milli, 125,
         "local codec failure must not mutate provider score"
     );
 }
 
 #[test]
 fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
-    for (status, code) in [(401, "invalid_api_key"), (0, "account_disabled")] {
+    for (status, code, expected_threshold) in
+        [(401, "invalid_api_key", 5), (0, "account_disabled", 5)]
+    {
         let failure = source(V3ErrorSourceKind::ProviderFailure, code, status);
         let classified = build_v3_error_02_classified_from_v3_error_01(failure);
         let action = apply_v3_internal_provider_failure_policy(
@@ -233,16 +235,18 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
         assert_eq!(
-            action.failure_threshold, 1,
-            "real terminal boundary must not wait for repeat: {code}"
+            action.failure_threshold, expected_threshold,
+            "configured terminal boundary must match: {code}"
         );
         let store = V3ProviderHealthStore::default();
-        assert!(
-            store
-                .record_provider_failure_action("p", "k", "m", &action, 100)
+        let mut cooled = false;
+        for i in 0..expected_threshold {
+            cooled = store
+                .record_provider_failure_action("p", "k", "m", &action, 100 + u64::from(i))
                 .unwrap()
-                .cooldown
-        );
+                .cooldown;
+        }
+        assert!(cooled);
     }
 }
 
@@ -265,12 +269,18 @@ fn typed_quota_failure_cools_immediately_and_success_cannot_reopen_it() {
         action.recovery,
         V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
     );
-    assert_eq!(action.failure_threshold, 1);
-    let failure = store
+    assert_eq!(action.failure_threshold, 5);
+    let mut failure = store
         .record_provider_failure_action("p", "k", "m", &action, 100)
         .unwrap();
+    for attempt in 1..5 {
+        assert!(!failure.cooldown);
+        failure = store
+            .record_provider_failure_action("p", "k", "m", &action, 100 + attempt)
+            .unwrap();
+    }
     assert!(failure.cooldown);
-    assert_eq!(failure.cooldown_until_ms, Some(3_600_100));
+    assert_eq!(failure.cooldown_until_ms, Some(3_600_104));
     let success = store
         .record_provider_key_success("p", "k", "m", 106)
         .unwrap();

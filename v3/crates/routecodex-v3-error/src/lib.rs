@@ -1287,27 +1287,16 @@ impl V3ErrorHandlingCenter {
     /// Classify the current provider terminal while keeping raw evidence
     /// separate from the client-projection qualification.
     pub fn provider_terminal_disposition_for_source(
-        source: &V3Error01SourceRaised,
-        target_exhausted: bool,
+        _source: &V3Error01SourceRaised,
+        _target_exhausted: bool,
         witness: Option<V3ExternalHttpWitness>,
     ) -> V3ProviderTerminalDisposition {
         let Some(witness) = witness else {
             return V3ProviderTerminalDisposition::NoResponse;
         };
-        let can_project = target_exhausted
-            && source.source_kind == V3ErrorSourceKind::ProviderFailure
-            && source
-                .external_error
-                .as_ref()
-                .and_then(|error| error.status)
-                == Some(witness.status())
-            && !(200..300).contains(&witness.status())
-            && witness.body_read_failure().is_none();
-        if can_project {
-            V3ProviderTerminalDisposition::ProjectExternalHttp(witness)
-        } else {
-            V3ProviderTerminalDisposition::ExternalHttp(witness)
-        }
+        // Last-provider error passthrough is retired: keep the upstream HTTP
+        // witness internal for diagnostics and terminate only the transport.
+        V3ProviderTerminalDisposition::ExternalHttp(witness)
     }
 
     pub fn provider_terminal_disposition(

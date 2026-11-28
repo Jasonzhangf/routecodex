@@ -470,6 +470,80 @@ impl V3TargetInterpreter {
                 bucket,
             });
         }
+        // Fallback: if all non-cooled candidates are exhausted or cooled, allow
+        // untried candidates blocked only by automatic health cooldown /
+        // probe_pending (never request-local failures or manual disables) so
+        // requests keep trying remaining providers instead of aborting early.
+        if eligible.is_empty() && admitted_count > 1 {
+            for candidate in selection_rows {
+                let identity = candidate.active_key_identity();
+                let Some(index) = indices.get(&identity).copied() else {
+                    continue;
+                };
+                let Some(occurrence) = candidate.occurrences.first() else {
+                    continue;
+                };
+                if excluded.contains(&identity)
+                    || active.is_some_and(|context| context.excluded.contains(&identity))
+                    || !Self::candidate_admitted(candidate, now_ms)
+                {
+                    continue;
+                }
+                let mut projection = scheduling.scheduling_projection_for_interface(
+                    routecodex_v3_provider_responses::V3ProviderKeyRef::new(
+                        &candidate.provider_id,
+                        &candidate.auth_alias,
+                        &candidate.model_id,
+                    ),
+                    &candidate.interface_id,
+                    candidate.priority,
+                    candidate.weight,
+                    now_ms,
+                );
+                if projection.available
+                    || !Self::ignores_single_candidate_automatic_cooldown(
+                        1,
+                        &projection.blocked_scopes,
+                    )
+                {
+                    continue;
+                }
+                projection.available = true;
+                projection.blocked_scopes.clear();
+                let rank = expanded
+                    .route
+                    .target_plan
+                    .len()
+                    .saturating_sub(occurrence.tier_index);
+                let scheduled_priority =
+                    self.provider_priority_schedule_priority(expanded, candidate, now_ms);
+                projection.effective_priority = projection
+                    .effective_priority
+                    .saturating_add(scheduled_priority.saturating_sub(candidate.priority))
+                    .saturating_add((rank as i32).saturating_mul(1_000_000));
+                let near_limit =
+                    context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
+                        .is_some()
+                        || context_window_near_limit_reason(
+                            expanded.route.request_input_tokens,
+                            candidate,
+                        )
+                        .is_some();
+                let bucket = (
+                    rank,
+                    scheduled_priority,
+                    !near_limit,
+                    projection.effective_priority,
+                );
+                eligible.push(EligibleOccurrence {
+                    index,
+                    candidate,
+                    occurrence,
+                    projection,
+                    bucket,
+                });
+            }
+        }
         (eligible, unavailable, cooled)
     }
 

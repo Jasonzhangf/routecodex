@@ -93,7 +93,33 @@ fn classified_global_429_burst_expires_and_auth_is_immediate() {
         action_401.recovery,
         V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
     );
-    assert_eq!(action_401.failure_threshold, 1);
+    assert_eq!(action_401.failure_threshold, 5);
+    for attempt in 1..=4 {
+        unrecoverable_health
+            .record_provider_global_health_for_classified_error(
+                &scope,
+                "first",
+                "default",
+                Some("key1"),
+                Some("gpt-test"),
+                &classified_401,
+                10_000 + attempt,
+            )
+            .expect("classified unrecoverable failure should record");
+        assert!(
+            unrecoverable_health
+                .store()
+                .availability_for_session(
+                    &scope,
+                    "first",
+                    Some("key1"),
+                    Some("gpt-test"),
+                    10_000 + attempt,
+                )
+                .available,
+            "401 must remain available before its 5th consecutive failure (attempt={attempt})"
+        );
+    }
     unrecoverable_health
         .record_provider_global_health_for_classified_error(
             &scope,
@@ -102,43 +128,25 @@ fn classified_global_429_burst_expires_and_auth_is_immediate() {
             Some("key1"),
             Some("gpt-test"),
             &classified_401,
-            10_000,
+            10_005,
         )
-        .expect("classified unrecoverable failure should record");
-    assert!(
-        !unrecoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000,)
-            .available,
-        "401 must be blocked after its first provider failure"
-    );
-    unrecoverable_health
-        .record_provider_global_health_for_classified_error(
-            &scope,
-            "first",
-            "default",
-            Some("key1"),
-            Some("gpt-test"),
-            &classified_401,
-            10_001,
-        )
-        .expect("repeated classified 401 failure should remain isolated");
-    let second_401 = unrecoverable_health.store().availability_for_session(
+        .expect("classified 5th 401 failure should record");
+    let fifth_401 = unrecoverable_health.store().availability_for_session(
         &scope,
         "first",
         Some("key1"),
         Some("gpt-test"),
-        10_001,
+        10_005,
     );
     assert!(
-        !second_401.available,
-        "401 must remain blocked while cooldown is active: {second_401:?}"
+        !fifth_401.available,
+        "401 must be blocked after its 5th consecutive provider failure: {fifth_401:?}"
     );
 
     let payment_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified_402 =
         classified_provider_error("V3ProviderRespInbound01Raw", "payment_required", 402);
-    for now_ms in [20_000] {
+    for now_ms in 20_000..20_005 {
         payment_health
             .record_provider_global_health_for_classified_error(
                 &scope,
@@ -154,9 +162,9 @@ fn classified_global_429_burst_expires_and_auth_is_immediate() {
     assert!(
         !payment_health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_004)
             .available,
-        "402 must reach global health and cool after its first failure"
+        "402 must reach global health and cool after its 5th consecutive failure"
     );
 }
 
