@@ -282,9 +282,9 @@ async fn direct_generic_provider_http_400_exhaustion_records_exact_identity_with
     );
     assert_eq!(output.observability.as_ref().and_then(|value| value.attempts), Some(1),
         "exhaustion must preserve its completed provider attempt: {output:?}");
-    assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ProjectExternalHttp(ref witness))
+    assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness))
         if witness.status() == 400 && String::from_utf8_lossy(witness.body()).contains("prompt is too long")),
-        "the complete final provider400 is qualified for client projection: {output:?}");
+        "the complete final provider400 stays internal for diagnostics: {output:?}");
     assert!(
         output.error_chain.is_some(),
         "generic provider HTTP 400 exhaustion must retain its internal error: {output:?}"

@@ -75,6 +75,7 @@ struct Entry {
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
+#[derive(Debug)]
 struct ClientResponse {
     status: reqwest::StatusCode,
     body: String,
@@ -245,9 +246,10 @@ async fn i86_single_stale_cooldown_bypass() {
         "a new request must send again without retrying the failed request"
     );
     for reply in [one, two] {
-        let reply = reply.expect("the final real Provider HTTP 503 must reach the client");
-        assert_eq!(reply.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(reply.body, FINAL_PROVIDER_ERROR_BODY);
+        assert!(
+            reply.is_err(),
+            "final Provider HTTP 503 must break transport without reaching the client: {reply:?}"
+        );
     }
 }
 
@@ -305,9 +307,9 @@ async fn i86_single_active_exact_cooldown_requires_release() {
         calls, 1,
         "operator release must restore the next real request"
     );
-    let reply = reply.expect("the final real Provider HTTP 503 must reach the client");
-    assert_eq!(reply.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(reply.body, FINAL_PROVIDER_ERROR_BODY);
+    reply.expect_err(
+        "the final real Provider HTTP 503 must break transport without reaching the client",
+    );
     assert!(
         released_pool["entries"].as_array().unwrap().is_empty(),
         "the final candidate failure must remain health-neutral: {released_pool}"
@@ -348,9 +350,9 @@ async fn i86_last_eligible_failure_is_terminal() {
         "last candidate must not acquire cooldown: {pool}"
     );
     for reply in replies {
-        let reply = reply.expect("the final real Provider HTTP 503 must reach the client");
-        assert_eq!(reply.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(reply.body, FINAL_PROVIDER_ERROR_BODY);
+        reply.expect_err(
+            "the final real Provider HTTP 503 must break transport without reaching the client",
+        );
     }
 }
 
@@ -373,12 +375,13 @@ async fn i86_multi_last_eligible_stays_routable() {
         (0, 2),
         "last eligible B must remain usable on the next request without retrying A"
     );
-    let one = one.expect("the final real Provider HTTP 503 must reach the client");
-    let two = two.expect("the final real Provider HTTP 503 must reach the client");
-    assert_eq!(one.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(one.body, FINAL_PROVIDER_ERROR_BODY);
-    assert_eq!(two.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(two.body, FINAL_PROVIDER_ERROR_BODY);
+    let one = one.expect_err(
+        "the final real Provider HTTP 503 must break transport without reaching the client",
+    );
+    let two = two.expect_err(
+        "the final real Provider HTTP 503 must break transport without reaching the client",
+    );
+    let _ = (one, two);
     assert!(
         pool["entries"]
             .as_array()
@@ -407,9 +410,9 @@ async fn i86_exhaustion_is_request_local() {
         entry.stop().await;
         sibling.stop().await;
         assert_eq!(calls, (1, 1), "each failed candidate is sent once");
-        let failed = failed.expect("the final real Provider HTTP 503 must reach the client");
-        assert_eq!(failed.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(failed.body, FINAL_PROVIDER_ERROR_BODY);
+        failed.expect_err(
+            "the final real Provider HTTP 503 must break transport without reaching the client",
+        );
         assert!(
             healthy.unwrap().contains("BUSINESS_B"),
             "failure must not terminate an independent request"
@@ -448,12 +451,13 @@ async fn i86_relay_switch_and_last_terminal() {
         calls, 2,
         "Relay must send each new request once without terminal retry"
     );
-    let one = one.expect("the final real Anthropic Relay HTTP 503 must reach the client");
-    let two = two.expect("the final real Anthropic Relay HTTP 503 must reach the client");
-    assert_eq!(one.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(one.body, FINAL_PROVIDER_ERROR_BODY);
-    assert_eq!(two.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(two.body, FINAL_PROVIDER_ERROR_BODY);
+    let one = one.expect_err(
+        "the final real Anthropic Relay HTTP 503 must break transport without reaching the client",
+    );
+    let two = two.expect_err(
+        "the final real Anthropic Relay HTTP 503 must break transport without reaching the client",
+    );
+    let _ = (one, two);
     assert!(
         pool["entries"].as_array().unwrap().is_empty(),
         "Relay last candidate cannot cool: {pool}"

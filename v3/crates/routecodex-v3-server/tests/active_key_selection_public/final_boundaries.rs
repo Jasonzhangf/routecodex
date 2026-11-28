@@ -956,7 +956,7 @@ async fn handoff(relay_first: bool, successor: Successor) {
     match successor {
         Successor::Held => {
             assert_eq!(calls, ["A"]);
-            let Some(V3ProviderTerminalDisposition::ProjectExternalHttp(witness)) = terminal else {
+            let Some(V3ProviderTerminalDisposition::ExternalHttp(witness)) = terminal else {
                 panic!("unqualified actual A after handoff: {terminal:?}, {source:?}");
             };
             assert_eq!(witness.status(), 503);
@@ -983,7 +983,7 @@ async fn handoff(relay_first: bool, successor: Successor) {
             assert_eq!(calls, ["A"]);
             assert!(!matches!(
                 terminal,
-                Some(V3ProviderTerminalDisposition::ProjectExternalHttp(_))
+                Some(V3ProviderTerminalDisposition::ExternalHttp(_))
             ));
             let source = source.expect("independent preparation failure must retain a typed cause");
             assert_eq!(
@@ -1119,10 +1119,7 @@ async fn final_trial(provider: &'static str, endpoint: &str, payload: Value) {
             .json(&payload)
             .send()
             .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap();
+            .expect_err("sole candidate HTTP 500 must break transport cleanly");
     }
     let final_queue = entry.queue().await;
     let all_calls = entry.calls();
@@ -1146,14 +1143,8 @@ async fn final_trial(provider: &'static str, endpoint: &str, payload: Value) {
     for field in ["until_ms", "failure_count", "kind", "reason"] {
         assert_eq!(after[field], before[field], "{field}");
     }
-    let response = response.unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(response.headers()["content-type"], "application/json");
-    let expected = json!({"error":{"message":"ordinary controlled upstream failure alias=A status=500","type":"server_error"}}).to_string();
-    assert_eq!(
-        response.bytes().await.unwrap().as_ref(),
-        expected.as_bytes()
-    );
+    response
+        .expect_err("final only failed trial must break transport without client error projection");
 }
 
 #[tokio::test]
@@ -1276,10 +1267,8 @@ async fn server_skipped_retry(protocol: &'static str) {
     entry.stop().await;
     assert_eq!(calls, ["A"], "{protocol}");
     assert!(clock.observations.load(Ordering::SeqCst) >= clock.close_at);
-    let response = response.unwrap();
-    assert_eq!(response.status(), 503);
-    assert_eq!(response.headers()["content-type"], "application/json");
-    assert_eq!(response.bytes().await.unwrap().as_ref(),json!({"error":{"message":"ordinary controlled upstream failure alias=A status=503","type":"server_error"}}).to_string().as_bytes());
+    response
+        .expect_err("single-candidate 503 after skipped retry must terminate transport cleanly");
 }
 #[tokio::test]
 async fn direct_skipped_retry_projects_exact_http_through_server() {

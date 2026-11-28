@@ -197,7 +197,7 @@ async fn assert_terminal_trial_remains_routable(mode: EntryMode) {
                     success_release: Arc::new(Semaphore::new(0)),
                     refusal_status: 401,
                     late_business_failure: false,
-                    refuse_limit: 1,
+                    refuse_limit: 5,
                 }),
         )
         .await
@@ -221,35 +221,32 @@ async fn assert_terminal_trial_remains_routable(mode: EntryMode) {
         .build()
         .unwrap();
 
-    assert!(business(&client, &managed).await.contains("spare-secret"));
-    assert_eq!(
-        rx.try_recv().unwrap(),
-        ("Bearer controlled-secret".into(), false)
-    );
-    assert_eq!(
-        rx.try_recv().unwrap(),
-        ("Bearer spare-secret".into(), false)
-    );
+    for _ in 0..5 {
+        assert!(business(&client, &managed).await.contains("spare-secret"));
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ("Bearer controlled-secret".into(), false)
+        );
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ("Bearer spare-secret".into(), false)
+        );
+    }
     let cooldown = pool_entries(&client, managed.pool_url())
         .await
         .into_iter()
         .find(|entry| entry["provider_id"] == "primary")
-        .expect("the real primary 401 must create its cooldown");
+        .expect("five consecutive primary 401s must create its cooldown");
     let until = cooldown["until_ms"].as_u64().unwrap();
     clock.0.store(until + 10_000, Ordering::SeqCst);
 
     for _ in 0..2 {
-        let response = client
+        client
             .post(format!("{}/v1/responses", managed.base))
             .json(&json!({"model":"primary.test","input":"terminal trial failure","stream":false}))
             .send()
             .await
-            .unwrap();
-        assert_eq!(response.status(), 503);
-        assert_eq!(
-            response.text().await.unwrap(),
-            r#"{"error":{"message":"terminal trial failure"}}"#
-        );
+            .expect_err("terminal trial exhaustion must break transport without client HTTP error");
         assert_eq!(
             timeout(Duration::from_secs(5), rx.recv())
                 .await
@@ -530,11 +527,11 @@ async fn direct_trial_uses_successor_window_at_failure_public_http() {
         let response = timeout(Duration::from_secs(5), trial)
             .await
             .unwrap()
-            .unwrap()
             .unwrap();
-        let status = response.status();
-        let body = response.text().await.unwrap();
         if spare_opens {
+            let response = response.unwrap();
+            let status = response.status();
+            let body = response.text().await.unwrap();
             assert_eq!(status, 200, "eligible successor must serve: {body}");
             assert!(body.contains("spare-secret"), "{body}");
             assert_eq!(
@@ -542,23 +539,14 @@ async fn direct_trial_uses_successor_window_at_failure_public_http() {
                 ("Bearer spare-secret".into(), false)
             );
         } else {
-            assert_eq!(
-                status, 503,
-                "closed successor leaves a real final error: {body}"
-            );
-            assert!(body.contains("upstream is still unavailable"), "{body}");
+            response.expect_err("closed successor must break transport without projecting 503");
             assert!(rx.try_recv().is_err());
-            let next = client
+            client
                 .post(format!("{}/v1/responses", managed.base))
                 .json(&json!({"model":"primary.test","input":"terminal trial failure","stream":false}))
                 .send()
                 .await
-                .unwrap();
-            assert_eq!(
-                next.status(),
-                503,
-                "the final trial must preserve immediate eligibility"
-            );
+                .expect_err("the final trial must preserve immediate eligibility and break transport");
             assert_eq!(
                 rx.try_recv().unwrap(),
                 ("Bearer controlled-secret".into(), false)
@@ -1048,7 +1036,7 @@ async fn direct_failure_hands_off_an_expired_trial_to_relay_once() {
                     success_release: Arc::new(Semaphore::new(0)),
                     refusal_status: 401,
                     late_business_failure: false,
-                    refuse_limit: 1,
+                    refuse_limit: 5,
                 }),
         )
         .await
@@ -1198,7 +1186,13 @@ async fn recovery_with_observation_race(
         success_release: success_release.clone(),
         refusal_status,
         late_business_failure,
-        refuse_limit: if in_flight_success { 3 } else { 1 },
+        refuse_limit: if refusal_status == 401 {
+            5
+        } else if in_flight_success {
+            3
+        } else {
+            1
+        },
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -1259,8 +1253,8 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         None
     };
     if in_flight_success {
-        // The held request already owns one slot, so the three business
-        // attempts must be refused together. The request-local failed
+        // The held request already owns one slot, so the three concurrent
+        // business attempts must be refused together. The request-local failed
         // identity exclusion still selects the spare for each request.
         let mut attempts = Vec::new();
         for _ in 0..3 {
@@ -1273,11 +1267,23 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         for attempt in attempts {
             assert!(attempt.await.unwrap().contains("spare-secret"));
         }
-        assert_eq!(
-            *failures.lock().await,
-            3,
-            "all three concurrent business attempts must reach exact key"
-        );
+        if refusal_status == 401 {
+            for _ in 0..2 {
+                assert!(business(&client, &managed).await.contains("spare-secret"));
+            }
+            assert_eq!(*failures.lock().await, 5);
+        } else {
+            assert_eq!(
+                *failures.lock().await,
+                3,
+                "all three concurrent business attempts must reach exact key"
+            );
+        }
+    } else if refusal_status == 401 {
+        for _ in 0..5 {
+            assert!(business(&client, &managed).await.contains("spare-secret"));
+        }
+        assert_eq!(*failures.lock().await, 5);
     } else {
         assert!(business(&client, &managed).await.contains("spare-secret"));
         assert_eq!(*failures.lock().await, 1);

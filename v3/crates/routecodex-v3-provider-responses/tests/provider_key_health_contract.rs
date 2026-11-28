@@ -165,7 +165,7 @@ fn concurrent_429s_count_once_without_sliding_the_short_deadline() {
         .record_provider_failure_action("p", "k", "m", &action, 121_001)
         .unwrap();
     assert_eq!(sustained.failure_streak, 19);
-    assert_eq!(sustained.cooldown_until_ms, Some(3_721_001));
+    assert_eq!(sustained.cooldown_until_ms, Some(181_001));
 }
 
 #[test]
@@ -511,8 +511,8 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     assert_eq!(episode.real_429_count, 11);
     assert_eq!(episode.first_429_at_ms, Some(1_000));
     assert_eq!(episode.last_429_at_ms, Some(136_000));
-    let hour_end = 3_736_000;
-    assert_eq!(episode.not_before_ms, Some(hour_end));
+    let cooldown_end = 196_000;
+    assert_eq!(episode.not_before_ms, Some(cooldown_end));
     assert!(episode.probe_required);
 
     let restored =
@@ -526,24 +526,24 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         "the restored exclusion keeps a probe schedule without restoring an active permit"
     );
     restored
-        .record_provider_key_success_for_interface("p", "default", "k", "m", hour_end - 2)
+        .record_provider_key_success_for_interface("p", "default", "k", "m", cooldown_end - 2)
         .unwrap();
     assert!(
         !restored
-            .availability_for_interface("p", "default", Some("k"), Some("m"), hour_end - 1)
+            .availability_for_interface("p", "default", Some("k"), Some("m"), cooldown_end - 1)
             .available,
-        "the persisted hour lock survives a business success"
+        "the persisted 429 cooldown survives a business success"
     );
     let probe = restored
         .acquire_provider_cooldown_probe_for_interface("p", "default", Some("k"), Some("m"))
         .unwrap()
         .expect("the restored lock exposes a fresh current probe");
     restored
-        .complete_provider_cooldown_probe_success_with_permit(&probe, hour_end)
+        .complete_provider_cooldown_probe_success_with_permit(&probe, cooldown_end)
         .unwrap();
     assert!(
         restored
-            .availability_for_interface("p", "default", Some("k"), Some("m"), hour_end)
+            .availability_for_interface("p", "default", Some("k"), Some("m"), cooldown_end)
             .available,
         "only the restored current qualified probe clears the persisted lock"
     );
@@ -687,7 +687,7 @@ fn hs02_score_is_clamped_per_event_without_hidden_credit() {
             .scheduling_projection("p", "k", "m", 100, 1, 21)
             .expect("exhausted projection")
             .score_milli,
-        0
+        10
     );
 }
 
@@ -709,7 +709,7 @@ fn hs03_zero_score_does_not_independently_cool_exact_key() {
     let zero = store
         .record_provider_failure_action("p", "k", "m", &action, 100)
         .expect("zero-score failure");
-    assert_eq!(zero.score_milli, 0);
+    assert_eq!(zero.score_milli, 10);
     assert!(!zero.cooldown);
     assert!(zero.available);
     for (provider, key, model) in [("p", "sibling-key", "m"), ("p", "k", "sibling-model")] {
@@ -1015,7 +1015,7 @@ fn session_scoped_recoverable_failures_do_not_create_global_key_cooldown() {
     let projection = store
         .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 120)
         .expect("session-scoped projection");
-    assert_eq!(projection.score_milli, 0);
+    assert_eq!(projection.score_milli, 10);
     assert!(projection.available);
     assert_eq!(projection.blocked_scopes, Vec::<String>::new());
     assert!(store
@@ -1099,7 +1099,7 @@ fn matching_business_success_resets_streak_but_not_committed_cooldown() {
     assert!(revived.cooldown);
     assert_eq!(revived.failure_streak, 0);
     assert_eq!(revived.success_streak, 1);
-    assert_eq!(revived.score_milli, 51);
+    assert_eq!(revived.score_milli, 75);
 
     let probe = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
@@ -1115,7 +1115,7 @@ fn matching_business_success_resets_streak_but_not_committed_cooldown() {
     let post_probe_success = store
         .record_provider_key_success("provider-a", "key-a", "model-a", 122)
         .expect("post-probe success");
-    assert_eq!(post_probe_success.score_milli, 101);
+    assert_eq!(post_probe_success.score_milli, 125);
 }
 
 #[test]
@@ -1130,13 +1130,13 @@ fn health_score_accumulates_each_event_without_a_rolling_window() {
     let before = store
         .scheduling_projection("p", "k", "m", 100, 1, 20)
         .expect("projection");
-    assert_eq!(before.score_milli, 0);
+    assert_eq!(before.score_milli, 10);
     let success = store
         .record_provider_key_success("p", "k", "m", 21)
         .expect("success");
-    // No rolling window exists: the success applies its +1 delta directly to
+    // No rolling window exists: the success applies its +25 delta directly to
     // the clamped score, independently of releasing the exact cooldown.
-    assert_eq!(success.score_milli, 1);
+    assert_eq!(success.score_milli, 35);
     assert_eq!(success.failure_streak, 0);
     for now_ms in 22..171 {
         store
@@ -1586,7 +1586,7 @@ fn account_error_reaches_cooldown_at_zero() {
         .expect("account failure");
     assert!(result.cooldown);
     assert!(!result.available);
-    assert_eq!(result.score_milli, 0);
+    assert_eq!(result.score_milli, 10);
 }
 
 #[test]
@@ -2230,7 +2230,7 @@ fn policy_matched_streaks_and_generic_http_403_or_500_streaks_do_not_clobber_or_
         cooldown_ms: 3_600_000,
         ..V3ProviderFailureAction::recoverable("http_403")
     };
-    for step in 0..9_u64 {
+    for step in 0..4_u64 {
         let proj = store
             .record_provider_failure_action("p", "a", "m", &http_403, 1_000 + step)
             .unwrap();
@@ -2238,7 +2238,7 @@ fn policy_matched_streaks_and_generic_http_403_or_500_streaks_do_not_clobber_or_
         assert_eq!(proj.failure_streak, (step + 1) as u32);
     }
 
-    // One matched transport policy failure must not wipe out the 9x HTTP 403 streak or clear `failure_streak_is_http_403`.
+    // One matched transport policy failure must not wipe out the 4x HTTP 403 streak or clear `failure_streak_is_http_403`.
     let conn_closed_action = V3ProviderFailureAction {
         recovery: V3ProviderRecoveryKind::RecoverableCounted,
         failure_threshold: 3,
@@ -2264,16 +2264,16 @@ fn policy_matched_streaks_and_generic_http_403_or_500_streaks_do_not_clobber_or_
         .unwrap();
     assert!(during_policy.available);
     assert_eq!(
-        during_policy.failure_streak, 9,
+        during_policy.failure_streak, 4,
         "policy failure must preserve generic HTTP 403 streak"
     );
 
-    // Next HTTP 403 must reach 10 and commit cooldown immediately rather than restarting at 1.
-    let tenth_403 = store
+    // Next HTTP 403 must reach 5 and commit cooldown immediately rather than restarting at 1.
+    let fifth_403 = store
         .record_provider_failure_action("p", "a", "m", &http_403, 1_030)
         .unwrap();
-    assert!(tenth_403.cooldown);
-    assert_eq!(tenth_403.failure_streak, 10);
+    assert!(fifth_403.cooldown);
+    assert_eq!(fifth_403.failure_streak, 5);
 
     // Conversely, policy streaks must never inflate generic failure_streak on an identity.
     let store2 = V3ProviderKeyHealthStore::default();

@@ -1811,7 +1811,7 @@ impl V3ProviderHealthStore {
         let cooldown_duration_ms = if is_http_429 {
             // Smooth 429 recovery: cap 429 cooldown at 60s instead of 1h so
             // traffic can recover quickly once upstream rate limits clear.
-            active_policy_rule.map_or(60_000, |rule| rule.cooldown_ms.max(1).min(60_000))
+            active_policy_rule.map_or(60_000, |rule| rule.cooldown_ms.clamp(1, 60_000))
         } else {
             active_policy_rule.map_or(V3_PROVIDER_HEALTH_COOLDOWN_MS, |rule| {
                 rule.cooldown_ms.max(1)

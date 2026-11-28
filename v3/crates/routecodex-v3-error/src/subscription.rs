@@ -206,7 +206,7 @@ pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
-        401 | 402 | 403 => Some(V3ProviderGlobalFailurePolicy {
+        401..=403 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 5,
             cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,

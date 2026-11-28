@@ -668,12 +668,7 @@ async fn native_direct_exhaustion_projects_only_the_final_provider_error() {
 
     assert_native_direct_default(&client, handle.listeners[0].addr).await;
 
-    let response = initial.expect("the final real provider error must be delivered");
-    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(
-        response.text().await.unwrap(),
-        r#"{"type":"error","error":{"type":"rate_limit_error","message":"ANTHROPIC_EXHAUSTION_PRIVATE_MARKER"}}"#
-    );
+    initial.expect_err("final exhaustion must break transport without delivering provider error");
     let capture = recv_capture(&mut captures_rx).await;
     assert_eq!(capture.provider, "anthropic-exhausted");
     assert_eq!(capture.path, "/exhausted/v1/messages");

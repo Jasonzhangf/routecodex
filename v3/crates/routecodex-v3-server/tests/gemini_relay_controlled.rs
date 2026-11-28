@@ -221,21 +221,10 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         }))
         .send()
         .await;
-    // This fixture declares one complete identity. Its final real HTTP error is
-    // therefore qualified for projection in the original Gemini protocol.
-    let error_response =
-        error_result.expect("the final Gemini provider error must reach the client");
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(
-        error_response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok()),
-        Some("application/json")
-    );
-    assert_eq!(
-        error_response.json::<Value>().await.unwrap(),
-        json!({"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}})
+    // Final provider HTTP error passthrough is retired: exhaustion breaks only
+    // client transport without projecting upstream error status or payload.
+    error_result.expect_err(
+        "the final Gemini provider error must break transport without reaching the client",
     );
     let _error_capture = captures_rx.recv().await.unwrap();
     while tokio::time::timeout(Duration::from_millis(25), captures_rx.recv())

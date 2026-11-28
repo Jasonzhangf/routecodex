@@ -68,22 +68,24 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     let endpoint = format!("{base}/v1/responses");
     let client = reqwest::Client::new();
 
-    // 1. A real business request commits the preferred identity's cooldown.
-    let first = client
-        .post(&endpoint)
-        .json(&json!({
-            "model": "wire-test",
-            "input": INITIAL_FAILURE_MARKER,
-            "stream": false
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(first.status(), 200);
-    let first_body: Value = first.json().await.unwrap();
-    assert_eq!(first_body["output_text"], HEALTHY_PAYLOAD);
+    // 1. Five consecutive authentication failures commit the preferred identity's cooldown.
+    for _ in 0..5 {
+        let first = client
+            .post(&endpoint)
+            .json(&json!({
+                "model": "wire-test",
+                "input": INITIAL_FAILURE_MARKER,
+                "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(first.status(), 200);
+        let first_body: Value = first.json().await.unwrap();
+        assert_eq!(first_body["output_text"], HEALTHY_PAYLOAD);
+    }
     let committed = cooled_probe_entry(&cooldown_pool(&client, &base).await)
-        .expect("a real cooled failure must commit the exact cooldown")
+        .expect("five consecutive auth failures must commit the exact cooldown")
         .clone();
     assert_eq!(committed["state"], "blocked");
 
@@ -222,12 +224,12 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     let after_stale_body: Value = after_stale.json().await.unwrap();
     assert_eq!(after_stale_body["output_text"], HEALTHY_PAYLOAD);
     assert!(
-        cooled_peer.captures.lock().await.len() == 2,
+        cooled_peer.captures.lock().await.len() == 6,
         "the retained newer cooldown must keep a fresh request away from cooled"
     );
 
     // 6. At the extended deadline the pinned identity may try again and
-    //    project its complete final HTTP error. Its sibling stays independent.
+    //    terminate transport without client error passthrough. Its sibling stays independent.
     schedule_real_trial(&client, &base).await;
     clock.0.store(extended_deadline + 1, Ordering::SeqCst);
     let exhausted = tokio::spawn(send_for_outcome(
@@ -260,16 +262,11 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     match timeout(Duration::from_secs(5), exhausted).await {
         Err(_) => panic!("singleton terminal failure must not wait for future recovery"),
         Ok(Err(join_error)) => panic!("exhausted request task must not fail: {join_error}"),
-        Ok(Ok(ClientOutcome::TransportBreak)) => {
-            panic!("the final real Provider error must reach the client");
-        }
+        Ok(Ok(ClientOutcome::TransportBreak)) => {}
         Ok(Ok(ClientOutcome::Response(response))) => {
-            let status = response.status();
-            let text = response.text().await.expect("unexpected response body");
-            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-            assert_eq!(
-                text,
-                r#"{"error":{"message":"issue231 owned cooled failure"}}"#
+            panic!(
+                "exhausted singleton must break transport without client HTTP error: status={}",
+                response.status()
             );
         }
     }

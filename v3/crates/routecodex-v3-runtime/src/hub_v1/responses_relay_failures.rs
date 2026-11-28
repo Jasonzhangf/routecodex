@@ -1167,8 +1167,8 @@ mod tests {
             terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));
         assert_eq!(
             terminalized.terminal_disposition,
-            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(witness)),
-            "a complete final upstream body is qualified for the client projection",
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+            "a complete final upstream body stays internal after passthrough retirement",
         );
         let projection = terminalized
             .terminal_projection
