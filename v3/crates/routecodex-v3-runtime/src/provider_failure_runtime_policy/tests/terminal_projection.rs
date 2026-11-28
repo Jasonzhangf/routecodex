@@ -321,11 +321,8 @@ fn final_provider_http_projection_requires_a_complete_matching_exhausted_respons
         ),
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
     ));
-    let different_status = routecodex_v3_error::V3ExternalHttpWitness::new(
-        502,
-        vec![],
-        b"bad gateway".to_vec(),
-    );
+    let different_status =
+        routecodex_v3_error::V3ExternalHttpWitness::new(502, vec![], b"bad gateway".to_vec());
     assert!(matches!(
         V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
             &source,

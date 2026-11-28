@@ -290,10 +290,7 @@ fn target_resolution_failure_carries_canonical_error01_into_error06() {
     let V3RelayProviderTargetResolution::Failed(failure) = resolution else {
         panic!("missing server must produce a target-resolution failure");
     };
-    let V3RelayProviderTargetResolutionFailure {
-        projection,
-        source,
-    } = failure;
+    let V3RelayProviderTargetResolutionFailure { projection, source } = failure;
 
     assert_eq!(projection, serde_json::to_value(&source).unwrap());
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
@@ -312,16 +309,20 @@ fn target_resolution_failure_carries_canonical_error01_into_error06() {
         decision.action,
         routecodex_v3_error::V3Error05ExecutionAction::RejectNonProviderError
     );
-    let (_, projected) = run_v3_error_06_terminal_projection_operator(
-        decision_projection,
-        decision,
-    )
-    .expect("terminal target failure must run canonical Error06")
-    .expect("terminal target failure must produce a typed projection");
+    let (_, projected) =
+        run_v3_error_06_terminal_projection_operator(decision_projection, decision)
+            .expect("terminal target failure must run canonical Error06")
+            .expect("terminal target failure must produce a typed projection");
 
-    assert_eq!(projected.chain, routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
+    assert_eq!(
+        projected.chain,
+        routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+    );
     assert_eq!(projected.diagnostic_source, source);
-    assert_eq!(projected.body["error"]["code"], "target_resolution_classification_failed");
+    assert_eq!(
+        projected.body["error"]["code"],
+        "target_resolution_classification_failed"
+    );
 }
 
 #[test]
