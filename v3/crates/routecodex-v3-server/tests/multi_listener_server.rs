@@ -7663,6 +7663,15 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
     assert_eq!(first.status(), StatusCode::OK);
     let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
     let output = first_body["output"].as_array().expect("output array");
+    let emitted_types: Vec<&str> = output
+        .iter()
+        .filter_map(|item| item["type"].as_str())
+        .collect();
+    assert_eq!(
+        emitted_types,
+        vec!["message", "reasoning", "function_call"],
+        "Turn-1 Responses output must keep text -> reasoning -> tool_call order: {first_body}"
+    );
     let turn1_reasoning = output
         .iter()
         .find(|item| item["type"] == "reasoning")
@@ -7670,7 +7679,7 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         .clone();
     assert!(
         turn1_reasoning.get("encrypted_content").is_none(),
-        "provider-emitted cipherless reasoning omits encrypted_content on Responses output: {turn1_reasoning}"
+        "provider-emitted unsigned thinking omits encrypted_content on Responses output: {turn1_reasoning}"
     );
     let assistant_text = output
         .iter()
@@ -7698,18 +7707,14 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         first_capture.body
     );
 
-    // Replay the exact provider-emitted Turn-1 reasoning item first.
+    // Replay the exact Turn-1 provider-emitted items in their returned order.
+    let mut emitted_replay_input = vec![json!({"role":"user","content":REASONING_LOOKUP_CONTROL})];
+    emitted_replay_input.extend(output.iter().cloned());
+    emitted_replay_input
+        .push(json!({"type":"function_call_output","call_id":call_id,"output":tool_output}));
     let emitted_replay = client
         .post(format!("{base}/v1/responses"))
-        .json(
-            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
-                {"role":"user","content":REASONING_LOOKUP_CONTROL},
-                turn1_reasoning,
-                assistant_text.clone(),
-                call.clone(),
-                {"type":"function_call_output","call_id":call_id,"output":tool_output}
-            ]}),
-        )
+        .json(&json!({"model":"client-test","stream":true,"tools":tools,"input":emitted_replay_input}))
         .send()
         .await
         .unwrap();
@@ -7727,11 +7732,11 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
         "emitted-turn1-replay: exact hosted web_search + lookup tools must survive: {}",
         emitted_capture.body
     );
-    let emitted_thinking = emitted_capture.body["messages"]
+    let emitted_assistant_content = emitted_capture.body["messages"][1]["content"]
         .as_array()
-        .unwrap()
+        .expect("emitted-turn1-replay: assistant message content");
+    let emitted_thinking = emitted_assistant_content
         .iter()
-        .flat_map(|message| message["content"].as_array().into_iter().flatten())
         .find(|block| block["type"] == "thinking" && block["thinking"] == "plan the lookup")
         .expect("emitted-turn1-replay: provider-emitted reasoning must survive on wire");
     assert_eq!(
