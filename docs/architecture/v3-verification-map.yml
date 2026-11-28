@@ -4531,7 +4531,7 @@ features:
   - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client, are preserved on retry/refill, and release only at RuntimeRequestFinalizer
   - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
   - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
-  - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; Error06 never authorizes a model-client error candidate; Runtime consumes retry or terminal no-commit decisions and Server/SSE commits only success or aborts the affected transport
+  - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; for a complete genuine non-2xx response from the current exhausted final identity before business commit, Error06 produces typed final-external-HTTP-projection eligibility and Server projects the actual status and body under the entry protocol; every other terminal failure ends only the affected transport without reusing an earlier attempt witness
   - retry belongs to Error05 typed error execution decision, not to the response graph; cancel/disconnect belong to Runtime ownership and the unified finalizer
   - no protocol-configurable optional flow or second runner bypasses the fixed request/response/error graphs
   - Config publishes declarations only and references the field/operator profile manifest; legacy conversion tables are migration baselines and cannot remain a competing field-mapping owner after cutover
@@ -4712,7 +4712,7 @@ features:
   - npm run run:v3-protocol-live-mock-matrix
   - npm run test:v3-protocol-live-mock-matrix-selftest
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_projects_final_real_provider_http_error -- --exact
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
   - npm run verify:v3-resource-map
