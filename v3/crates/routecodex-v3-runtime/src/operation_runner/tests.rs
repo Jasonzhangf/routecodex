@@ -2,6 +2,50 @@ use serde_json::json;
 use std::collections::HashMap;
 
 #[test]
+fn canonical_operation_graphs_precompile_all_declared_nodes_once() {
+    let request = crate::operation_runner::compiled_graph_node_ids(
+        crate::operation_runner::V3OperationGraph::Request,
+    )
+    .expect("request graph precompiles");
+    let response = crate::operation_runner::compiled_graph_node_ids(
+        crate::operation_runner::V3OperationGraph::Response,
+    )
+    .expect("response graph precompiles");
+    let error = crate::operation_runner::compiled_graph_node_ids(
+        crate::operation_runner::V3OperationGraph::Error,
+    )
+    .expect("error graph precompiles");
+
+    assert_eq!(request.len(), 9, "{request:?}");
+    assert_eq!(response.len(), 5, "{response:?}");
+    assert_eq!(error.len(), 6, "{error:?}");
+    assert_eq!(
+        crate::operation_runner::precompiled_node_ids(
+            crate::operation_runner::V3OperationGraph::Request
+        )
+        .unwrap()
+        .len(),
+        request.len()
+    );
+    assert_eq!(
+        crate::operation_runner::precompiled_node_ids(
+            crate::operation_runner::V3OperationGraph::Response
+        )
+        .unwrap()
+        .len(),
+        response.len()
+    );
+    assert_eq!(
+        crate::operation_runner::precompiled_node_ids(
+            crate::operation_runner::V3OperationGraph::Error
+        )
+        .unwrap()
+        .len(),
+        error.len()
+    );
+}
+
+#[test]
 fn capture_client_json_entry_preserves_exact_json_value() {
     let command = format!(
         "printf '%s' '{}{}'",
@@ -246,6 +290,30 @@ fn runtime_identity_uses_deterministic_derived_slice_identity() {
         super::CANONICAL_REQUEST_GRAPH_VERSION,
         "request graph slice identity must inherit the canonical request graph version"
     );
+}
+
+#[test]
+fn request_origin_kind_is_invocation_identity_not_payload_state() {
+    let entry = super::RuntimeRequestGraphEntry::compile().expect("capture entry compiles");
+    let payload = json!({"model": "client-model", "input": "opaque"});
+    let origin = super::V3RequestOrigin::new(
+        "request-origin-test",
+        "retry-invocation",
+        super::V3RequestOriginKind::Retry,
+    )
+    .unwrap();
+    let captured = entry
+        .capture_client_json_with_origin(payload.clone(), &origin)
+        .expect("retry entry uses the request capture graph");
+    assert_eq!(captured, payload);
+
+    let identity = super::request_graph_identity_with_origin(
+        &entry.graph,
+        origin.invocation_id.clone(),
+        origin.origin_kind,
+    );
+    assert_eq!(identity.attempt_id, "retry");
+    assert_eq!(identity.execution_id, "retry-invocation");
 }
 
 #[test]

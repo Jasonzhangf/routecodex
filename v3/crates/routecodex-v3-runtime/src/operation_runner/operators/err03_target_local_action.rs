@@ -13,7 +13,7 @@ const OPERATOR_NAME: &str = "routecodex.v3.error.err03_target_local_action";
 const OPERATOR_VERSION: &str = "1";
 const NODE_ID: &str = "error_err03_target_local_action";
 
-struct V3Error03TargetLocalActionOperator {
+pub(crate) struct V3Error03TargetLocalActionOperator {
     classified: V3Error02Classified,
     scope: V3ErrorActionScope,
     candidates_remaining: usize,
@@ -21,7 +21,7 @@ struct V3Error03TargetLocalActionOperator {
 }
 
 impl V3Error03TargetLocalActionOperator {
-    fn new(
+    pub(crate) fn new(
         classified: V3Error02Classified,
         scope: V3ErrorActionScope,
         candidates_remaining: usize,

@@ -21,7 +21,7 @@ pub(crate) struct Err02ClassifiedOperator {
 }
 
 impl Err02ClassifiedOperator {
-    fn new(
+    pub(crate) fn new(
         source: V3Error01SourceRaised,
         provider_global_policy: Option<(Option<u64>, String)>,
         side_output: Arc<Mutex<Option<Result<V3Error02Classified, String>>>>,
