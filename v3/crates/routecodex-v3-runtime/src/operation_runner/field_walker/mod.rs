@@ -3,7 +3,7 @@
 mod field_operator_library;
 mod profile;
 
-pub(crate) use field_operator_library::{FieldOperator, FieldOperatorRegistry};
+pub(crate) use field_operator_library::FieldOperatorRegistry;
 pub(crate) use profile::{FieldProfile, ProfileError};
 
 use serde::{Deserialize, Serialize};
@@ -158,7 +158,7 @@ impl FieldWalker {
             }
             let structural = rule.structure_only && (value.is_object() || value.is_array());
             if !structural {
-                let operator = branch.map(|case| case.operator.as_str()).or_else(|| {
+                let operator = branch.map(|case| case.operator.as_str()).or({
                     if rule.structure_only {
                         rule.scalar_consumer.as_deref()
                     } else {

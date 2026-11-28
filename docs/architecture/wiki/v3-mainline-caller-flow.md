@@ -38,7 +38,7 @@ flowchart TD
   module_v3_admin_webui["v3/admin-webui"]
   module_v3_scripts["v3/scripts"]
   module_v3_vendor["v3/vendor"]
-  module_pending -->|12 edges / 4 paths| module_pending
+  module_pending -->|9 edges / 4 paths| module_pending
   module_routecodex_v3_admin -->|19 edges / 8 paths| module_routecodex_v3_admin
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_config
   module_routecodex_v3_admin -->|2 edges / 2 paths| module_v3_debug
@@ -75,7 +75,7 @@ flowchart TD
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|22 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|60 edges / 21 paths| module_v3_runtime
+  module_v3_runtime -->|63 edges / 22 paths| module_v3_runtime
   module_v3_runtime -->|45 edges / 14 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|6 edges / 2 paths| module_v3_virtual_router
@@ -98,7 +98,7 @@ flowchart TD
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
-| pending | pending | 12 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
+| pending | pending | 9 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
 | routecodex-v3-admin | routecodex-v3-admin | 19 | `v3.admin.control_plane_admission`<br/>`v3.admin.environment_projection`<br/>`v3.admin.observability_status_projection`<br/>`v3.admin.provider_authoring_write`<br/>`v3.admin.provider_candidate_probe`<br/>`v3.admin.provider_patrol_plan_authoring`<br/>`v3.admin.provider_patrol_run`<br/>`v3.admin.provider_usage_query` |
 | routecodex-v3-admin | v3-config | 1 | `v3.active_key_selection_control` |
 | routecodex-v3-admin | v3-debug | 2 | `v3.admin.provider_usage_query`<br/>`v3.server.internal_observability_projection` |
@@ -135,7 +135,7 @@ flowchart TD
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 22 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 60 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 63 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 45 | `v3.console_human_readable_layering.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 6 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -180,9 +180,6 @@ flowchart TD
 | v3.operation_runner.dagpipe.response | v3-op-runner-resp-03 | V3OperationRunnerGovernResponse | V3OperationRunnerInverseProjectClient |
 | v3.operation_runner.dagpipe.response | v3-op-runner-resp-04 | V3OperationRunnerInverseProjectClient | V3OperationRunnerFrameClient |
 | v3.operation_runner.dagpipe.error | v3-op-runner-err-01 | ErrorErr01SourceRaised | ErrorErr02Classified |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-02 | ErrorErr02Classified | ErrorErr03TargetLocalAction |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-03 | ErrorErr03TargetLocalAction | ErrorErr04TargetExhaustion |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-04 | ErrorErr04TargetExhaustion | ErrorErr05ExecutionDecision |
 | v3.operation_runner.dagpipe.error | v3-op-runner-err-05 | ErrorErr05ExecutionDecision | ErrorErr06ClientProjected |
 
 ### Missing caller/callee fields
@@ -3605,7 +3602,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.request
 
-Existing DAGpipe request graph; one source client JSON and one exit transport request. Candidate M2 accepts nine request-side stages through the canonical SDK Registry, compile, and Runtime.run path. The accepted control stages resolve_target and plan_execution use actual callers in Direct kernels, four-protocol Relay, and the Server non-admitting preplan, and passed the fresh full-chain matrix. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. A refill is a new execution through this same request mainline; the static DAG has no back-edge. Refill execution preserves the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client origin and never rebuilds it from the continuation payload.
+Existing DAGpipe request graph; one source client JSON and one exit transport request. The runtime compiles the complete request graph and its canonical node slices once into an immutable OnceLock bundle, then binds one invocation-scoped operator at Runtime.run time. The nine accepted request stages execute through that compiled bundle. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. A refill is a new execution through this same request mainline; the static DAG has no back-edge. Typed request lifecycle ownership preserves request_inverse_context and explicit_history_pairing across retry and servertool re-entry until RuntimeRequestFinalizer; normalize initializes inverse context only for client origin and never rebuilds it from the continuation payload.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.request.graph.json`
@@ -3661,7 +3658,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.response
 
-Existing DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. Candidate M2 accepts four response-side stages through the canonical SDK Registry, compile, and Runtime.run path, with the frame stage limited to the existing Responses JSON path. Ordinary inverse projection is SDK-wired but its hosted path still awaits REQ02. The target fixed order is not claimed as migrated; Runtime still consumes the current Resp03 outcome, and retry remains Error05-owned while cancellation remains Runtime-owned.
+Existing DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. The runtime compiles the complete response graph and all five canonical node slices once into an immutable OnceLock bundle, then binds one invocation-scoped operator at Runtime.run time. Candidate M2 accepts four response-side stages through that compiled bundle, with the frame stage limited to the existing Responses JSON path. Ordinary inverse projection is SDK-wired but its hosted path still awaits REQ02. The target fixed order is not claimed as migrated; Runtime still consumes the current Resp03 outcome, and retry remains Error05-owned while cancellation remains Runtime-owned.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.response.graph.json`
@@ -3702,7 +3699,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.error
 
-Canonical DAGpipe ErrorErr01-06 graph has source, classification, target-local action, exhaustion, execution decision, and one terminal outcome. Relay and health consumers execute the declared SDK slices; remaining callers are pending. Error06 records internal evidence and, only for the current exhausted final identity's complete genuine non-2xx HTTP response, emits typed projection eligibility. Runtime consumes Error05; Server alone performs the qualified protocol projection, while every other terminal remains a detectable transport break. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
+Canonical DAGpipe ErrorErr01-06 graph has source, classification, target-local action, exhaustion, execution decision, and one terminal outcome. The runtime precompiles the complete error graph once and executes three canonical SESE slices: Error01, Error02-05, and Error06. Relay and health consumers use those compiled slices; remaining global callers are pending. Error06 records internal evidence and, only for the current exhausted final identity's complete genuine non-2xx HTTP response, emits typed projection eligibility. Runtime consumes Error05; Server alone performs the qualified protocol projection, while every other terminal remains a detectable transport break. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.error.graph.json`
@@ -3712,19 +3709,23 @@ flowchart TD
   subgraph c_88_v3_operation_runner_dagpipe_error_m_pending["pending"]
     c_88_v3_operation_runner_dagpipe_error_0["pending<br/>pending<br/><small>pending</small>"]
   end
+  subgraph c_88_v3_operation_runner_dagpipe_error_m_v3_runtime["v3-runtime"]
+    c_88_v3_operation_runner_dagpipe_error_1["v3-runtime<br/>run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
+    c_88_v3_operation_runner_dagpipe_error_2["v3-runtime<br/>run_precompiled_error_02_to_05<br/><small>routecodex-v3-runtime/src/operation_runner/precompiled.rs</small>"]
+  end
   c_88_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-01<br/>ErrorErr01SourceRaised → ErrorErr02Classified| c_88_v3_operation_runner_dagpipe_error_0
-  c_88_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-02<br/>ErrorErr02Classified → ErrorErr03TargetLocalAction| c_88_v3_operation_runner_dagpipe_error_0
-  c_88_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-03<br/>ErrorErr03TargetLocalAction → ErrorErr04TargetExhaustion| c_88_v3_operation_runner_dagpipe_error_0
-  c_88_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-04<br/>ErrorErr04TargetExhaustion → ErrorErr05ExecutionDecision| c_88_v3_operation_runner_dagpipe_error_0
+  c_88_v3_operation_runner_dagpipe_error_1 -->|v3-op-runner-err-02<br/>ErrorErr02Classified → ErrorErr03TargetLocalAction| c_88_v3_operation_runner_dagpipe_error_2
+  c_88_v3_operation_runner_dagpipe_error_1 -->|v3-op-runner-err-03<br/>ErrorErr03TargetLocalAction → ErrorErr04TargetExhaustion| c_88_v3_operation_runner_dagpipe_error_2
+  c_88_v3_operation_runner_dagpipe_error_1 -->|v3-op-runner-err-04<br/>ErrorErr04TargetExhaustion → ErrorErr05ExecutionDecision| c_88_v3_operation_runner_dagpipe_error_2
   c_88_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-05<br/>ErrorErr05ExecutionDecision → ErrorErr06ClientProjected| c_88_v3_operation_runner_dagpipe_error_0
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-op-runner-err-01` | `ErrorErr01SourceRaised` → `ErrorErr02Classified` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-err-02` | `ErrorErr02Classified` → `ErrorErr03TargetLocalAction` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-err-03` | `ErrorErr03TargetLocalAction` → `ErrorErr04TargetExhaustion` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-err-04` | `ErrorErr04TargetExhaustion` → `ErrorErr05ExecutionDecision` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-02` | `ErrorErr02Classified` → `ErrorErr03TargetLocalAction` | runtime_bound | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_precompiled_error_02_to_05<br/><small>routecodex-v3-runtime/src/operation_runner/precompiled.rs</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-03` | `ErrorErr03TargetLocalAction` → `ErrorErr04TargetExhaustion` | runtime_bound | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_precompiled_error_02_to_05<br/><small>routecodex-v3-runtime/src/operation_runner/precompiled.rs</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-04` | `ErrorErr04TargetExhaustion` → `ErrorErr05ExecutionDecision` | runtime_bound | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_precompiled_error_02_to_05<br/><small>routecodex-v3-runtime/src/operation_runner/precompiled.rs</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-err-05` | `ErrorErr05ExecutionDecision` → `ErrorErr06ClientProjected` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 
 ## v3.admin.control_plane_admission

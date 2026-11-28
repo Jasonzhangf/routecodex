@@ -1,15 +1,18 @@
 use super::operators::{
-    execute_v3_operation_runner_error_err05_execution_decision,
-    execute_v3_operation_runner_error_err06_client_projected, run_v3_err02_classified_operator,
-    run_v3_error_03_target_local_action_operator,
-    run_v3_error_04_target_exhaustion_operator_with_target_recovery,
+    execute_v3_operation_runner_error_err06_client_projected, Err02ClassifiedOperator,
+    Err05ExecutionDecisionOperator, V3Error03TargetLocalActionOperator,
+    V3Error04TargetExhaustionOperator,
 };
+use super::run_precompiled_error_02_to_05;
 use super::OperationRunnerError;
+use pipeline_runtime::Operator;
 use routecodex_v3_error::{
-    V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope,
+    V3Error01SourceRaised, V3Error02Classified, V3Error03TargetLocalAction,
+    V3Error04TargetExhaustionDecision, V3Error05ExecutionDecision,
+    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
 };
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 
 pub(crate) fn run_v3_error_02_to_05_decision_operators(
     source_projection: Value,
@@ -42,28 +45,84 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators_with_target_recovery(
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
     target_recovery_pending: bool,
 ) -> Result<(Value, V3Error05ExecutionDecision), OperationRunnerError> {
-    let (classified_projection, classified) =
-        run_v3_err02_classified_operator(source_projection, source, None)?;
-    let (action_projection, action) = run_v3_error_03_target_local_action_operator(
-        classified_projection,
-        classified,
-        scope,
+    let err02_output = Arc::new(Mutex::new(None));
+    let err03_output = Arc::new(Mutex::new(None));
+    let err04_output = Arc::new(Mutex::new(None));
+    let err05_output = Arc::new(Mutex::new(None));
+
+    // Err03 and Err04 need the typed outputs produced by the preceding
+    // precompiled node. Their identities are fixed by the canonical graph, so
+    // the side outputs are bound before the single slice execution starts.
+    let classified = source.clone();
+    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(classified);
+    let action = routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
+        classified.clone(),
+        scope.clone(),
         route_pool_remaining_after_exclusion,
-    )?;
-    let (exhaustion_projection, exhaustion) =
-        run_v3_error_04_target_exhaustion_operator_with_target_recovery(
-            action_projection,
+    );
+    let exhaustion =
+        routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+            action.clone(),
+            route_pool_remaining_after_exclusion,
+            default_pool_available,
+            same_provider_retry_available,
+            target_recovery_pending,
+        );
+    let operators: Vec<Box<dyn Operator>> = vec![
+        Box::new(Err02ClassifiedOperator::new(
+            source,
+            None,
+            Arc::clone(&err02_output),
+        )),
+        Box::new(V3Error03TargetLocalActionOperator::new(
+            classified,
+            scope,
+            route_pool_remaining_after_exclusion,
+            Arc::clone(&err03_output),
+        )),
+        Box::new(V3Error04TargetExhaustionOperator::new(
             action,
             route_pool_remaining_after_exclusion,
             default_pool_available,
             same_provider_retry_available,
             target_recovery_pending,
-        )?;
-    execute_v3_operation_runner_error_err05_execution_decision(
-        exhaustion_projection,
-        exhaustion,
-        recovery,
-    )
+            Arc::clone(&err04_output),
+        )),
+        Box::new(Err05ExecutionDecisionOperator::new(
+            exhaustion.clone(),
+            recovery,
+            Arc::clone(&err05_output),
+        )),
+    ];
+    let projection = run_precompiled_error_02_to_05(source_projection, operators)?;
+
+    let err02 = err02_output
+        .lock()
+        .map_err(|_| OperationRunnerError::new("Err02 side-output holder is poisoned"))?
+        .take()
+        .ok_or_else(|| OperationRunnerError::new("Err02 omitted its typed output"))?
+        .map_err(OperationRunnerError::new)?;
+    let err03 = err03_output
+        .lock()
+        .map_err(|_| OperationRunnerError::new("Err03 side-output holder is poisoned"))?
+        .take()
+        .ok_or_else(|| OperationRunnerError::new("Err03 omitted its typed output"))?;
+    let err04 = err04_output
+        .lock()
+        .map_err(|_| OperationRunnerError::new("Err04 side-output holder is poisoned"))?
+        .take()
+        .ok_or_else(|| OperationRunnerError::new("Err04 omitted its typed output"))?;
+    let err05 = err05_output
+        .lock()
+        .map_err(|_| OperationRunnerError::new("Err05 side-output holder is poisoned"))?
+        .take()
+        .ok_or_else(|| OperationRunnerError::new("Err05 omitted its typed output"))?;
+    let _: (
+        V3Error02Classified,
+        V3Error03TargetLocalAction,
+        V3Error04TargetExhaustionDecision,
+    ) = (err02, err03, err04);
+    Ok((projection, err05))
 }
 
 pub(crate) fn run_v3_error_06_terminal_projection_operator(
