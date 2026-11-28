@@ -348,11 +348,28 @@ async fn issue245_witness(stream: bool) {
         .send()
         .await;
     match exhausted {
-        Ok(response) if stream && response.status() == StatusCode::OK => {
-            let body_err = response.text().await.expect_err(
-                "exhausted SSE request must terminate transport without emitting error event",
+        Ok(mut response) if stream && response.status() == StatusCode::OK => {
+            let mut wire = Vec::new();
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                    Ok(None) => panic!(
+                        "exhausted SSE request must terminate transport without normal EOF: {}",
+                        String::from_utf8_lossy(&wire)
+                    ),
+                    Err(_) => break,
+                }
+            }
+            let wire_text = String::from_utf8_lossy(&wire);
+            assert!(
+                !wire_text.contains("data:")
+                    && !wire_text.contains("event:")
+                    && !wire_text.contains("\"error\"")
+                    && wire_text
+                        .lines()
+                        .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                "exhausted SSE request must emit only keepalives before closing: {wire_text}"
             );
-            let _ = body_err;
         }
         Ok(response) => {
             let status = response.status();

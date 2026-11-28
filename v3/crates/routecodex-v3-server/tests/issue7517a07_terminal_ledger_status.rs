@@ -886,11 +886,27 @@ async fn issue7517a07_genuine_provider_502_keeps_502() {
         .send()
         .await;
     let err = match response {
-        Ok(reply) => {
+        Ok(mut reply) => {
             assert_eq!(reply.status(), StatusCode::OK);
-            reply.text().await.expect_err(
-                "the final real Provider HTTP 502 must break transport without emitting completion",
-            )
+            let mut wire = Vec::new();
+            let stream_err = loop {
+                match reply.chunk().await {
+                    Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                    Ok(None) => panic!("the final real Provider HTTP 502 must break transport without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                    Err(error) => break error,
+                }
+            };
+            let wire_text = String::from_utf8_lossy(&wire);
+            assert!(
+                !wire_text.contains("data:")
+                    && !wire_text.contains("event:")
+                    && !wire_text.contains("\"error\"")
+                    && wire_text
+                        .lines()
+                        .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                "exhausted SSE stream must contain only keepalives before termination: {wire_text}"
+            );
+            stream_err
         }
         Err(error) => error,
     };

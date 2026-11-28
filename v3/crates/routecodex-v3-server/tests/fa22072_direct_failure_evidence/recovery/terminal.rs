@@ -53,9 +53,40 @@ async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
         let raw = raw_post_chat(case.port, &recovery_chat_request(&marker, stream)).await;
         let text = String::from_utf8_lossy(&raw);
         let expected_body = owned_b_503_body().to_string();
-        if text.contains("503") || text.contains(&expected_body) || text.contains("\"error\"") {
+        if stream {
+            let Some((head, body)) = text.split_once("\r\n\r\n") else {
+                if !raw.is_empty() {
+                    controls.push(format!(
+                        "{label}: streaming exhaustion wrote partial non-HTTP bytes: {text}"
+                    ));
+                }
+                continue;
+            };
+            let head_lower = head.to_ascii_lowercase();
+            if !head_lower.starts_with("http/1.1 200")
+                || !head_lower.contains("content-type: text/event-stream")
+                || !head_lower.contains("transfer-encoding: chunked")
+            {
+                controls.push(format!(
+                    "{label}: streaming exhaustion wrote unexpected HTTP head: {head}"
+                ));
+            }
+            if body.starts_with("0\r\n")
+                || body.contains("\r\n0\r\n")
+                || text.contains("data:")
+                || text.contains("[DONE]")
+                || text.contains("chat.completion")
+                || text.contains("503")
+                || text.contains(&expected_body)
+                || text.contains("\"error\"")
+            {
+                controls.push(format!(
+                    "{label}: streaming exhaustion must emit only unclosed keepalives without terminal/business/error frames: {text}"
+                ));
+            }
+        } else if !raw.is_empty() {
             controls.push(format!(
-                "{label}: final B provider 503 leaked onto client wire: {text}"
+                "{label}: nonstreaming exhaustion must emit zero response bytes: {text}"
             ));
         }
         if text.contains(KEY) || text.contains("OWNED_A_503_PRIVATE") {

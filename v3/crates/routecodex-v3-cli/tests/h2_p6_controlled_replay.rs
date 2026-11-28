@@ -337,7 +337,7 @@ async fn assert_final_provider_http_error(
         .send()
         .await;
     match response {
-        Ok(reply) if stream && reply.status() == ReqwestStatusCode::OK => {
+        Ok(mut reply) if stream && reply.status() == ReqwestStatusCode::OK => {
             let is_sse = reply
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
@@ -347,13 +347,31 @@ async fn assert_final_provider_http_error(
                 is_sse,
                 "a committed Responses SSE head must retain its native content type"
             );
-            let error = reply
-                .text()
-                .await
-                .expect_err("exhausted final provider error on committed Responses SSE stream must terminate transport cleanly");
+            let mut wire = Vec::new();
+            let stream_err = loop {
+                match reply.chunk().await {
+                    Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                    Ok(None) => panic!("exhausted final provider error on committed Responses SSE stream must terminate transport cleanly without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                    Err(error) => break error,
+                }
+            };
             assert!(
-                error.is_body() || error.is_decode() || error.is_request(),
-                "unexpected SSE transport termination error: {error:?}"
+                !stream_err.is_timeout()
+                    && !stream_err.is_connect()
+                    && (stream_err.is_body() || stream_err.is_decode() || stream_err.is_request()),
+                "unexpected SSE transport termination error: {stream_err:?}"
+            );
+            let wire_text = String::from_utf8_lossy(&wire);
+            assert!(
+                !wire_text.contains("data:")
+                    && !wire_text.contains("event:")
+                    && !wire_text.contains("\"error\"")
+                    && !wire_text.contains("response.completed")
+                    && !wire_text.contains("[DONE]")
+                    && wire_text
+                        .lines()
+                        .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                "exhausted SSE stream must contain only transport keepalives before termination: {wire_text}"
             );
         }
         Ok(reply) => {
@@ -363,7 +381,9 @@ async fn assert_final_provider_http_error(
         }
         Err(error) => {
             assert!(
-                error.is_request() || error.is_body() || error.is_decode() || error.is_connect(),
+                !error.is_timeout()
+                    && !error.is_connect()
+                    && (error.is_request() || error.is_body() || error.is_decode()),
                 "expected clean transport break, got {error:?}"
             );
         }

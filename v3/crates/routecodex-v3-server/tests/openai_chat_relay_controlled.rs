@@ -244,22 +244,40 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         }))
         .send()
         .await;
-    match sse_error_result {
-        Err(_) => {}
-        Ok(response) => {
-            if response.status() == StatusCode::OK {
-                assert_eq!(response.headers()["content-type"], "text/event-stream");
-            } else {
-                panic!(
-                    "unexpected non-SSE status on exhausted SSE transport: {}",
-                    response.status()
-                );
-            }
-            tokio::time::timeout(Duration::from_secs(2), response.text())
-                .await
-                .expect("streaming provider terminal must settle promptly")
-                .expect_err("exhausted SSE transport must break without projecting an error frame");
+    if let Ok(mut response) = sse_error_result {
+        if response.status() == StatusCode::OK {
+            assert_eq!(response.headers()["content-type"], "text/event-stream");
+        } else {
+            panic!(
+                "unexpected non-SSE status on exhausted SSE transport: {}",
+                response.status()
+            );
         }
+        let mut wire = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                    Ok(None) => panic!(
+                        "exhausted SSE transport must break cleanly without normal EOF: {}",
+                        String::from_utf8_lossy(&wire)
+                    ),
+                    Err(_) => break,
+                }
+            }
+        })
+        .await
+        .expect("streaming provider terminal must settle promptly");
+        let wire_text = String::from_utf8_lossy(&wire);
+        assert!(
+            !wire_text.contains("data:")
+                && !wire_text.contains("[DONE]")
+                && !wire_text.contains("\"error\"")
+                && wire_text
+                    .lines()
+                    .all(|line| line.trim().is_empty() || line.starts_with(':')),
+            "exhausted SSE transport must emit only keepalives before closing: {wire_text}"
+        );
     }
     let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())

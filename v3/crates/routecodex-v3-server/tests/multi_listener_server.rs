@@ -4922,15 +4922,30 @@ async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
             .unwrap();
     let port = handle.listeners[0].addr.port();
 
-    if let Ok(reply) = reqwest::Client::new()
+    if let Ok(mut reply) = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
     {
         assert_eq!(reply.status(), StatusCode::OK);
-        reply.text().await.expect_err(
-            "the final Provider error must break SSE transport without reaching the client",
+        let mut wire = Vec::new();
+        loop {
+            match reply.chunk().await {
+                Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                Ok(None) => panic!("the final Provider error must break SSE transport cleanly without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                Err(_) => break,
+            }
+        }
+        let wire_text = String::from_utf8_lossy(&wire);
+        assert!(
+            !wire_text.contains("data:")
+                && !wire_text.contains("event:")
+                && !wire_text.contains("\"error\"")
+                && wire_text
+                    .lines()
+                    .all(|line| line.trim().is_empty() || line.starts_with(':')),
+            "exhausted SSE stream must contain only keepalives before termination: {wire_text}"
         );
     }
 
@@ -13039,21 +13054,35 @@ async fn p6_provider_503_reaches_a_streaming_client() {
             .unwrap();
     let port = handle.listeners[0].addr.port();
     // Exhaustion breaks only the client SSE/HTTP transport without projecting 503.
-    match reqwest::Client::new()
+    if let Ok(mut response) = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
     {
-        Err(_) => {}
-        Ok(response) => {
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(response.headers()["content-type"], "text/event-stream");
-            response
-                .text()
-                .await
-                .expect_err("exhausted SSE transport must break without projecting an error body");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        let mut wire = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                Ok(None) => panic!(
+                    "exhausted SSE transport must break cleanly without normal EOF: {}",
+                    String::from_utf8_lossy(&wire)
+                ),
+                Err(_) => break,
+            }
         }
+        let wire_text = String::from_utf8_lossy(&wire);
+        assert!(
+            !wire_text.contains("data:")
+                && !wire_text.contains("event:")
+                && !wire_text.contains("\"error\"")
+                && wire_text
+                    .lines()
+                    .all(|line| line.trim().is_empty() || line.starts_with(':')),
+            "exhausted SSE transport must emit only keepalives before closing: {wire_text}"
+        );
     }
 
     // The provider's real 503 and its body remain typed evidence alongside the
@@ -13925,16 +13954,30 @@ async fn anthropic_messages_provider_failure_uses_the_client_error_protocol() {
         }))
         .send()
         .await;
-    match response {
-        Err(_) => {}
-        Ok(response) => {
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(response.headers()["content-type"], "text/event-stream");
-            response
-                .text()
-                .await
-                .expect_err("the exhausted Anthropic SSE transport must close without error event");
+    if let Ok(mut response) = response {
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        let mut wire = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                Ok(None) => panic!(
+                    "the exhausted Anthropic SSE transport must close without normal EOF: {}",
+                    String::from_utf8_lossy(&wire)
+                ),
+                Err(_) => break,
+            }
         }
+        let wire_text = String::from_utf8_lossy(&wire);
+        assert!(
+            !wire_text.contains("data:")
+                && !wire_text.contains("event:")
+                && !wire_text.contains("\"error\"")
+                && wire_text
+                    .lines()
+                    .all(|line| line.trim().is_empty() || line.starts_with(':')),
+            "exhausted Anthropic SSE transport must emit only keepalives before closing: {wire_text}"
+        );
     }
 
     handle.shutdown().await;

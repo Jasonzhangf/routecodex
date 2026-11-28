@@ -465,17 +465,33 @@ async fn responses_relay_preserves_late_tool_call_ids_through_execution_and_foll
         .json(&mismatched_followup)
         .send()
         .await;
-    let err = tokio::time::timeout(
-        Duration::from_secs(10),
-        async {
-            match rejected_response {
-                Ok(response) => response.text().await.expect_err(
-                    "mismatched follow-up upstream 400 must break transport without projecting error body",
-                ),
-                Err(error) => error,
+    let err = tokio::time::timeout(Duration::from_secs(10), async {
+        match rejected_response {
+            Ok(mut response) => {
+                assert_eq!(response.status(), StatusCode::OK);
+                let mut wire = Vec::new();
+                let stream_err = loop {
+                    match response.chunk().await {
+                        Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                        Ok(None) => panic!("mismatched follow-up upstream 400 must break transport cleanly without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                        Err(error) => break error,
+                    }
+                };
+                let wire_text = String::from_utf8_lossy(&wire);
+                assert!(
+                    !wire_text.contains("data:")
+                        && !wire_text.contains("event:")
+                        && !wire_text.contains("\"error\"")
+                        && wire_text
+                            .lines()
+                            .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                    "exhausted SSE stream must contain only keepalives before termination: {wire_text}"
+                );
+                stream_err
             }
-        },
-    )
+            Err(error) => error,
+        }
+    })
     .await
     .expect("mismatched follow-up must settle");
     let _ = err;
