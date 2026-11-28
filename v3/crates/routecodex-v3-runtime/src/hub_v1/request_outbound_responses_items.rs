@@ -410,7 +410,8 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
         item.insert("output".to_string(), native_parts.clone());
     }
     if let Some(call_id) = call_id {
-        // Responses-derived outputs retain an absent item id through the round trip.
+        // Responses-derived outputs retain an absent item id through the round trip,
+        // and explicit item IDs accepted from Responses entry are emitted verbatim.
         if responses_item_id_from_chat_extension(row).is_some() || !omit_tool_output_id {
             let item_id = if responses_tool_output_type == "custom_tool_call_output"
                 || preserve_native_tool_output_id

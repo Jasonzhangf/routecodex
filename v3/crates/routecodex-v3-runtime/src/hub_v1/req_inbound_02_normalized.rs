@@ -579,11 +579,10 @@ fn merge_responses_chat_histories(
                 || is_tool_search_output(src)
                 || is_tool_search_output(dec);
             let is_ordinary_tool_receipt = src["role"] == "tool" || dec["role"] == "tool";
-            let incompatible_receipt_item_id = if is_named_or_search_receipt {
+            let incompatible_receipt_item_id = if is_named_or_search_receipt
+                || (is_ordinary_tool_receipt && all_decoded_are_legacy_tool_outputs)
+            {
                 tool_output_item_id(src) != tool_output_item_id(dec)
-            } else if is_ordinary_tool_receipt && all_decoded_are_legacy_tool_outputs {
-                tool_output_item_id(src).is_some()
-                    && tool_output_item_id(src) != tool_output_item_id(dec)
             } else if is_ordinary_tool_receipt {
                 tool_output_item_id(src).is_some()
                     && tool_output_item_id(dec).is_some()
@@ -626,8 +625,14 @@ fn merge_responses_chat_histories(
             }
         }
         let mut merged = sanitized_source;
-        let mut merged_entries =
-            vec![V3HubMessageHistoryProvenance::default(); original_source_len];
+        let mut merged_entries: Vec<V3HubMessageHistoryProvenance> = merged
+            .iter()
+            .map(|row| V3HubMessageHistoryProvenance {
+                preserve_native_tool_output_id: row["role"] == "tool"
+                    || tool_output_name(row).is_some(),
+                ..Default::default()
+            })
+            .collect();
         let mut matched_source_for_decoded = vec![None; decoded.len()];
         let mut decoded_entry_provenances = Vec::with_capacity(decoded.len());
         for (dec_idx, result) in decoded.iter().enumerate() {
@@ -643,17 +648,11 @@ fn merge_responses_chat_histories(
             };
             let matched_pos = if let Some(pos) = reserved_source_for_decoded[dec_idx] {
                 Some(pos)
-            } else if result_item_id.is_some() && tool_output_name(result).is_none() {
-                (0..original_source_len).find(|&idx| {
-                    is_unreserved_candidate(idx)
-                        && tool_output_item_id(&merged[idx]).is_none()
-                        && (!is_tool_search_output(result)
-                            || merge_equivalent_chat_value(&merged[idx], result).is_some())
-                })
+            } else if result_item_id.is_some() {
+                None
             } else if tool_output_name(result).is_some() || is_tool_search_output(result) {
                 (0..original_source_len).find(|&idx| {
                     is_unreserved_candidate(idx)
-                        && result_item_id.is_none()
                         && tool_output_item_id(&merged[idx]).is_none()
                         && merge_equivalent_chat_value(&merged[idx], result).is_some()
                 })
@@ -2391,10 +2390,103 @@ mod tests {
                 json!("fco_2")
             );
             assert_eq!(messages[0]["content"], json!("second-output"));
+            assert!(
+                normalized
+                    .explicit_history_pairing
+                    .message_entry(0)
+                    .is_some_and(|entry| entry.preserve_native_tool_output_id),
+                "Responses-entry legacy tool output must retain preserve_native_tool_output_id"
+            );
             assert!(messages[1]["routecodex_chat_extension"]
                 .get("responses_item_id")
                 .is_none());
             assert_eq!(messages[1]["content"], json!(incoming_output));
+
+            // Inverse placement: ID-less legacy `messages` row + explicit `fco_2` in `input`
+            // must also preserve both receipts for equal and unequal outputs.
+            let inverse_raw = raw_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": [{
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "second-output"
+                    }],
+                    "input": [{
+                        "type": "function_call_output",
+                        "id": "fco_2",
+                        "call_id": "call_1",
+                        "output": incoming_output
+                    }]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+            let inverse_normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+                inverse_raw,
+            )
+            .expect("explicit fco_2 with existing ID-less legacy receipt must preserve both");
+            let inverse_messages = inverse_normalized.previous.payload.0["messages"]
+                .as_array()
+                .expect("canonical Chat messages");
+            assert_eq!(inverse_messages.len(), 2, "{inverse_messages:#?}");
+            assert!(inverse_messages[0]
+                .pointer("/routecodex_chat_extension/responses_item_id")
+                .is_none());
+            assert_eq!(inverse_messages[0]["content"], json!("second-output"));
+            assert_eq!(
+                inverse_messages[1]["routecodex_chat_extension"]["responses_item_id"],
+                json!("fco_2")
+            );
+            assert_eq!(inverse_messages[1]["content"], json!(incoming_output));
+
+            // Distinct item IDs (`fco_2` vs `fc_fco_2`) on same call_id must stay distinct.
+            let distinct_ids_raw = raw_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "messages": [{
+                        "role": "tool",
+                        "tool_call_id": "call_1",
+                        "content": "second-output",
+                        "routecodex_chat_extension": {
+                            "responses_item_id": "fco_2"
+                        }
+                    }],
+                    "input": [{
+                        "type": "function_call_output",
+                        "id": "fc_fco_2",
+                        "call_id": "call_1",
+                        "output": incoming_output
+                    }]
+                }),
+                V3HubEntryProtocol::Responses,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+            let distinct_ids =
+                build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(distinct_ids_raw)
+                    .expect("distinct fco_2 and fc_fco_2 receipts must preserve both");
+            let distinct_messages = distinct_ids.previous.payload.0["messages"]
+                .as_array()
+                .expect("canonical Chat messages");
+            assert_eq!(distinct_messages.len(), 2, "{distinct_messages:#?}");
+            assert_eq!(
+                distinct_messages[0]["routecodex_chat_extension"]["responses_item_id"],
+                json!("fco_2")
+            );
+            assert!(distinct_ids
+                .explicit_history_pairing
+                .message_entry(0)
+                .is_some_and(|entry| entry.preserve_native_tool_output_id));
+            assert_eq!(
+                distinct_messages[1]["routecodex_chat_extension"]["responses_item_id"],
+                json!("fc_fco_2")
+            );
+            assert!(distinct_ids
+                .explicit_history_pairing
+                .message_entry(1)
+                .is_some_and(|entry| entry.preserve_native_tool_output_id));
         }
 
         // Genuine twins sharing the same explicit item_id with conflicting outputs must still fail.

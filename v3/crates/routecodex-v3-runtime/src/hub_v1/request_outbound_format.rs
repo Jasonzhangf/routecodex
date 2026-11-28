@@ -168,6 +168,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
             has_web_search_capability,
             preserve_responses_custom_tools,
             provenance,
+            false,
         )?;
     Ok((projected, drops))
 }
@@ -177,6 +178,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     has_web_search_capability: bool,
     preserve_responses_custom_tools: bool,
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
@@ -189,6 +191,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
             payload,
             preserve_responses_custom_tools,
             provenance,
+            preserve_responses_entry_tool_output_id,
         )?;
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
@@ -211,7 +214,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let (projected, drops, _) =
         build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_and_provenance_and_literals(
-            payload, false, None,
+            payload, false, None, false,
         )?;
     Ok((projected, drops))
 }
@@ -220,6 +223,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_
     payload: &Value,
     preserve_responses_custom_tools: bool,
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
@@ -237,6 +241,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_
             projected_source,
             drops,
             provenance,
+            preserve_responses_entry_tool_output_id,
         );
     }
     let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(
@@ -247,6 +252,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options_
         projected_source,
         drops,
         provenance,
+        preserve_responses_entry_tool_output_id,
     )
 }
 
@@ -254,6 +260,7 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical_with_literals
     projected_source: Value,
     mut drops: Vec<V3ProjectionDropRecord>,
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     let messages = projected_source
         .get("messages")
@@ -264,8 +271,10 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical_with_literals
         responses_payload.insert("model".to_string(), model.clone());
     }
     let (input, item_drops, orphan_tool_output_literals) =
-        build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals(
-            messages, provenance,
+        build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals_and_entry(
+            messages,
+            provenance,
+            preserve_responses_entry_tool_output_id,
         )?;
     drops.extend(item_drops);
     responses_payload.insert("input".to_string(), input);
@@ -1264,6 +1273,16 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
     messages: &[Value],
     provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
+    build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals_and_entry(
+        messages, provenance, false,
+    )
+}
+
+fn build_responses_input_from_chat_messages_with_provenance_and_drops_and_literals_and_entry(
+    messages: &[Value],
+    provenance: Option<&super::req_inbound_02_normalized::V3HubExplicitHistoryProvenance>,
+    preserve_responses_entry_tool_output_id: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<bool>), String> {
     let mut output: Vec<(Option<u64>, Value, bool)> = Vec::new();
     let mut drops = Vec::new();
     let message_order =
@@ -1284,8 +1303,8 @@ pub(crate) fn build_responses_input_from_chat_messages_with_provenance_and_drops
         {
             let msg_provenance = provenance.and_then(|p| p.message_entry(msg_idx));
             let omit_tool_output_id = msg_provenance.is_some_and(|p| p.omit_tool_output_id);
-            let preserve_native_tool_output_id =
-                msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
+            let preserve_native_tool_output_id = preserve_responses_entry_tool_output_id
+                || msg_provenance.is_some_and(|p| p.preserve_native_tool_output_id);
             let restore_responses_hosted_web_search =
                 msg_provenance.is_some_and(|p| p.restore_responses_hosted_web_search);
             let decoder_captured_tool_output = msg_provenance

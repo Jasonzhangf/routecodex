@@ -198,6 +198,7 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request_with_provena
                         .any(|capability| capability == "web_search"),
                     preserve_responses_custom_tools,
                     explicit_history_pairing,
+                    is_responses_entry,
                 )?;
             if is_responses_entry {
                 orphan_tool_output_literals = responses_orphan_literals;

@@ -581,8 +581,8 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                         policy.explicit_history_pairing.clone(),
                     )
                 };
-                let (wire_body, mut projection_drops) =
-                    crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance(
+                let (wire_body, mut projection_drops, _) =
+                    crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
                         &source_body,
                         candidate
                             .model_capabilities
@@ -590,6 +590,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                             .any(|capability| capability == "web_search"),
                         false,
                         Some(&provenance),
+                        true,
                     )
                     .map_err(|error| {
                         raise_v3_source_via_err01(

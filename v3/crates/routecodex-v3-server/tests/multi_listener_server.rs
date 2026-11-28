@@ -9717,7 +9717,7 @@ async fn issue4a0b3aa_r21_dual_idless_function_output_with_existing_explicit_fco
             input[0],
             json!({
                 "type": "function_call_output",
-                "id": "fc_fco_2",
+                "id": "fco_2",
                 "call_id": "call_1",
                 "output": "second-output"
             })
@@ -9731,6 +9731,178 @@ async fn issue4a0b3aa_r21_dual_idless_function_output_with_existing_explicit_fco
             input[1],
             json!({
                 "type": "function_call_output",
+                "call_id": "call_1",
+                "output": incoming_output
+            })
+        );
+    }
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r22_dual_explicit_fco_with_existing_idless_legacy_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r22_dual_explicit_fco_with_idless_legacy",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r22-dual-explicit-fco-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    for incoming_output in ["second-output", "first-output"] {
+        let res = client
+            .post(&resp_endpoint)
+            .json(&json!({
+                "model": "test",
+                "stream": false,
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output"
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "id": "fco_2",
+                    "call_id": "call_1",
+                    "output": incoming_output
+                }]
+            }))
+            .send()
+            .await
+            .expect("explicit fco_2 with existing ID-less legacy receipt must succeed");
+        assert_eq!(res.status(), StatusCode::OK);
+        let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+            .await
+            .expect("dual-history r22 explicit fco capture timeout")
+            .expect("dual-history r22 explicit fco capture");
+        let input = capture.body["input"]
+            .as_array()
+            .expect("provider input array");
+        assert_eq!(
+            input.len(),
+            2,
+            "both ID-less legacy receipt and explicit fco_2 ({incoming_output}) must reach first provider: {}",
+            capture.body
+        );
+        assert_eq!(input[0]["type"], json!("function_call_output"));
+        assert_eq!(input[0]["call_id"], json!("call_1"));
+        assert_eq!(input[0]["output"], json!("second-output"));
+        assert_ne!(input[0].get("id").and_then(Value::as_str), Some("fco_2"));
+        assert_eq!(
+            input[1],
+            json!({
+                "type": "function_call_output",
+                "id": "fco_2",
+                "call_id": "call_1",
+                "output": incoming_output
+            })
+        );
+    }
+
+    resp_handle.shutdown().await;
+    let _ = resp_shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn issue4a0b3aa_r22_dual_explicit_fco2_and_native_fc_fco2_no_collision_public() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::new();
+    let responses_provider_body = json!({
+        "id": "resp_r22_dual_fco2_and_fc_fco2",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}]
+    });
+    let (resp_url, mut resp_captures, resp_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            serde_json::to_vec(&responses_provider_body).unwrap(),
+        )
+        .await;
+    std::env::set_var("V3_P6_TEST_KEY", "issue4a0b3aa-r22-two-id-collision-key");
+    let mut resp_manifest = responses_relay_manifest(free_port(), free_port(), &resp_url);
+    resp_manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .remove("client_test");
+    let resp_handle = spawn_v3_server_aggregate(resp_manifest).await.unwrap();
+    let resp_endpoint = format!("http://{}/v1/responses", resp_handle.listeners[0].addr);
+
+    for incoming_output in ["second-output", "first-output"] {
+        let res = client
+            .post(&resp_endpoint)
+            .json(&json!({
+                "model": "test",
+                "stream": false,
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_item_id": "fco_2"
+                    }
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "id": "fc_fco_2",
+                    "call_id": "call_1",
+                    "output": incoming_output
+                }]
+            }))
+            .send()
+            .await
+            .expect("distinct fco_2 and fc_fco_2 receipts must succeed without collision");
+        assert_eq!(res.status(), StatusCode::OK);
+        let capture = timeout(Duration::from_secs(2), resp_captures.recv())
+            .await
+            .expect("dual-history r22 two-id capture timeout")
+            .expect("dual-history r22 two-id capture");
+        let input = capture.body["input"]
+            .as_array()
+            .expect("provider input array");
+        assert_eq!(
+            input.len(),
+            2,
+            "both fco_2 and fc_fco_2 ({incoming_output}) must reach first provider without collapsing: {}",
+            capture.body
+        );
+        assert_eq!(
+            input[0],
+            json!({
+                "type": "function_call_output",
+                "id": "fco_2",
+                "call_id": "call_1",
+                "output": "second-output"
+            })
+        );
+        assert_eq!(
+            input[1],
+            json!({
+                "type": "function_call_output",
+                "id": "fc_fco_2",
                 "call_id": "call_1",
                 "output": incoming_output
             })

@@ -219,6 +219,52 @@ fn responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids() {
 }
 
 #[test]
+fn responses_entry_preserves_explicit_fco_item_ids_verbatim_without_fc_collision() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "second-output",
+                "routecodex_chat_extension": {"responses_item_id": "fco_2"}
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "first-output",
+                "routecodex_chat_extension": {"responses_item_id": "fc_fco_2"}
+            }
+        ]
+    });
+    let provenance = super::super::V3HubExplicitHistoryProvenance {
+        message_entries: vec![
+            super::super::V3HubMessageHistoryProvenance {
+                preserve_native_tool_output_id: true,
+                ..Default::default()
+            },
+            super::super::V3HubMessageHistoryProvenance {
+                preserve_native_tool_output_id: true,
+                ..Default::default()
+            },
+        ],
+    };
+    let (wire, _, _) =
+        super::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+            &payload,
+            false,
+            false,
+            Some(&provenance),
+            true,
+        )
+        .expect("Responses entry must preserve explicit tool output item ids verbatim");
+    let input = wire["input"].as_array().expect("Responses input array");
+    assert_eq!(input.len(), 2, "{wire}");
+    assert_eq!(input[0]["id"], "fco_2");
+    assert_eq!(input[1]["id"], "fc_fco_2");
+}
+
+#[test]
 fn responses_wire_preserves_custom_tool_item_ids() {
     let payload = json!({
         "model": "gpt-test",
