@@ -831,10 +831,10 @@ async fn final_provider_error_stays_health_neutral_and_terminal() {
     assert!(
         matches!(
             output.terminal_disposition,
-            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(ref witness))
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(ref witness))
                 if witness.status() == 429
         ),
-        "the final real provider 429 must be available to the Server as a qualified terminal"
+        "the final real provider 429 must stay internal for diagnostics after passthrough retirement"
     );
     assert!(
         output

@@ -131,7 +131,7 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
     assert_eq!(floor_capture.body["model"], "wire-default");
     assert_no_route_controls(&floor_capture.body);
 
-    let exhausted_response = client
+    client
         .post(format!("http://127.0.0.1:{exhausted_port}/v1/responses"))
         .json(&json!({
             "model":"client-tools",
@@ -144,15 +144,7 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         }))
         .send()
         .await
-        .unwrap();
-    assert_eq!(
-        exhausted_response.status(),
-        ReqwestStatusCode::SERVICE_UNAVAILABLE
-    );
-    assert_eq!(
-        exhausted_response.text().await.unwrap(),
-        DEFAULT_PROVIDER_FAILURE
-    );
+        .expect_err("exhausted route must break transport without projecting 503");
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;
     assert_eq!(exhausted_optional.body["model"], "wire-optional");
     let exhausted_default = next_capture(&mut failure_b.captures, "exhaust default").await;

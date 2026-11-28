@@ -1113,7 +1113,7 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
     };
     assert!(
         ["first", "second"].contains(&selected.candidate.provider_id.as_str()),
-        "unexpected fallback candidate: {}",
+        "unexpected selected candidate: {}",
         selected.candidate.provider_id
     );
 }
@@ -1726,7 +1726,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     };
     assert!(
         ["first", "second"].contains(&selected.candidate.provider_id.as_str()),
-        "unexpected fallback candidate: {}",
+        "unexpected selected candidate: {}",
         selected.candidate.provider_id
     );
     assert_eq!(selected.candidate.auth_alias, "key1");

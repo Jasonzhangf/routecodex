@@ -347,8 +347,8 @@ async fn verify(entry: Entry, scenario: Scenario) {
     }
     match scenario {
         Scenario::SkipRetry | Scenario::TailRetry | Scenario::SecondHttp => {
-            let Some(V3ProviderTerminalDisposition::ProjectExternalHttp(witness)) = output else {
-                panic!("{entry:?} {scenario:?}: final actual HTTP error must qualify: {output:?}");
+            let Some(V3ProviderTerminalDisposition::ExternalHttp(witness)) = output else {
+                panic!("{entry:?} {scenario:?}: final actual HTTP error must stay internal: {output:?}");
             };
             let first = skipped;
             assert_eq!(witness.status(), if first { 503 } else { 502 });
@@ -363,9 +363,10 @@ async fn verify(entry: Entry, scenario: Scenario) {
         _ => assert!(
             !matches!(
                 output,
-                Some(V3ProviderTerminalDisposition::ProjectExternalHttp(_))
+                Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness))
+                    if witness.body() == FIRST && witness.body_read_failure().is_none()
             ),
-            "later actual failure must replace the first complete HTTP witness"
+            "later actual failure must replace the first complete HTTP witness: {output:?}"
         ),
     }
 }

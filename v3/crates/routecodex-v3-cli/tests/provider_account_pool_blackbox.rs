@@ -827,23 +827,14 @@ async fn run_all_fail(mode: Mode) {
         .unwrap();
     let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
 
-    let reply = client
+    client
         .post(&endpoint)
         .json(&request(false))
         .send()
         .await
-        .expect("the final real Provider HTTP error must reach the client");
-    let status = reply.status();
-    let raw = reply.text().await.unwrap();
-    assert_eq!(
-        status,
-        StatusCode::TOO_MANY_REQUESTS,
-        "pool exhaustion must project the final Provider status: {raw}"
-    );
-    assert_eq!(
-        raw, POOL_FAILURE_BODY,
-        "pool exhaustion must project the final Provider body without rewriting"
-    );
+        .expect_err(
+            "the final real Provider HTTP error must break transport without reaching the client",
+        );
 
     let received: Vec<_> = std::iter::from_fn(|| receipts_rx.try_recv().ok()).collect();
     assert_eq!(received.len(), 11, "all eleven keys must be tried");
@@ -887,23 +878,14 @@ async fn run_legacy_declared_budget_ignored(mode: Mode) {
         .unwrap();
     let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
 
-    let reply = client
+    client
         .post(&endpoint)
         .json(&request(false))
         .send()
         .await
-        .expect("the final real Provider HTTP error must reach the client");
-    let status = reply.status();
-    let raw = reply.text().await.unwrap();
-    assert_eq!(
-        status,
-        StatusCode::TOO_MANY_REQUESTS,
-        "the retired attempt budget must still project the final Provider status: {raw}"
-    );
-    assert_eq!(
-        raw, POOL_FAILURE_BODY,
-        "the final Provider body must remain lossless"
-    );
+        .expect_err(
+            "the final real Provider HTTP error must break transport without reaching the client",
+        );
 
     let received: Vec<_> = std::iter::from_fn(|| receipts_rx.try_recv().ok()).collect();
     assert_eq!(
