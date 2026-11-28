@@ -448,7 +448,10 @@ async fn relay_provider_failure_projects_target_expansion_error() {
     // The attempt stays health-neutral because its own target resolution proved
     // no alternative exists. An ordinary provider failure adds no permanent
     // request-local exclusion before that typed projection.
-    assert_eq!(result.event.health_record.state, "last_candidate_terminal");
+    assert_eq!(
+        result.event.health_record.state,
+        "request_local_provider_compat"
+    );
     assert!(
         failed_candidates.is_empty(),
         "an ordinary provider failure must not add a permanent request-local exclusion"

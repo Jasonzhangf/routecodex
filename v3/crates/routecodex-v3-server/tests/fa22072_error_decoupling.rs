@@ -866,37 +866,11 @@ async fn websocket_three_sources_close_without_business_or_error_frames_and_rele
             let terminal = timeout(Duration::from_secs(5), socket.next())
                 .await
                 .expect("WS failure must terminate");
-            if input == "provider-failure" {
-                let message = terminal
-                    .expect("the final provider error must reach the WebSocket")
-                    .expect("the WebSocket error message must use valid framing");
-                let message: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-                assert_eq!(message["type"], "error");
-                assert_eq!(message["status"], 500);
-                let details = message
-                    .get("error")
-                    .expect("Responses WebSocket error details are required");
-                assert_eq!(
-                    details.get("message"),
-                    Some(&json!("owned private provider cause"))
-                );
-                assert_eq!(details.get("type"), Some(&json!("server_error")));
-                assert!(details.get("code").is_some_and(Value::is_null));
-                assert!(details.get("param").is_some_and(Value::is_null));
-                assert!(
-                    message.to_string().contains("must-survive"),
-                    "unknown provider error data must remain opaque: {message}"
-                );
-                eprintln!(
-                    "public-ws process={process} source={input} projected_final_error={message}"
-                );
-            } else {
-                assert!(
-                    matches!(terminal, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
-                    "WS local failure leaked frame: {terminal:?}"
-                );
-                eprintln!("public-ws process={process} source={input} terminal={terminal:?}");
-            }
+            assert!(
+                matches!(terminal, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
+                "WS failure must close without projecting error frame: {terminal:?}"
+            );
+            eprintln!("public-ws process={process} source={input} terminal={terminal:?}");
             if input == "malformed-request" {
                 assert!(entry.captures.try_recv().is_err());
             } else {
@@ -966,27 +940,11 @@ async fn final_provider_error_projects_native_responses_sse_error_event() {
             .is_some_and(|value| value.starts_with("text/event-stream")),
         "the committed client channel must remain SSE"
     );
-    let body = response.text().await.unwrap();
-    let data = body
-        .lines()
-        .find_map(|line| line.strip_prefix("data: "))
-        .unwrap_or_else(|| panic!("SSE error data missing: {body}"));
-    let event: Value = serde_json::from_str(data)
-        .unwrap_or_else(|error| panic!("invalid SSE error JSON {error}: {body}"));
-    assert_eq!(event["type"], "error");
-    assert_eq!(event["message"], "owned private provider cause");
-    assert!(event.get("code").is_some_and(Value::is_null));
-    assert!(event.get("param").is_some_and(Value::is_null));
-    assert_eq!(event["sequence_number"], 0);
-    assert_eq!(event["opaque"], json!({"carrier":"must-survive"}));
-    assert!(
-        event
-            .get("error")
-            .and_then(|error| error.get("error"))
-            .is_none(),
-        "Responses SSE must not nest another error envelope: {event}"
+    let body_result = response.text().await;
+    let body_err = body_result.expect_err(
+        "final provider HTTP error must terminate SSE transport without projecting an error event",
     );
-    eprintln!("public-native-sse-error event={event}");
+    eprintln!("public-native-sse-transport-break err={body_err}");
     drained(&entry).await;
     entry.stop().await;
 }
@@ -1027,24 +985,10 @@ async fn three_failed_requests_do_not_block_concurrent_or_same_identity_followup
         };
         let (wire, ()) = tokio::join!(raw(&entry, "/v1/responses", &headers, &failed), sibling);
         let wire_text = String::from_utf8_lossy(&wire);
-        if origin == "provider-failure" {
-            assert!(
-                wire_text.starts_with("HTTP/1.1 500"),
-                "final JSON provider error must project its real status: {wire_text}"
-            );
-            assert!(
-                wire_text.contains(
-                    r#"{"error":{"message":"owned private provider cause","type":"server_error","opaque":{"carrier":"must-survive"}}}"#
-                )
-                    && wire_text.ends_with("0\r\n\r\n"),
-                "final JSON provider error must preserve its real body and complete the frame: {wire_text}"
-            );
-        } else {
-            assert!(
-                wire.is_empty(),
-                "local JSON failure must close before any HTTP head"
-            );
-        }
+        assert!(
+            wire.is_empty(),
+            "final failure must close before any HTTP head without projecting upstream error: {wire_text}"
+        );
         let expected_attempts = if origin == "request" { 1 } else { 2 };
         for _ in 0..expected_attempts {
             entry.captures.try_recv().unwrap();

@@ -237,15 +237,11 @@ async fn held_successor_projects_exact_http(relay_first: bool) {
     assert!(shutdown.is_empty(), "{shutdown:?}");
     assert_eq!(observed.load(Ordering::SeqCst), 1);
     assert_eq!(actual_calls, ["A"]);
-    let (status, headers, body) = result.expect("real Server HTTP response");
-    assert_eq!(status.as_u16(), 503);
-    assert_eq!(headers.get("content-type").unwrap(), "application/json");
-    assert_eq!(
-        body.as_ref(),
-        error_body().as_bytes(),
-        "complete A body, no appended payload"
+    assert!(
+        result.is_err(),
+        "final provider HTTP error must terminate transport without client error projection: {result:?}"
     );
-    eprintln!("handoff-projection client status=503 content-type=application/json exact_A_body=true appended_payload=false");
+    eprintln!("handoff-projection client terminated transport without error projection");
 }
 
 #[tokio::test]

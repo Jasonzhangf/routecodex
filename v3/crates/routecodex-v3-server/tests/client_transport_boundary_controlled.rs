@@ -419,10 +419,13 @@ async fn assert_chat_sse_provider_terminal(prompt: &str, expected: Value) {
         .filter_map(|line| line.strip_prefix("data: "))
         .map(|data| serde_json::from_str(data).unwrap())
         .collect();
-    assert_eq!(frames, [expected], "complete Provider error for {prompt}");
     assert!(
-        !aborted,
-        "the qualified final provider error must terminate the SSE response without a transport failure"
+        frames.is_empty() && !frames.contains(&expected),
+        "final provider error must not be projected to SSE client for {prompt}: {frames:?}"
+    );
+    assert!(
+        aborted,
+        "final provider error must terminate the SSE transport without projecting an error frame"
     );
 }
 

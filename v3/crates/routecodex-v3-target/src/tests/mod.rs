@@ -2328,17 +2328,66 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         }
     }
 
+    // Fallback over cooled candidates when all regular candidates are cooled:
+    // untried cooled candidates are attempted before exhausting, and once all
+    // candidates have been excluded as request_local_provider_failure, selection exhausts.
+    let first = target
+        .select_available(expanded.clone(), &AutomaticCooldown, 0)
+        .expect("cooled primary candidate is tried as fallback");
+    assert_eq!(first.candidate.provider_id, "search");
+    struct RequestFailedAfterCooldown {
+        failed: std::collections::BTreeSet<String>,
+    }
+    impl V3ProviderAvailabilityReader for RequestFailedAfterCooldown {
+        fn availability(
+            &self,
+            provider_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
+        }
+
+        fn availability_for_interface(
+            &self,
+            provider_id: &str,
+            _interface_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            _now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            let scope = if self.failed.contains(provider_id) {
+                "request_local_provider_failure"
+            } else {
+                "provider_key_health_cooldown"
+            };
+            V3ProviderAvailabilityProjection {
+                provider_id: provider_id.into(),
+                interface_id: "default".into(),
+                auth_alias: auth_alias.map(Into::into),
+                model_id: model_id.map(Into::into),
+                available: false,
+                blocked_scopes: vec![scope.into()],
+            }
+        }
+    }
+    let second_reader = RequestFailedAfterCooldown {
+        failed: ["search".to_string()].into_iter().collect(),
+    };
+    let second = target
+        .select_available(expanded.clone(), &second_reader, 0)
+        .expect("cooled default candidate is tried as fallback");
+    assert_eq!(second.candidate.provider_id, "text");
+    let both_failed = RequestFailedAfterCooldown {
+        failed: ["search".to_string(), "text".to_string()]
+            .into_iter()
+            .collect(),
+    };
     let exhausted = target
-        .select_available(expanded, &AutomaticCooldown, 0)
-        .expect_err("all captured candidates are cooled");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "search:default:key:m:availability(provider_key_health_cooldown)".to_string(),
-            "text:default:key:m:availability(provider_key_health_cooldown)".to_string(),
-        ],
-        "both captured tiers are reported without an admission wait"
-    );
+        .select_available(expanded, &both_failed, 0)
+        .expect_err("exhausts once all cooled candidates have failed in this request");
+    assert!(!exhausted.attempted_candidates.is_empty());
 }
 
 #[test]

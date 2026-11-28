@@ -102,7 +102,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -20,
-            failure_threshold: 1,
+            failure_threshold: 5,
             cooldown_ms,
             long_probe_backoff: true,
             advisory_probe: false,
@@ -206,12 +206,12 @@ pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
-        401 | 402 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 1,
+        401 | 402 | 403 => Some(V3ProviderGlobalFailurePolicy {
+            failure_threshold: 5,
             cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,
         }),
-        403 | 429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
+        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,
@@ -327,7 +327,7 @@ mod tests {
             payment_required.recovery,
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
-        assert_eq!(payment_required.failure_threshold, 1);
+        assert_eq!(payment_required.failure_threshold, 5);
         assert_eq!(payment_required.cooldown_ms, 60 * 60_000);
         assert!(payment_required.long_probe_backoff);
         let fingerprint = build_v3_provider_global_error_fingerprint(402)
@@ -345,7 +345,7 @@ mod tests {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 5);
 
         for code in ["insufficient_quota", "rate_limit_error"] {
             let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -359,7 +359,7 @@ mod tests {
                     V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
                     "{code}: typed unrecoverable classification wins"
                 );
-                assert_eq!(rate_limited.failure_threshold, 1);
+                assert_eq!(rate_limited.failure_threshold, 5);
             } else {
                 assert_eq!(
                     rate_limited.recovery,
@@ -387,7 +387,7 @@ mod tests {
             action.recovery,
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 5);
 
         for code in ["provider_http_403", "permission_error", "account_disabled"] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -396,7 +396,7 @@ mod tests {
                 403,
             ));
             assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-            assert_eq!(action.failure_threshold, 10);
+            assert_eq!(action.failure_threshold, 5);
             assert_eq!(action.failure_fingerprint.unwrap().http_status, 403);
         }
 
@@ -528,7 +528,7 @@ mod tests {
                 V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
                 "code={code} status={status}"
             );
-            assert_eq!(action.failure_threshold, 1, "code={code} status={status}");
+            assert_eq!(action.failure_threshold, 5, "code={code} status={status}");
         }
     }
 }

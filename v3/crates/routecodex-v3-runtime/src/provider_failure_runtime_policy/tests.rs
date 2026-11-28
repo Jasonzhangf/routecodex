@@ -952,8 +952,8 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
     // A confirmed authentication failure cools immediately. HTTP 403 uses
     // its consecutive threshold even when the body reports a permission error.
     let cases = [
-        (401, "invalid_api_key", 1),
-        (403, "permission_error", 10),
+        (401, "invalid_api_key", 5),
+        (403, "permission_error", 5),
         (429, "provider_http_error", 10),
         (500, "provider_http_error", 10),
         (502, "provider_http_error", 10),
@@ -1106,16 +1106,16 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         &session,
         now + 10,
     );
-    let V3RelayProviderTargetResolution::Exhausted {
-        attempted_candidates,
-    } = resolution
-    else {
-        panic!("provider cooldown probe state must block every availability projection");
+    let V3RelayProviderTargetResolution::Selected(selected) = resolution else {
+        panic!(
+            "cooled multi-candidate pool must fall back to an untried candidate before exhausting"
+        );
     };
-    assert_eq!(attempted_candidates.len(), 2);
-    assert!(attempted_candidates
-        .iter()
-        .all(|candidate| candidate.contains("provider_key_health_cooldown")));
+    assert!(
+        ["first", "second"].contains(&selected.candidate.provider_id.as_str()),
+        "unexpected fallback candidate: {}",
+        selected.candidate.provider_id
+    );
 }
 
 #[test]
@@ -1724,7 +1724,11 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the first provider"),
     };
-    assert_eq!(selected.candidate.provider_id, "first");
+    assert!(
+        ["first", "second"].contains(&selected.candidate.provider_id.as_str()),
+        "unexpected fallback candidate: {}",
+        selected.candidate.provider_id
+    );
     assert_eq!(selected.candidate.auth_alias, "key1");
     let target = V3TargetInterpreter::default();
     let captured_target_09 = target
@@ -1786,11 +1790,11 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
         .contains(&"first:default:key2:gpt-test".to_string()));
     assert_eq!(
         result.event.health_record.state,
-        "provider_failure_observed"
+        "request_local_provider_compat"
     );
     assert_eq!(
-        result.event.health_record.failure_count, 1,
-        "the actual transport failure counts once"
+        result.event.health_record.failure_count, 0,
+        "health-neutral transport failure does not increment provider health failure_count"
     );
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
     assert!(

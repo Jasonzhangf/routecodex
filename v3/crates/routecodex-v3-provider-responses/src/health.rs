@@ -1785,18 +1785,38 @@ impl V3ProviderHealthStore {
             action.recovery == V3ProviderRecoveryKind::RecoverableCounted
                 && action.scope == V3ProviderHealthScope::GlobalProviderKey
         });
+        let is_http_403 = active_policy_rule.is_none()
+            && action
+                .failure_fingerprint
+                .as_ref()
+                .is_some_and(|fingerprint| fingerprint.http_status == 403);
+        let is_http_429 = active_policy_rule.is_none()
+            && action.recovery == V3ProviderRecoveryKind::RecoverableCounted
+            && action
+                .failure_fingerprint
+                .as_ref()
+                .is_some_and(|fingerprint| fingerprint.http_status == 429);
         let failure_threshold = match action.recovery {
-            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 1,
-            V3ProviderRecoveryKind::RecoverableCounted => active_policy_rule
-                .map_or(V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD, |rule| {
-                    rule.failure_threshold
-                }),
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => action.failure_threshold.max(1),
+            V3ProviderRecoveryKind::RecoverableCounted => active_policy_rule.map_or(
+                if is_http_403 {
+                    5
+                } else {
+                    V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+                },
+                |rule| rule.failure_threshold,
+            ),
             _ => 0,
         };
-        let cooldown_duration_ms = active_policy_rule
-            .map_or(V3_PROVIDER_HEALTH_COOLDOWN_MS, |rule| {
+        let cooldown_duration_ms = if is_http_429 {
+            // Smooth 429 recovery: cap 429 cooldown at 60s instead of 1h so
+            // traffic can recover quickly once upstream rate limits clear.
+            active_policy_rule.map_or(60_000, |rule| rule.cooldown_ms.max(1).min(60_000))
+        } else {
+            active_policy_rule.map_or(V3_PROVIDER_HEALTH_COOLDOWN_MS, |rule| {
                 rule.cooldown_ms.max(1)
-            });
+            })
+        };
         let probe_cooldown_active = state
             .provider_cooldown_probes
             .get(&key)
@@ -1811,14 +1831,14 @@ impl V3ProviderHealthStore {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
                 | V3ProviderRecoveryKind::RecoverableCounted
         ) {
-            record_health_delta(history, action.score_delta_milli);
+            let delta = if is_http_429 {
+                action.score_delta_milli.min(-30)
+            } else {
+                action.score_delta_milli
+            };
+            record_health_delta(history, delta);
         }
         history.success_streak = 0;
-        let is_http_403 = active_policy_rule.is_none()
-            && action
-                .failure_fingerprint
-                .as_ref()
-                .is_some_and(|fingerprint| fingerprint.http_status == 403);
         let mut active_policy_streak = None;
         match action.recovery {
             V3ProviderRecoveryKind::RecoverableCounted
@@ -1855,7 +1875,10 @@ impl V3ProviderHealthStore {
             }
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
                 history.policy_streaks.clear();
-                history.failure_streak = 1;
+                if history.failure_fingerprint != action.failure_fingerprint {
+                    history.failure_streak = 0;
+                }
+                history.failure_streak = history.failure_streak.saturating_add(1);
                 history.failure_fingerprint = action.failure_fingerprint.clone();
             }
             _ => {}
@@ -1869,12 +1892,6 @@ impl V3ProviderHealthStore {
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
             let failure_streak = active_policy_streak.unwrap_or(history.failure_streak);
-            let is_http_429 = active_policy_rule.is_none()
-                && action.recovery == V3ProviderRecoveryKind::RecoverableCounted
-                && action
-                    .failure_fingerprint
-                    .as_ref()
-                    .is_some_and(|fingerprint| fingerprint.http_status == 429);
             let episode = history
                 .rate_limit_episode
                 .get_or_insert_with(Default::default);
@@ -1983,7 +2000,7 @@ impl V3ProviderHealthStore {
         let history = state.adaptive_history.entry(key.clone()).or_default();
         history.attempts = 0;
         history.failures = 0;
-        record_health_delta(history, 1);
+        record_health_delta(history, 25);
         history.failure_streak = 0;
         history.failure_fingerprint = None;
         history.policy_streaks.clear();

@@ -167,6 +167,17 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         // not provider health. Relay may surface them as a runtime 502 after
         // decoding an HTTP-200 SSE error event, so status alone is insufficient.
         || error_type == Some("invalid_request_error")
+        // Transport / response-header timeouts switch provider directly without
+        // locking the provider out in a 1-hour health cooldown.
+        || matches!(
+            error_type,
+            Some(
+                "provider_response_header_timeout"
+                    | "provider_request_budget_exhausted"
+                    | "provider_timeout"
+                    | "provider_transport_error"
+            )
+        )
 }
 
 /// A Relay Error-operator contract failure. This is a typed control resource:
