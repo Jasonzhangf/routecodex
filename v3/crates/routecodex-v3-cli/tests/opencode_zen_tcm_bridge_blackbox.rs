@@ -840,35 +840,30 @@ async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    let (status, content_type, raw) = send_raw(
-        &client,
-        harness.port,
-        "/v1/chat/completions",
-        &json!({
+    let error = client
+        .post(format!(
+            "http://127.0.0.1:{}/v1/chat/completions",
+            harness.port
+        ))
+        .json(&json!({
             "model":"zenpeer.model",
             "stream":false,
             "messages":[{"role":"user","content":"hi"}]
-        }),
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "the final real Provider HTTP status must reach the client: {raw}"
-    );
+        }))
+        .send()
+        .await
+        .expect_err(
+            "final exhausted provider 403 must terminate transport without HTTP error projection",
+        );
     assert!(
-        content_type.contains("application/json"),
-        "the final Provider error must retain its JSON content type: {content_type}"
-    );
-    assert_eq!(
-        raw, r#"{"error":{"message":"FreeTierError","type":"FreeTierError"}}"#,
-        "the final Provider error body must remain lossless"
+        error.is_request() || error.is_connect() || error.is_body() || error.is_decode(),
+        "expected clean transport break, got {error:?}"
     );
     let captures = harness.peer.captures.lock().await;
     assert_eq!(
         captures.len(),
         1,
-        "one provider attempt must reach the peer before final projection: {captures:?}"
+        "one provider attempt must reach the peer before transport termination: {captures:?}"
     );
     drop(captures);
     assert!(harness.peer.errors.lock().await.is_empty());

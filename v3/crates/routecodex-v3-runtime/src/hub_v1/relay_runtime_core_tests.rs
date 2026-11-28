@@ -141,8 +141,8 @@ fn openai_chat_relay_provider_http_400_derives_external_code_from_status() {
     );
     assert_eq!(
         terminal.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(witness)),
-        "the complete final upstream body is qualified for the client projection",
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+        "the complete final upstream body stays internal after passthrough retirement",
     );
     let projection = terminal
         .terminal_projection

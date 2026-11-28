@@ -825,7 +825,7 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
 
     for (status, code, threshold) in [
         (400u16, "provider_http_400", 10u32),
-        (401, "provider_http_401", 1),
+        (401, "provider_http_401", 5u32),
     ] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
         let session =
@@ -880,17 +880,18 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
                 "wrong cooldown threshold for HTTP {status}"
             );
         }
+        let committed_at = 100 + u64::from(threshold);
         assert!(
             !health
                 .store()
-                .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 102)
+                .scheduling_projection("openai", "key1", "gpt-test", 100, 100, committed_at)
                 .unwrap()
                 .available,
             "HTTP {status} must cool the exact attempted identity"
         );
         assert!(
             health
-                .availability("openai", Some("key1"), Some("other-model"), 102)
+                .availability("openai", Some("key1"), Some("other-model"), committed_at)
                 .available,
             "the observed failure cannot cool a sibling identity"
         );
@@ -901,12 +902,12 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
                 "openai",
                 Some("key1"),
                 Some("gpt-test"),
-                103,
+                committed_at + 1,
             )
             .unwrap();
         assert!(
             !health
-                .availability("openai", Some("key1"), Some("gpt-test"), 103)
+                .availability("openai", Some("key1"), Some("gpt-test"), committed_at + 1)
                 .available,
             "a matching in-flight success cannot shorten committed cooldown"
         );

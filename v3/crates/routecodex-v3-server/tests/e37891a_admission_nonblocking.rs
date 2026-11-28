@@ -153,15 +153,14 @@ fn evidence_body_text(evidence: &Value) -> String {
 }
 
 fn assert_final_http_error(outcome: &ClientOutcome, evidence: &Value, expected_status: u16) {
-    let ClientOutcome::Http { status, body } = outcome else {
-        panic!("the final provider HTTP error must reach the client: {outcome:?}");
-    };
-    assert_eq!(*status, expected_status);
+    assert!(
+        matches!(outcome, ClientOutcome::TransportError(_)),
+        "final exhaustion must terminate transport without client error projection: {outcome:?}"
+    );
     assert_eq!(evidence["kind"], "external_http");
     assert_eq!(evidence["status"], expected_status);
-    assert_eq!(*body, evidence_body_text(evidence));
     assert_eq!(
-        serde_json::from_str::<Value>(body).unwrap(),
+        serde_json::from_str::<Value>(&evidence_body_text(evidence)).unwrap(),
         json!({"error":{"message":"owned-real-key-failure","http_status":expected_status}})
     );
 }

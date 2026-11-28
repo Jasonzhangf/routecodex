@@ -554,7 +554,8 @@ fn assert_persisted_429_recovery(advisory: bool) {
             .available,
         "a persisted 429 hold must block during its window"
     );
-    let now = 3_720_102;
+    // Smooth 429 recovery caps 429 cooldown at 60s instead of 1h.
+    let now = 180_102;
     assert!(
         restored
             .record_provider_key_success("p", "k", "m", now)

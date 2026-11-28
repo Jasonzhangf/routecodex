@@ -735,12 +735,8 @@ async fn req03_provider_exhaustion_projects_only_final_typed_error_blackbox() {
     .await
     .expect("the failing request must reach a terminal transport outcome");
 
-    let response = client_observation.expect("the real last-key HTTP error must reach the client");
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        response.text().await.unwrap(),
-        final_provider_error.to_string()
-    );
+    client_observation
+        .expect_err("the real last-key HTTP error must break transport without client projection");
 
     let first_failure_capture = timeout(Duration::from_secs(5), captures_rx.recv())
         .await
