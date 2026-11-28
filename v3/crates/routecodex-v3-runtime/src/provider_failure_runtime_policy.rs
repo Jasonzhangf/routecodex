@@ -2139,7 +2139,10 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
     is_compaction: bool,
 ) -> Result<
     V3Router07OpaqueTargetHitOnce,
-    Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>,
+    Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
 > {
     resolve_v3_relay_opaque_target_with_history_images_with_projection(
         manifest,
