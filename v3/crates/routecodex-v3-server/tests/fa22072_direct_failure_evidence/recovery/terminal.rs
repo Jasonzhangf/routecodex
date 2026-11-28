@@ -53,13 +53,9 @@ async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
         let raw = raw_post_chat(case.port, &recovery_chat_request(&marker, stream)).await;
         let text = String::from_utf8_lossy(&raw);
         let expected_body = owned_b_503_body().to_string();
-        if !text.starts_with("HTTP/1.1 503 ")
-            || !text.contains("content-type: application/json")
-            || !text.contains("connection: close")
-            || !text.contains(&expected_body)
-        {
+        if text.contains("503") || text.contains(&expected_body) || text.contains("\"error\"") {
             controls.push(format!(
-                "{label}: final B provider 503 lost status, framing, or body: {text}"
+                "{label}: final B provider 503 leaked onto client wire: {text}"
             ));
         }
         if text.contains(KEY) || text.contains("OWNED_A_503_PRIVATE") {

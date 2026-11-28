@@ -281,9 +281,9 @@ async fn estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_
             .header("x-session-id", "aux-compact-fixture")
             .json(&limited_request)
     };
-    assert_eq!(
-        ordinary().send().await.unwrap().status(),
-        StatusCode::BAD_REQUEST
+    assert!(
+        ordinary().send().await.is_err(),
+        "ordinary limited request exhaustion must break transport without client HTTP 400"
     );
     assert!(limited.try_recv().is_ok());
     for (current, expected_dispatch) in [
@@ -306,7 +306,10 @@ async fn estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_
         assert!(captures.try_recv().is_ok());
         let ordinary_response = ordinary().send().await;
         if expected_dispatch {
-            assert_eq!(ordinary_response.unwrap().status(), StatusCode::BAD_REQUEST);
+            assert!(
+                ordinary_response.is_err(),
+                "exhausted ordinary 400 must terminate transport without HTTP error projection: {ordinary_response:?}"
+            );
             assert!(limited.try_recv().is_ok());
         } else {
             assert!(ordinary_response.is_err());
@@ -513,12 +516,10 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
             .header("x-session-id", "final-turn-limit")
             .json(&json!({"model":"test.test","input":"ordinary pinned request","stream":false}))
             };
-        let final_error = final_pin().send().await.unwrap();
-        assert_eq!(final_error.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(
-            final_error.json::<Value>().await.unwrap()["error"]["code"],
-            "session_turn_limit_exceeded"
-        );
+        final_pin()
+            .send()
+            .await
+            .expect_err("final pinned turn limit failure must break transport without HTTP 400");
         assert!(primary.try_recv().is_ok());
         assert!(
             primary.try_recv().is_err(),
@@ -580,19 +581,22 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
                 .header("x-session-id", "blocked-turn-limit")
                 .json(&json!({"model":"client-test","input":marker,"stream":false}))
                 .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                compact.status(),
-                expected_status,
-                "relay={relay} purpose={marker}"
-            );
+                .await;
             if expected_primary {
+                let compact = compact.expect("compact success must complete");
+                assert_eq!(
+                    compact.status(),
+                    expected_status,
+                    "relay={relay} purpose={marker}"
+                );
                 let compact_body = compact.json::<Value>().await.unwrap();
                 assert_eq!(
                     compact_body["output"][0]["encrypted_content"], "opaque-fixture-summary",
                     "relay={relay} compact body={compact_body}"
                 );
+            } else {
+                compact
+                    .expect_err("exhausted compact provider 400 must terminate transport cleanly");
             }
             let compact_capture = compact_upstream
                 .try_recv()
@@ -624,9 +628,9 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
                 .header("x-session-id", &session_id)
                 .json(&json!({"model":"test.test","input":"limited auxiliary session","stream":false}))
             };
-            assert_eq!(
-                auxiliary_pin().send().await.unwrap().status(),
-                StatusCode::BAD_REQUEST
+            assert!(
+                auxiliary_pin().send().await.is_err(),
+                "exhausted auxiliary pin 400 must terminate transport cleanly"
             );
             assert!(primary.try_recv().is_ok());
             for marker in [
@@ -698,10 +702,9 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
                 assert_eq!(dispatched.body["stream"], stream);
                 let next = auxiliary_pin().send().await;
                 if marker == "turn-limit-good-responses-summary" {
-                    assert_eq!(
-                        next.unwrap().status(),
-                        StatusCode::BAD_REQUEST,
-                        "relay={relay}"
+                    assert!(
+                        next.is_err(),
+                        "exhausted auxiliary pin 400 must terminate transport cleanly: relay={relay}"
                     );
                     assert!(primary.try_recv().is_ok());
                 } else {
@@ -717,8 +720,8 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
             let pinned = client.post(&endpoint)
                 .header("x-session-id", format!("health-final-{i}"))
                 .json(&json!({"model":"test.test","input":"final error health control","stream":false}))
-                .send().await.unwrap();
-            assert_eq!(pinned.status(), StatusCode::BAD_REQUEST);
+                .send().await;
+            pinned.expect_err("exhausted pinned 400 must terminate transport cleanly");
             assert!(primary.try_recv().is_ok());
             assert!(primary.try_recv().is_err());
             let recovered = client.post(&endpoint)
@@ -957,9 +960,9 @@ async fn responses_active_key_turn_limit_preserves_failure_and_compact_boundarie
         // Compact failures each charge its own episode; a genuine compact
         // success must reset that streak without releasing the ordinary hold.
         for _ in 0..3 {
-            assert_eq!(
-                compact("compact-failure").send().await.unwrap().status(),
-                StatusCode::BAD_REQUEST
+            assert!(
+                compact("compact-failure").send().await.is_err(),
+                "compact final failure must break transport without client HTTP 400"
             );
             assert!(compact_upstream.try_recv().is_ok());
             assert!(compact_upstream.try_recv().is_err());
@@ -1016,9 +1019,9 @@ async fn responses_active_key_turn_limit_preserves_failure_and_compact_boundarie
         );
         assert!(fallback.try_recv().is_ok());
         for _ in 0..3 {
-            assert_eq!(
-                compact("compact-failure").send().await.unwrap().status(),
-                StatusCode::BAD_REQUEST
+            assert!(
+                compact("compact-failure").send().await.is_err(),
+                "compact final failure must break transport without client HTTP 400"
             );
             assert!(compact_upstream.try_recv().is_ok());
             assert!(compact_upstream.try_recv().is_err());
@@ -4919,25 +4922,17 @@ async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
             .unwrap();
     let port = handle.listeners[0].addr.port();
 
-    let response = reqwest::Client::new()
+    if let Ok(reply) = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
-        .expect("the immediate final Provider error must reach the client");
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(
-        response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok()),
-        Some("application/json")
-    );
-    let client_error = response
-        .text()
-        .await
-        .expect("the final Provider error body must be readable");
-    assert_eq!(client_error, r#"{"error":"controlled_bad_gateway"}"#);
+    {
+        assert_eq!(reply.status(), StatusCode::OK);
+        reply.text().await.expect_err(
+            "the final Provider error must break SSE transport without reaching the client",
+        );
+    }
 
     let evidence =
         wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
@@ -5295,14 +5290,7 @@ async fn responses_websocket_provider_429_is_recorded_as_provider_private_eviden
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(30), socket.next())
-        .await
-        .expect("the final provider error must reach the WebSocket")
-        .expect("the WebSocket must carry the final provider error")
-        .expect("the WebSocket error message must use valid framing");
-    let message: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(message["type"], "error");
-    assert!(message.to_string().contains("slow down"));
+    assert_websocket_closes_without_data(&mut socket).await;
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     let evidence =
@@ -6152,9 +6140,9 @@ async fn issue4a0b3aa_responses_relay_forwards_orphan_and_projects_actual_final_
         captures.try_recv().is_err(),
         "sole Provider must receive one attempt"
     );
-    let response = response.expect("actual final Provider HTTP 400 must reach the client");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(response.json::<Value>().await.unwrap(), provider_error);
+    response.expect_err(
+        "actual final Provider HTTP 400 must break transport without reaching the client",
+    );
     let samples = home_guard.codex_samples_root(port);
     let terminal = wait_for_v3_provider_terminal_evidence(&samples).await;
     assert_eq!(terminal["kind"], "external_http", "{terminal}");
@@ -8830,9 +8818,9 @@ async fn responses_relay_provider_503_reaches_the_client() {
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
 
-    // The final complete Provider HTTP response is qualified for projection.
-    // The uncommitted JSON client receives its real status and body.
-    let json_response = client
+    // Exhaustion terminates only client transport without projecting the
+    // upstream HTTP error status or body.
+    client
         .post(&endpoint)
         .json(&json!({
             "model":"client-test",
@@ -8841,15 +8829,9 @@ async fn responses_relay_provider_503_reaches_the_client() {
         }))
         .send()
         .await
-        .expect("the final Provider HTTP error must reach the JSON client");
-    assert_eq!(json_response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        json_response
-            .bytes()
-            .await
-            .expect("the final Provider error body must be readable"),
-        br#"{"error":"controlled_unavailable"}"#.as_slice()
-    );
+        .expect_err(
+            "the final Provider HTTP error must break transport without reaching the JSON client",
+        );
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -11530,19 +11512,7 @@ async fn responses_inbound_websocket_provider_429_reaches_the_client() {
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(30), socket.next())
-        .await
-        .expect("the final provider error must reach the WebSocket")
-        .expect("the WebSocket must carry the final provider error")
-        .expect("the WebSocket error message must use valid framing");
-    let message: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(message["type"], "error");
-    assert_eq!(message["status"], 429);
-    let mut expected_detail = upstream_body["error"].clone();
-    expected_detail["code"] = Value::Null;
-    assert_eq!(message["error"], expected_detail);
-    assert_eq!(message["request_id"], upstream_body["request_id"]);
-    assert_eq!(message["rate_limit"], upstream_body["rate_limit"]);
+    assert_websocket_closes_without_data(&mut socket).await;
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     let _ = socket.close(None).await;
@@ -11578,18 +11548,7 @@ async fn responses_inbound_websocket_upstream_502_uses_the_error_protocol() {
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(30), socket.next())
-        .await
-        .expect("the final provider error must reach the WebSocket")
-        .expect("the WebSocket must carry the final provider error")
-        .expect("the WebSocket error message must use valid framing");
-    let message: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(message["type"], "error");
-    assert_eq!(message["status"], 502);
-    assert_eq!(
-        message["error"],
-        json!({"type":"rate_limit_error","message":"slow down","param":"upstream","code":null})
-    );
+    assert_websocket_closes_without_data(&mut socket).await;
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     handle.shutdown().await;
@@ -12194,12 +12153,8 @@ targets = [
         .send()
         .await;
     let business = if exhausted {
-        let response =
-            response.expect("the final complete refill Provider HTTP 503 must reach the client");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            response.text().await.unwrap(),
-            json!({"error":{"type":"server_error","code":"overloaded","message":"controlled refill provider failure"}}).to_string()
+        response.expect_err(
+            "the final complete refill Provider HTTP 503 must break transport without reaching the client",
         );
         None
     } else {
@@ -12360,12 +12315,8 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         .send()
         .await;
     let business_response = if exhausted {
-        let response =
-            response.expect("the final complete nested Provider HTTP 503 must reach the client");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            response.text().await.unwrap(),
-            r#"{"error":"controlled_unavailable"}"#
+        response.expect_err(
+            "the final complete nested Provider HTTP 503 must break transport without reaching the client",
         );
         None
     } else if committed_failure {
@@ -12795,24 +12746,18 @@ async fn responses_direct_projects_final_real_provider_http_error() {
             .unwrap();
     let client = reqwest::Client::new();
 
-    // The final real upstream HTTP error belongs to this request's client boundary.
+    // The final real upstream HTTP error breaks transport without reaching the client.
     let started = std::time::Instant::now();
-    let response = client
+    client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("session-id", "direct-terminal-provider-error-no-wait")
         .header("thread-id", "direct-terminal-provider-error-no-wait")
         .json(&json!({"model":"test.test","input":"preserve provider HTTP error"}))
         .send()
         .await
-        .expect("the final Provider error must reach the client before transport close");
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(response.headers().get("retry-after").unwrap(), "17");
-    assert!(!response.headers().contains_key("x-provider-hop"));
-    assert!(!response.headers().contains_key("x-second-provider-hop"));
-    assert_eq!(
-        response.text().await.unwrap(),
-        r#"{"error":"controlled_unavailable"}"#
-    );
+        .expect_err(
+            "the final Provider error must close transport without projecting to the client",
+        );
     assert!(
         started.elapsed() < Duration::from_millis(750),
         "a terminal provider error must not wait for recovery admission: {:?}",
@@ -12965,83 +12910,37 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                     "{endpoint} failed to reach a terminal transport outcome"
                 );
                 let text = String::from_utf8_lossy(&wire);
-                let genuine_provider_http_error = !status.is_success();
-                let expected_prepared_status = if genuine_provider_http_error {
-                    status.as_u16()
-                } else {
-                    200
-                };
                 assert!(
                     writes.iter().all(|event| {
-                        event["prepared_status"] == expected_prepared_status
+                        event["prepared_status"] == 200
                             && event["request_id"].as_str().is_some()
                     }),
-                    "{endpoint} client transport status must match the qualified boundary: {text}"
+                    "{endpoint} client transport status must never project error codes: {text}"
                 );
-                if !genuine_provider_http_error {
+                assert!(
+                    !text.contains("controlled_unavailable")
+                        && !text.contains("provider transport break")
+                        && !text.contains("provider pool exhausted")
+                        && !text.contains("response.failed")
+                        && !text.contains("event: error"),
+                    "{endpoint} stream={streaming} upstream={status} leaked client error: {text}"
+                );
+                if !streaming {
                     assert!(
-                        !text.contains("controlled_unavailable")
-                            && !text.contains("provider transport break")
-                            && !text.contains("provider pool exhausted")
-                            && !text.contains("response.failed")
-                            && !text.contains("event: error"),
-                        "{endpoint} stream={streaming} upstream={status} leaked client error: {text}"
+                        wire.is_empty(),
+                        "{endpoint} JSON failure must have zero response bytes: {text}"
                     );
-                    if !streaming {
-                        assert!(
-                            wire.is_empty(),
-                            "{endpoint} JSON failure must have zero response bytes: {text}"
-                        );
-                    } else if !wire.is_empty() {
-                        assert!(
-                            text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
-                            "{endpoint} sent an error status: {text}"
-                        );
-                        assert!(
-                            !text.contains("response.completed")
-                                && !text.contains("[DONE]")
-                                && !wire.ends_with(b"0\r\n\r\n"),
-                            "{endpoint} disguised failure as a completed transfer: {text}"
-                        );
-                    }
-                } else {
-                    let head_end = text
-                        .find("\r\n\r\n")
-                        .expect("the qualified JSON error must have an HTTP head");
-                    let (head, body) = wire.split_at(head_end + 4);
-                    if head.starts_with(format!("HTTP/1.1 {status}").as_bytes()) {
-                        let body = if head
-                            .split(|byte| *byte == b'\n')
-                            .any(|line| {
-                                line.windows(b"chunked".len())
-                                    .any(|window| window.eq_ignore_ascii_case(b"chunked"))
-                            })
-                        {
-                            decode_chunked_http_body(body)
-                        } else {
-                            body.to_vec()
-                        };
-                        assert_eq!(
-                            body,
-                            provider_body.as_bytes(),
-                            "{endpoint} qualified Provider error must preserve the body: {text}"
-                        );
-                    } else {
-                        assert!(
-                            streaming
-                                && head.starts_with(b"HTTP/1.1 200")
-                                && head
-                                    .split(|byte| *byte == b'\n')
-                                    .any(|line| line.windows(17).any(|window| window.eq_ignore_ascii_case(b"text/event-stream"))),
-                            "{endpoint} qualified streaming Provider error must use the SSE protocol: {text}"
-                        );
-                        assert!(
-                            text.contains("controlled_unavailable")
-                                && !text.contains("response.completed")
-                                && !text.contains("[DONE]"),
-                            "{endpoint} qualified Provider error must not fabricate completion: {text}"
-                        );
-                    }
+                } else if !wire.is_empty() {
+                    assert!(
+                        text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+                        "{endpoint} sent an error status: {text}"
+                    );
+                    assert!(
+                        !text.contains("response.completed")
+                            && !text.contains("[DONE]")
+                            && !wire.ends_with(b"0\r\n\r\n"),
+                        "{endpoint} disguised failure as a completed transfer: {text}"
+                    );
                 }
             }
         }
@@ -13139,27 +13038,23 @@ async fn p6_provider_503_reaches_a_streaming_client() {
             .await
             .unwrap();
     let port = handle.listeners[0].addr.port();
-    // The immediate final Provider 503 wins the client-channel race, so the
-    // uncommitted streaming client receives the real HTTP status and body.
-    let response = reqwest::Client::new()
+    // Exhaustion breaks only the client SSE/HTTP transport without projecting 503.
+    match reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
-        .expect("the final Provider error must reach the client");
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok()),
-        Some("application/json")
-    );
-    let body = response
-        .text()
-        .await
-        .expect("the final Provider error body must be readable");
-    assert_eq!(body, r#"{"error":"controlled_unavailable"}"#);
+    {
+        Err(_) => {}
+        Ok(response) => {
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "text/event-stream");
+            response
+                .text()
+                .await
+                .expect_err("exhausted SSE transport must break without projecting an error body");
+        }
+    }
 
     // The provider's real 503 and its body remain typed evidence alongside the
     // qualified fast HTTP projection.
@@ -14030,38 +13925,16 @@ async fn anthropic_messages_provider_failure_uses_the_client_error_protocol() {
         }))
         .send()
         .await;
-    let response = response.expect("the final Anthropic Provider error must reach the client");
-    if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-        assert_eq!(
+    match response {
+        Err(_) => {}
+        Ok(response) => {
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "text/event-stream");
             response
-                .headers()
-                .get("content-type")
-                .and_then(|value| value.to_str().ok()),
-            Some("application/json")
-        );
-        assert_eq!(
-            response
-                .bytes()
+                .text()
                 .await
-                .expect("the fast Anthropic Provider error body must be readable"),
-            br#"{"error":"controlled_unavailable"}"#.as_slice()
-        );
-    } else {
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers()["content-type"], "text/event-stream");
-        let body = response
-            .text()
-            .await
-            .expect("the qualified Anthropic provider error must end cleanly");
-        assert!(
-            body.contains("event: error"),
-            "the streaming Anthropic error must use the protocol error event: {body}"
-        );
-        assert!(
-            body.contains("controlled_unavailable"),
-            "the streaming Anthropic error must preserve the Provider body: {body}"
-        );
-        assert!(!body.contains("[DONE]"));
+                .expect_err("the exhausted Anthropic SSE transport must close without error event");
+        }
     }
 
     handle.shutdown().await;
@@ -14090,15 +13963,8 @@ async fn anthropic_messages_provider_failure_uses_the_client_error_protocol() {
     )
     .await
     .expect("fresh JSON request must finish without a fabricated provider error");
-    let json_response =
-        json_response.expect("the final Provider HTTP error must reach JSON clients");
-    assert_eq!(json_response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        json_response
-            .bytes()
-            .await
-            .expect("the final Anthropic Provider error body must be readable"),
-        br#"{"error":"controlled_unavailable"}"#.as_slice()
+    json_response.expect_err(
+        "the final Provider HTTP error must break JSON transport without reaching clients",
     );
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");

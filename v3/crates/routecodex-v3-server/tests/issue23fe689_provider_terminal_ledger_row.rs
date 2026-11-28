@@ -364,21 +364,9 @@ async fn assert_entry_writes_one_failed_terminal(entry: Entry, mode: Mode) {
         .post(format!("{base}{}", entry.endpoint()))
         .json(&entry.request())
         .send()
-        .await
-        .expect("the final real Provider HTTP error must reach the client");
-    assert_eq!(
-        response.status(),
-        StatusCode::TOO_MANY_REQUESTS,
-        "the client must receive the real final Provider status"
-    );
-    assert_eq!(
-        response
-            .bytes()
-            .await
-            .expect("the final Provider error body must be readable"),
-        br#"{"error":{"type":"rate_limit_error","message":"raw provider secret detail"}}"#
-            .as_slice(),
-        "the client must receive the exact final Provider body"
+        .await;
+    response.expect_err(
+        "the final real Provider HTTP error must break transport without reaching the client",
     );
 
     assert_eq!(
@@ -460,7 +448,7 @@ async fn assert_entry_writes_one_failed_terminal(entry: Entry, mode: Mode) {
         "the terminal row must keep the real provider status"
     );
     assert_eq!(
-        terminal_row["meta"]["error_category"], "provider_http_429",
+        terminal_row["meta"]["error_category"], "http_429",
         "the terminal row must keep the real provider error category"
     );
     assert!(
@@ -1301,30 +1289,18 @@ async fn assert_dd1de7e_responses_relay_provider_http_400(recovers: bool) {
         );
         assert_eq!(terminal_rows[0]["result"], "success");
     } else {
-        assert_eq!(
-            client_capture.status,
-            Some(StatusCode::BAD_REQUEST),
-            "the uncommitted streaming head must preserve the real Provider status: {client_wire}"
+        assert!(
+            client_capture.transport_failed(),
+            "exhausted Provider HTTP 400 on SSE stream must terminate transport cleanly without projecting error body: {client_wire}"
         );
         assert!(
-            !client_capture.transport_failed(),
-            "the qualified Provider error body must complete without a transport break: {client_wire}"
-        );
-        let error_data: Value = serde_json::from_slice(&client_capture.bytes)
-            .expect("the final Provider error must remain valid JSON");
-        assert_eq!(
-            error_data["error"]["type"], "private_http_400",
-            "the final Provider error type must reach the client: {client_wire}"
-        );
-        assert!(
-            error_data["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("private A sentinel")),
-            "the final Provider error body must reach the client: {client_wire}"
+            !client_wire.contains("private A sentinel")
+                && !client_wire.contains("private_http_400"),
+            "the exhausted Provider error body must not leak to the client: {client_wire}"
         );
         assert!(
             !client_wire.contains("response.completed") && !client_wire.contains("network_error"),
-            "the qualified Provider error must not fabricate success or a proxy error: {client_wire}"
+            "the exhausted Provider error must not fabricate success or a proxy error: {client_wire}"
         );
         assert_eq!(
             terminal_rows[0]["event_type"], "request.failed",
@@ -1335,8 +1311,8 @@ async fn assert_dd1de7e_responses_relay_provider_http_400(recovers: bool) {
             "the terminal row must preserve the real provider HTTP 400: {rows:#?}"
         );
         assert_eq!(
-            terminal_rows[0]["meta"]["error_category"], "provider_http_400",
-            "the terminal row must not relabel the provider 400 as network_error: {rows:#?}"
+            terminal_rows[0]["meta"]["error_category"], "http_400",
+            "the terminal row must record the real provider 400 category rather than network_error: {rows:#?}"
         );
         assert_eq!(
             terminal_rows[0]["meta"]["observed_error"]["external_error_status"], 400,

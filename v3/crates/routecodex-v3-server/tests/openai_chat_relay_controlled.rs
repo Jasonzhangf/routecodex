@@ -223,11 +223,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         }))
         .send()
         .await;
-    let expected_error =
-        r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#;
-    let error_response = error_result.expect("the final provider 429 must reach the client");
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(error_response.text().await.unwrap(), expected_error);
+    error_result
+        .expect_err("the final provider 429 must break transport without reaching the client");
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
         .expect("provider failure must produce a capture")
@@ -247,24 +244,22 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         }))
         .send()
         .await;
-    let response = sse_error_result.expect("the final provider error must reach the client");
-    let status = response.status();
-    if status == StatusCode::OK {
-        assert_eq!(response.headers()["content-type"], "text/event-stream");
-    }
-    let body = tokio::time::timeout(Duration::from_secs(2), response.text())
-        .await
-        .expect("streaming provider terminal must settle promptly")
-        .expect("final provider terminal must be readable");
-    if status == StatusCode::OK {
-        let data = body
-            .lines()
-            .filter_map(|line| line.strip_prefix("data: "))
-            .collect::<Vec<_>>();
-        assert_eq!(data, [expected_error]);
-    } else {
-        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
-        assert_eq!(body, expected_error);
+    match sse_error_result {
+        Err(_) => {}
+        Ok(response) => {
+            if response.status() == StatusCode::OK {
+                assert_eq!(response.headers()["content-type"], "text/event-stream");
+            } else {
+                panic!(
+                    "unexpected non-SSE status on exhausted SSE transport: {}",
+                    response.status()
+                );
+            }
+            tokio::time::timeout(Duration::from_secs(2), response.text())
+                .await
+                .expect("streaming provider terminal must settle promptly")
+                .expect_err("exhausted SSE transport must break without projecting an error frame");
+        }
     }
     let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())

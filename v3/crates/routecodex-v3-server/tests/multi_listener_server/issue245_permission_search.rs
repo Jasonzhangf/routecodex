@@ -274,9 +274,21 @@ async fn issue245_witness(stream: bool) {
         && message["tool_call_id"] == "call_issue245_continuation"
         && message["content"] == result));
 
+    for _ in 0..4 {
+        let extra = successful_response(
+            &client,
+            &base,
+            &search_request("ISSUE245_PERMISSION_DENIED_TURN1", stream),
+        )
+        .await;
+        assert!(extra["output"].as_array().is_some());
+        capture(&mut receiver, PROVIDER_A).await;
+        capture(&mut receiver, PROVIDER_B).await;
+    }
+
     let pool = cooldown_pool(&client, &base).await;
     let entry = find_entry(&pool, PROVIDER_A)
-        .expect("a confirmed permission failure must cool A immediately");
+        .expect("five consecutive confirmed permission failures must cool A");
     assert_eq!(entry["state"], "blocked");
     assert_eq!(entry["kind"], "probe");
     assert_eq!(entry["interface_id"], "default");
@@ -329,37 +341,25 @@ async fn issue245_witness(stream: bool) {
     assert!(find_entry(&pool, PROVIDER_B).is_none());
     assert!(find_entry(&pool, "hosted").is_none());
 
-    // The final complete HTTP error is projected. SSE may already have its
-    // transport-only head, in which case the same error is carried by the
-    // protocol error event.
     DENIED_TRIAL_RECOVERS.store(false, Ordering::SeqCst);
     let exhausted = client
         .post(format!("{base}/v1/responses"))
         .json(&search_request("ISSUE245_EXHAUST", stream))
         .send()
         .await;
-    let response = exhausted.expect("the final complete Provider HTTP 400 must reach the client");
-    let status = response.status();
-    let body = response.text().await.unwrap();
-    let message = "Illegal API invocation from an unapproved channel";
-    if status == StatusCode::OK {
-        assert!(stream);
-        let events = body
-            .lines()
-            .filter_map(|line| line.strip_prefix("data: "))
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(events.len(), 1, "{body}");
-        assert_eq!(events[0]["type"], "error");
-        assert_eq!(events[0]["code"], "11128");
-        assert_eq!(events[0]["message"], message);
-    } else {
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(
-            body,
-            json!({"error":{"type":"permission_error","code":"11128","message":message}})
-                .to_string()
-        );
+    match exhausted {
+        Ok(response) if stream && response.status() == StatusCode::OK => {
+            let body_err = response.text().await.expect_err(
+                "exhausted SSE request must terminate transport without emitting error event",
+            );
+            let _ = body_err;
+        }
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await;
+            panic!("exhausted request must terminate transport without client HTTP error, got status={status} body={body:?}");
+        }
+        Err(_) => {}
     }
     capture(&mut receiver, PROVIDER_A).await;
     capture(&mut receiver, PROVIDER_B).await;

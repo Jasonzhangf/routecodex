@@ -464,24 +464,27 @@ async fn responses_relay_preserves_late_tool_call_ids_through_execution_and_foll
         .header("X-Session-Id", "late-tool-id-public-mismatch")
         .json(&mismatched_followup)
         .send()
-        .await
-        .expect("mismatched follow-up must reach the public entry");
-    assert_eq!(rejected_response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let rejected_body = tokio::time::timeout(Duration::from_secs(10), rejected_response.text())
-        .await
-        .expect("mismatched follow-up must settle")
-        .expect("the final provider error body must be complete");
+        .await;
+    let err = tokio::time::timeout(
+        Duration::from_secs(10),
+        async {
+            match rejected_response {
+                Ok(response) => response.text().await.expect_err(
+                    "mismatched follow-up upstream 400 must break transport without projecting error body",
+                ),
+                Err(error) => error,
+            }
+        },
+    )
+    .await
+    .expect("mismatched follow-up must settle");
+    let _ = err;
     let rejected_upstream = received_capture(&mut captures, "mismatched follow-up").await;
     let reason = rejected_upstream
         .rejection
         .as_deref()
         .expect("controlled provider must reject mismatched paired tool history");
     assert!(reason.contains("controlled upstream history mismatch"));
-    assert_eq!(
-        rejected_body,
-        json!({"error":{"message":reason}}).to_string(),
-        "the final error must preserve the actual upstream response"
-    );
     let mut expected_mismatched_history = expected_tool_history();
     expected_mismatched_history[2]["content"] = json!("wrong late id");
     assert_eq!(

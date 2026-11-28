@@ -97,7 +97,7 @@ async fn cooled_provider(
     if body.to_string().contains(BUSINESS_FAILURE_MARKER) {
         peer.business_entered.add_permits(1);
         peer.business_release.acquire().await.unwrap().forget();
-        if attempt == 2 && peer.first_probe_outcome == StaleProbeOutcome::Success {
+        if attempt == 6 && peer.first_probe_outcome == StaleProbeOutcome::Success {
             return ok_responses(TRIAL_SUCCESS_PAYLOAD, false);
         }
         return failed(

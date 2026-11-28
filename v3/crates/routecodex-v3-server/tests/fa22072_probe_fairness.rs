@@ -68,7 +68,9 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     for index in 0..5 {
-        request(port, index, "genuine failure").await;
+        for _ in 0..5 {
+            request(port, index, "genuine failure").await;
+        }
     }
     let before = pool(&base).await;
     assert_eq!(before["entries"].as_array().unwrap().len(), 5);
