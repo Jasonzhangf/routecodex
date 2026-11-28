@@ -638,7 +638,7 @@ const relayFailurePolicy = findFunctionBody(
   files.policy,
 );
 const targetResolutionFailure = relayFailurePolicy.match(
-  /V3RelayProviderTargetResolution::Failed\((?:source|failure)\)\s*=>\s*\{[\s\S]{0,400}?let resolution_message = source\.message\.clone\(\);[\s\S]{0,1400}?run_v3_error_02_to_05_decision_operators\(\s*source_projection,\s*source,/u,
+  /V3RelayProviderTargetResolution::Failed\(source\)\s*=>\s*\{\s*let resolution_message = source\.(?:source\.)?message\.clone\(\);[\s\S]{0,1400}?run_v3_error_02_to_05_decision_operators\(\s*source_projection,\s*source,/u,
 );
 if (!targetResolutionFailure) {
   failures.push(
