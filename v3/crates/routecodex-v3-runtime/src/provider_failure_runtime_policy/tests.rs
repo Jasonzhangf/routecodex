@@ -1178,9 +1178,10 @@ fn assert_resolution_failure(
     expected_stage: &str,
     expected_code: &str,
 ) {
-    let V3RelayProviderTargetResolution::Failed(source) = resolution else {
+    let V3RelayProviderTargetResolution::Failed(failure) = resolution else {
         panic!("expected independent target-resolution source failure");
     };
+    let source = failure.source;
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.source_stage, expected_stage);
     assert_eq!(source.code, expected_code);

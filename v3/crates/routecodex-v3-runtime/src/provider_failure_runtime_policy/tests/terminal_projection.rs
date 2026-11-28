@@ -277,3 +277,163 @@ targets = [
         Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
     );
 }
+
+#[test]
+fn final_provider_http_projection_requires_a_complete_matching_exhausted_response() {
+    use routecodex_v3_error::V3ExternalErrorKind;
+
+    let source = raise_v3_source_via_err01(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_http_503",
+        "provider unavailable",
+        V3Err01SourceInput::External(V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(503),
+            code: Some("HTTP_503".to_string()),
+            provider_id: Some("primary".to_string()),
+            upstream_request_id: None,
+            message: Some("provider unavailable".to_string()),
+        }),
+    )
+    .expect("canonical Err01 must raise the provider source")
+    .1;
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        503,
+        vec![("retry-after".to_string(), b"9".to_vec())],
+        br#"{"error":{"type":"unavailable"}}"#.to_vec(),
+    );
+
+    assert!(matches!(
+        V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+            &source,
+            true,
+            Some(witness.clone())
+        ),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(ref value)
+            if value == &witness
+    ));
+    assert!(matches!(
+        V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+            &source,
+            false,
+            Some(witness.clone())
+        ),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+    ));
+    let different_status = routecodex_v3_error::V3ExternalHttpWitness::new(
+        502,
+        vec![],
+        b"bad gateway".to_vec(),
+    );
+    assert!(matches!(
+        V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+            &source,
+            true,
+            Some(different_status)
+        ),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+    ));
+    let incomplete = witness.clone().with_body_read_failure("body read failed");
+    assert!(matches!(
+        V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+            &source,
+            true,
+            Some(incomplete)
+        ),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+    ));
+    let successful = routecodex_v3_error::V3ExternalHttpWitness::new(200, vec![], b"ok".to_vec());
+    assert!(matches!(
+        V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+            &source,
+            true,
+            Some(successful)
+        ),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+    ));
+}
+
+#[tokio::test]
+async fn final_real_provider_http_error_projects_and_stays_health_neutral() {
+    use routecodex_v3_error::V3ExternalErrorKind;
+
+    let scope = "final_provider_http_projection";
+    let manifest = target_resolution_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let source = raise_v3_source_via_err01(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_http_503",
+        "provider unavailable",
+        V3Err01SourceInput::External(V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(503),
+            code: Some("HTTP_503".to_string()),
+            provider_id: Some("primary".to_string()),
+            upstream_request_id: Some("upstream-final".to_string()),
+            message: Some("provider unavailable".to_string()),
+        }),
+    )
+    .expect("canonical Err01 must raise the provider source")
+    .1;
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
+        503,
+        vec![("retry-after".to_string(), b"9".to_vec())],
+        br#"{"error":{"type":"unavailable"}}"#.to_vec(),
+    );
+    let mut last_external_http = Some(upstream.clone());
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        recovery_control: None,
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session-final")
+            .expect("failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+
+    let result = run_v3_relay_provider_failure_policy_with_response_source(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        503,
+        Some("provider_http_503".to_string()),
+        "provider unavailable".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+        None,
+        Some(source),
+        Some(503),
+        None,
+    )
+    .await
+    .expect("a complete final provider HTTP error must finish through Error06");
+
+    assert_eq!(
+        result.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(upstream))
+    );
+    assert!(result.terminal_projection.is_some());
+    assert_eq!(result.event.health_record.state, "last_candidate_terminal");
+    assert_eq!(result.event.health_record.failure_count, 0);
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    assert!(
+        health
+            .availability("primary", Some("key1"), Some("gpt-test"), 20_000)
+            .available
+    );
+}

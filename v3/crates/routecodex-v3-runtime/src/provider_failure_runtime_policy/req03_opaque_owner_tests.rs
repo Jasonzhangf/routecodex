@@ -303,9 +303,10 @@ fn coordinator_preserves_classification_stage_on_missing_server() {
         now_ms: 1,
         deterministic_sample: 0,
     });
-    let V3RelayProviderTargetResolution::Failed(source) = resolution else {
+    let V3RelayProviderTargetResolution::Failed(failure) = resolution else {
         panic!("a missing server must fail through the coordinator");
     };
+    let source = failure.source;
     assert_eq!(source.source_stage, "V3Router05RequestClassified");
     assert_eq!(source.code, "target_resolution_classification_failed");
 }

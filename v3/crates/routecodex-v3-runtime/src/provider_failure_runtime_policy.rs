@@ -486,8 +486,18 @@ pub(crate) struct V3RelayProviderTargetResolutionInput<'input> {
 pub(crate) enum V3RelayProviderTargetResolution {
     Selected(V3Target10ConcreteProviderSelected),
     Exhausted { attempted_candidates: Vec<String> },
-    Failed(routecodex_v3_error::V3Error01SourceRaised),
+    Failed(V3RelayProviderTargetResolutionFailure),
     OperatorFault(V3RelayErrorOperatorFault),
+}
+
+/// A target-resolution failure carries both side outputs from the canonical
+/// Err01 node: the typed source used by the decision operators and the exact
+/// projection that node emitted. The projection must not be reconstructed by
+/// serializing the source at a later stage.
+#[derive(Debug, Clone)]
+pub(crate) struct V3RelayProviderTargetResolutionFailure {
+    pub(crate) projection: Value,
+    pub(crate) source: routecodex_v3_error::V3Error01SourceRaised,
 }
 
 enum V3RelayProviderSuccessorObservation {
@@ -1220,7 +1230,7 @@ async fn reselect_from_captured_target_plan(
                             "captured_target_plan_expansion_failed",
                             error,
                         ) {
-                            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+                            Ok(failure) => V3RelayProviderTargetResolution::Failed(failure),
                             Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
                         },
                     );
@@ -1722,19 +1732,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates: _,
         } => true,
-        V3RelayProviderTargetResolution::Failed(source) => {
+        V3RelayProviderTargetResolution::Failed(failure) => {
+            let V3RelayProviderTargetResolutionFailure {
+                projection: source_projection,
+                source,
+            } = failure;
             let resolution_message = source.message.clone();
             let original_source = source.clone();
-            let source_projection = serde_json::to_value(&source).map_err(|error| {
-                Err(relay_error_operator_fault(
-                    "relay_error_operator_sdk_failure",
-                    format!("serialize raised target-resolution source: {error}"),
-                    Some(original_source.clone()),
-                ))
-            })?;
-            // The target-resolution source already raised Err01. Its Err01
-            // migration remains pending; enter this batch at the complete
-            // serialized Err01 diagnostic projection without rerunning Err01.
             let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
                 source_projection,
                 source,
@@ -2111,7 +2115,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
     deterministic_sample: u64,
 ) -> Result<V3Router07OpaqueTargetHitOnce, Result<V3Error01SourceRaised, V3RelayErrorOperatorFault>>
 {
-    resolve_v3_relay_opaque_target_with_history_images(
+    resolve_v3_relay_opaque_target_with_history_images_with_projection(
         manifest,
         server_id,
         entry_kind,
@@ -2121,6 +2125,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
         false,
         false,
     )
+    .map_err(|error| error.map(|failure| failure.source))
 }
 
 pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
@@ -2134,8 +2139,34 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
     is_compaction: bool,
 ) -> Result<
     V3Router07OpaqueTargetHitOnce,
+    Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>,
+> {
+    resolve_v3_relay_opaque_target_with_history_images_with_projection(
+        manifest,
+        server_id,
+        entry_kind,
+        endpoint_path,
+        body,
+        deterministic_sample,
+        has_unprojected_history_images,
+        is_compaction,
+    )
+    .map_err(|error| error.map(|failure| failure.source))
+}
+
+fn resolve_v3_relay_opaque_target_with_history_images_with_projection(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    entry_kind: &str,
+    endpoint_path: &str,
+    body: &Value,
+    deterministic_sample: u64,
+    has_unprojected_history_images: bool,
+    is_compaction: bool,
+) -> Result<
+    V3Router07OpaqueTargetHitOnce,
     Result<
-        V3Error01SourceRaised,
+        V3RelayProviderTargetResolutionFailure,
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
     >,
 > {
@@ -2164,7 +2195,7 @@ pub(crate) fn resolve_v3_relay_opaque_target_with_history_images(
             has_unprojected_history_images,
         )
         .map_err(|error| {
-            crate::shared::v3_route_plan_error_source(
+            target_resolution_source(
                 "V3Router06RoutePoolResolved",
                 "target_resolution_route_plan_failed",
                 error,
@@ -2187,10 +2218,24 @@ pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
     manifest: &V3Config05ManifestPublished,
     hit: V3Router07OpaqueTargetHitOnce,
     deterministic_sample: u64,
+) -> Result<V3Target09CandidateSetExpanded, Result<V3Error01SourceRaised, V3RelayErrorOperatorFault>>
+{
+    expand_v3_relay_target_candidates_from_opaque_hit_with_projection(
+        manifest,
+        hit,
+        deterministic_sample,
+    )
+    .map_err(|error| error.map(|failure| failure.source))
+}
+
+fn expand_v3_relay_target_candidates_from_opaque_hit_with_projection(
+    manifest: &V3Config05ManifestPublished,
+    hit: V3Router07OpaqueTargetHitOnce,
+    deterministic_sample: u64,
 ) -> Result<
     V3Target09CandidateSetExpanded,
     Result<
-        V3Error01SourceRaised,
+        V3RelayProviderTargetResolutionFailure,
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
     >,
 > {
@@ -2210,28 +2255,30 @@ pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
 fn build_v3_relay_target_candidates(
     input: &V3RelayProviderTargetResolutionInput<'_>,
 ) -> Result<V3Target09CandidateSetExpanded, Box<V3RelayProviderTargetResolution>> {
-    let hit = resolve_v3_relay_opaque_target_once(
+    let hit = resolve_v3_relay_opaque_target_with_history_images_with_projection(
         input.manifest,
         input.server_id,
         input.entry_kind,
         input.endpoint_path,
         input.body,
         input.deterministic_sample,
+        false,
+        false,
     )
     .map_err(|error| {
         Box::new(match error {
-            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+            Ok(failure) => V3RelayProviderTargetResolution::Failed(failure),
             Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
         })
     })?;
-    expand_v3_relay_target_candidates_from_opaque_hit(
+    expand_v3_relay_target_candidates_from_opaque_hit_with_projection(
         input.manifest,
         hit,
         input.deterministic_sample,
     )
     .map_err(|error| {
         Box::new(match error {
-            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+            Ok(failure) => V3RelayProviderTargetResolution::Failed(failure),
             Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
         })
     })
@@ -2274,10 +2321,17 @@ fn target_resolution_source(
     code: &'static str,
     error: impl std::fmt::Display,
 ) -> Result<
-    routecodex_v3_error::V3Error01SourceRaised,
+    V3RelayProviderTargetResolutionFailure,
     crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
 > {
-    crate::shared::raise_v3_runtime_failure_source(stage, code, error.to_string())
+    raise_v3_source_via_err01(
+        V3ErrorSourceKind::RuntimeFailure,
+        stage,
+        code,
+        error.to_string(),
+        V3Err01SourceInput::Plain,
+    )
+    .map(|(projection, source)| V3RelayProviderTargetResolutionFailure { projection, source })
 }
 
 pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64 {
