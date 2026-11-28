@@ -54,35 +54,68 @@ async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
         let text = String::from_utf8_lossy(&raw);
         let expected_body = owned_b_503_body().to_string();
         if stream {
-            let Some((head, body)) = text.split_once("\r\n\r\n") else {
-                if !raw.is_empty() {
+            if !raw.is_empty() {
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let head_lower = head.to_ascii_lowercase();
+                    if !head_lower.starts_with("http/1.1 200")
+                        || !head_lower.contains("content-type: text/event-stream")
+                        || !head_lower.contains("transfer-encoding: chunked")
+                    {
+                        controls.push(format!(
+                            "{label}: streaming exhaustion wrote unexpected HTTP head: {head}"
+                        ));
+                    }
+                    let mut rest = body;
+                    let mut decoded = String::new();
+                    let mut chunk_error = None;
+                    while !rest.is_empty() {
+                        let Some((len_line, after_len)) = rest.split_once("\r\n") else {
+                            chunk_error = Some(format!("incomplete chunk header: {rest:?}"));
+                            break;
+                        };
+                        let hex = len_line.split(';').next().unwrap_or("").trim();
+                        let Ok(len) = usize::from_str_radix(hex, 16) else {
+                            chunk_error = Some(format!("invalid chunk size {len_line:?}"));
+                            break;
+                        };
+                        if len == 0 {
+                            chunk_error = Some("unexpected terminating 0-length chunk".to_string());
+                            break;
+                        }
+                        if after_len.len() < len + 2
+                            || &after_len.as_bytes()[len..len + 2] != b"\r\n"
+                        {
+                            chunk_error = Some(format!(
+                                "incomplete or malformed chunk payload for len={len}"
+                            ));
+                            break;
+                        }
+                        decoded.push_str(&after_len[..len]);
+                        rest = &after_len[len + 2..];
+                    }
+                    if let Some(err) = chunk_error {
+                        controls.push(format!(
+                            "{label}: streaming exhaustion invalid chunk framing ({err}): {text}"
+                        ));
+                    } else if decoded.contains("data:")
+                        || decoded.contains("[DONE]")
+                        || decoded.contains("chat.completion")
+                        || decoded.contains("503")
+                        || decoded.contains(&expected_body)
+                        || decoded.contains("\"error\"")
+                        || !decoded
+                            .lines()
+                            .all(|line| line.trim().is_empty() || line.starts_with(':'))
+                    {
+                        controls.push(format!(
+                            "{label}: streaming exhaustion must emit only keepalives without terminal/business/error frames: {decoded:?}"
+                        ));
+                    }
+                } else {
                     controls.push(format!(
                         "{label}: streaming exhaustion wrote partial non-HTTP bytes: {text}"
                     ));
                 }
-                continue;
-            };
-            let head_lower = head.to_ascii_lowercase();
-            if !head_lower.starts_with("http/1.1 200")
-                || !head_lower.contains("content-type: text/event-stream")
-                || !head_lower.contains("transfer-encoding: chunked")
-            {
-                controls.push(format!(
-                    "{label}: streaming exhaustion wrote unexpected HTTP head: {head}"
-                ));
-            }
-            if body.starts_with("0\r\n")
-                || body.contains("\r\n0\r\n")
-                || text.contains("data:")
-                || text.contains("[DONE]")
-                || text.contains("chat.completion")
-                || text.contains("503")
-                || text.contains(&expected_body)
-                || text.contains("\"error\"")
-            {
-                controls.push(format!(
-                    "{label}: streaming exhaustion must emit only unclosed keepalives without terminal/business/error frames: {text}"
-                ));
             }
         } else if !raw.is_empty() {
             controls.push(format!(
