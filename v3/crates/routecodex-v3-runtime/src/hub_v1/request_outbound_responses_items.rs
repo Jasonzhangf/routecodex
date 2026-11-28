@@ -289,6 +289,21 @@ fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&st
         .filter(|value| !value.trim().is_empty())
 }
 
+fn responses_tool_output_item_id(
+    row: &Map<String, Value>,
+    preserve_native_tool_output_id: bool,
+) -> Option<&str> {
+    if preserve_native_tool_output_id {
+        row.get("routecodex_chat_extension")
+            .and_then(|extension| extension.get("responses_item_id"))
+            .or_else(|| row.get("id"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    } else {
+        responses_item_id_from_chat_extension(row)
+    }
+}
+
 fn responses_function_item_id(row: &Map<String, Value>, call_id: &str) -> String {
     match responses_item_id_from_chat_extension(row) {
         Some(item_id) if item_id.starts_with("fc_") => item_id.to_string(),
@@ -396,6 +411,13 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
             ("tools".to_string(), tools),
         ]);
         project_responses_item_extension_fields(row, &mut item);
+        if !item.contains_key("id") {
+            if let Some(item_id) =
+                responses_tool_output_item_id(row, preserve_native_tool_output_id)
+            {
+                item.insert("id".to_string(), Value::String(item_id.to_string()));
+            }
+        }
         return Ok(Some(Value::Object(item)));
     }
 
@@ -441,20 +463,27 @@ pub(super) fn chat_tool_result_to_responses_input_item_with_provenance_and_drops
     if let Some(call_id) = call_id {
         // Responses-derived outputs retain an absent item id through the round trip,
         // and explicit item IDs accepted from Responses entry are emitted verbatim.
-        if responses_item_id_from_chat_extension(row).is_some() || !omit_tool_output_id {
-            let item_id = if responses_tool_output_type == "custom_tool_call_output"
-                || preserve_native_tool_output_id
-            {
-                responses_custom_item_id(row, call_id)
+        let explicit_item_id = responses_tool_output_item_id(row, preserve_native_tool_output_id);
+        if explicit_item_id.is_some() || !omit_tool_output_id {
+            let item_id = if let Some(explicit_item_id) = explicit_item_id {
+                if responses_tool_output_type == "custom_tool_call_output"
+                    || preserve_native_tool_output_id
+                {
+                    explicit_item_id.to_string()
+                } else if explicit_item_id.starts_with("fc_") {
+                    explicit_item_id.to_string()
+                } else {
+                    compact_tool_id("fc_", explicit_item_id)
+                }
             } else {
-                responses_function_item_id(row, call_id)
+                compact_tool_id("fc_", call_id)
             };
             item.insert("id".to_string(), Value::String(item_id));
         }
         item.insert("call_id".to_string(), Value::String(call_id.to_string()));
     } else if let Some(name) = named_output {
         item.insert("name".to_string(), name.clone());
-        if let Some(item_id) = responses_item_id_from_chat_extension(row) {
+        if let Some(item_id) = responses_tool_output_item_id(row, preserve_native_tool_output_id) {
             item.insert("id".to_string(), Value::String(item_id.to_string()));
         }
         if let Some(namespace) =

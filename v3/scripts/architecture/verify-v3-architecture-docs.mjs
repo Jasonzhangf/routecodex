@@ -185,6 +185,10 @@ for (const [stepId, field] of [
   ['v3-op-runner-req-04', 'side_channel_writes'],
   ['v3-op-runner-req-05', 'consumes'],
   ['v3-op-runner-req-05', 'side_channel_reads'],
+  ['v3-hub-relay-req-02', 'consumes'],
+  ['v3-hub-relay-req-02', 'produces'],
+  ['v3-hub-relay-req-02', 'side_channel_reads'],
+  ['v3-hub-relay-req-02', 'side_channel_writes'],
   ['v3-hub-req-05', 'consumes'],
   ['v3-hub-req-05', 'side_channel_reads'],
 ]) {

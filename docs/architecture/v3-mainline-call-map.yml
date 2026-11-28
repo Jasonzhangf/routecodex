@@ -3062,11 +3062,15 @@ chains:
       consumes:
       - v3.request.normal_payload
       - v3.hub.entry_protocol
+      - v3.operation_runner.explicit_history_pairing
       produces:
       - v3.request.normal_payload
+      - v3.operation_runner.explicit_history_pairing
       side_channel_reads:
       - v3.hub.entry_protocol
-      side_channel_writes: []
+      - v3.operation_runner.explicit_history_pairing
+      side_channel_writes:
+      - v3.operation_runner.explicit_history_pairing
   - step_id: v3-hub-relay-req-03
     from_node: V3HubReqChatProcess04Governed
     to_node: V3HubReqExecution05Planned

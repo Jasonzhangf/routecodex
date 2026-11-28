@@ -265,6 +265,43 @@ fn responses_entry_preserves_explicit_fco_item_ids_verbatim_without_fc_collision
 }
 
 #[test]
+fn responses_entry_preserves_top_level_tool_output_id_verbatim_alongside_whitespace_suffixed_native_id(
+) {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "id": "fco_2",
+                "content": "second-output"
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "first-output",
+                "routecodex_chat_extension": {"responses_item_id": "fco_2 "}
+            }
+        ]
+    });
+    let (wire, _, _) =
+        super::build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options_and_provenance_and_literals(
+            &payload,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("Responses entry must preserve top-level legacy tool output id verbatim");
+    let input = wire["input"].as_array().expect("Responses input array");
+    assert_eq!(input.len(), 2, "{wire}");
+    assert_eq!(input[0]["id"], "fco_2");
+    assert_eq!(input[0]["call_id"], "call_1");
+    assert_eq!(input[1]["id"], "fco_2 ");
+    assert_eq!(input[1]["call_id"], "call_1");
+}
+
+#[test]
 fn responses_entry_omits_id_for_idless_legacy_receipt_alongside_native_fc_callid() {
     let payload = json!({
         "model": "gpt-test",

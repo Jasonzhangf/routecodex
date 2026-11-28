@@ -78,6 +78,34 @@ const fixtures = [
     to: 'allowed_readers: [govern_v3_operation_runner_chat_request, govern_v3_operation_runner_chat_response]',
     diagnostic: /explicit_history_pairing allowed_readers missing project_v3_operation_runner_standard_provider_request/,
   },
+  {
+    name: 'hub-relay-req-02 explicit_history_pairing consumes read removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '  - step_id: v3-hub-relay-req-02\n    from_node: V3HubReqInbound02Normalized\n    to_node: V3HubReqChatProcess04Governed\n    caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events\n    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs\n    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs\n    status: anchored\n    binding_kind: relay_request_source_slice\n    owner_feature_id: v3.hub_relay_request_semantics\n    resource_flow:\n      consumes:\n      - v3.request.normal_payload\n      - v3.hub.entry_protocol\n      - v3.operation_runner.explicit_history_pairing',
+    to: '  - step_id: v3-hub-relay-req-02\n    from_node: V3HubReqInbound02Normalized\n    to_node: V3HubReqChatProcess04Governed\n    caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events\n    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs\n    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs\n    status: anchored\n    binding_kind: relay_request_source_slice\n    owner_feature_id: v3.hub_relay_request_semantics\n    resource_flow:\n      consumes:\n      - v3.request.normal_payload\n      - v3.hub.entry_protocol',
+    diagnostic: /v3-hub-relay-req-02 resource_flow\.consumes must declare v3\.operation_runner\.explicit_history_pairing/,
+  },
+  {
+    name: 'hub-relay-req-02 explicit_history_pairing produces write removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '      produces:\n      - v3.request.normal_payload\n      - v3.operation_runner.explicit_history_pairing\n      side_channel_reads:\n      - v3.hub.entry_protocol\n      - v3.operation_runner.explicit_history_pairing',
+    to: '      produces:\n      - v3.request.normal_payload\n      side_channel_reads:\n      - v3.hub.entry_protocol\n      - v3.operation_runner.explicit_history_pairing',
+    diagnostic: /v3-hub-relay-req-02 resource_flow\.produces must declare v3\.operation_runner\.explicit_history_pairing/,
+  },
+  {
+    name: 'hub-relay-req-02 explicit_history_pairing side_channel_reads removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '      side_channel_reads:\n      - v3.hub.entry_protocol\n      - v3.operation_runner.explicit_history_pairing\n      side_channel_writes:\n      - v3.operation_runner.explicit_history_pairing',
+    to: '      side_channel_reads:\n      - v3.hub.entry_protocol\n      side_channel_writes:\n      - v3.operation_runner.explicit_history_pairing',
+    diagnostic: /v3-hub-relay-req-02 resource_flow\.side_channel_reads must declare v3\.operation_runner\.explicit_history_pairing/,
+  },
+  {
+    name: 'hub-relay-req-02 explicit_history_pairing side_channel_writes removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: '      side_channel_reads:\n      - v3.hub.entry_protocol\n      - v3.operation_runner.explicit_history_pairing\n      side_channel_writes:\n      - v3.operation_runner.explicit_history_pairing',
+    to: '      side_channel_reads:\n      - v3.hub.entry_protocol\n      - v3.operation_runner.explicit_history_pairing\n      side_channel_writes: []',
+    diagnostic: /v3-hub-relay-req-02 resource_flow\.side_channel_writes must declare v3\.operation_runner\.explicit_history_pairing/,
+  },
 ];
 const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-data-red-'));
 const failures = [];
