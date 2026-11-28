@@ -624,6 +624,25 @@ fn merge_responses_chat_histories(
                 reserved_source_for_decoded[dec_idx] = Some(pos);
             }
         }
+        // Pre-reserve merge-equivalent unreserved ID-less receipts before checking
+        // unmatched rows for conflicts so later equivalent twins claim their
+        // matching source row ahead of earlier distinct ID-less inputs.
+        for (dec_idx, result) in decoded.iter().enumerate() {
+            if reserved_source_for_decoded[dec_idx].is_some()
+                || tool_output_item_id(result).is_some()
+            {
+                continue;
+            }
+            if let Some(pos) = (0..original_source_len).find(|&idx| {
+                !source_reserved[idx]
+                    && same_legacy_tool_output_identity(&sanitized_source[idx], result)
+                    && tool_output_item_id(&sanitized_source[idx]).is_none()
+                    && merge_equivalent_chat_value(&sanitized_source[idx], result).is_some()
+            }) {
+                source_reserved[pos] = true;
+                reserved_source_for_decoded[dec_idx] = Some(pos);
+            }
+        }
         let mut merged = sanitized_source;
         let mut merged_entries: Vec<V3HubMessageHistoryProvenance> = merged
             .iter()
@@ -2611,6 +2630,122 @@ mod tests {
                     "type": "function_call_output",
                     "call_id": "call_1",
                     "output": "second-output"
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let err = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(lone_conflict)
+            .expect_err("lone conflicting ID-less twin must still fail");
+        assert!(
+            err.contains("conflicting tool output representations"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dual_one_idless_legacy_and_two_idless_input_pre_reserves_equivalent_second_twin() {
+        let raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output"
+                }],
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "first-output"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "second-output"
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("second equivalent ID-less input must reserve legacy twin before first input");
+        let messages = normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical Chat messages");
+        assert_eq!(messages.len(), 2, "{messages:#?}");
+        assert_eq!(messages[0]["content"], json!("first-output"));
+        assert_eq!(messages[1]["content"], json!("second-output"));
+        assert!(messages[0]
+            .pointer("/routecodex_chat_extension/responses_item_id")
+            .is_none());
+        assert!(messages[1]
+            .pointer("/routecodex_chat_extension/responses_item_id")
+            .is_none());
+        assert!(normalized
+            .explicit_history_pairing
+            .message_entry(0)
+            .is_some_and(|entry| entry.omit_tool_output_id));
+        assert!(normalized
+            .explicit_history_pairing
+            .message_entry(1)
+            .is_some_and(|entry| entry.omit_tool_output_id));
+
+        let named_raw = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "user",
+                    "content": "second-output",
+                    "routecodex_chat_extension": {
+                        "responses_tool_output_name": "send_message_to_thread",
+                        "responses_tool_output_namespace": "codex_tui"
+                    }
+                }],
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "name": "send_message_to_thread",
+                        "namespace": "codex_tui",
+                        "output": "first-output"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "name": "send_message_to_thread",
+                        "namespace": "codex_tui",
+                        "output": "second-output"
+                    }
+                ]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let named_normalized =
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(named_raw)
+                .expect("named ID-less legacy receipt must match second equivalent input");
+        let named_messages = named_normalized.previous.payload.0["messages"]
+            .as_array()
+            .expect("canonical named Chat messages");
+        assert_eq!(named_messages.len(), 2, "{named_messages:#?}");
+        assert_eq!(named_messages[0]["content"], json!("first-output"));
+        assert_eq!(named_messages[1]["content"], json!("second-output"));
+
+        let lone_conflict = raw_request(
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": "second-output"
+                }],
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "first-output"
                 }]
             }),
             V3HubEntryProtocol::Responses,
