@@ -1732,12 +1732,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source_an
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates: _,
         } => true,
-        V3RelayProviderTargetResolution::Failed(failure) => {
+        V3RelayProviderTargetResolution::Failed(source) => {
+            let resolution_message = source.source.message.clone();
             let V3RelayProviderTargetResolutionFailure {
                 projection: source_projection,
                 source,
-            } = failure;
-            let resolution_message = source.message.clone();
+            } = source;
             let original_source = source.clone();
             let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
                 source_projection,
