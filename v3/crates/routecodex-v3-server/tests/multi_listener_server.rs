@@ -1,34 +1,34 @@
 #![allow(clippy::clone_on_copy)]
 
 use axum::{
+    Router,
     body::Body,
     extract::State,
     http::{HeaderMap, StatusCode, Uri},
     response::Response,
     routing::post,
-    Router,
 };
-use futures_util::{future::join_all, FutureExt, SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt, future::join_all};
 use routecodex_v3_config::{
-    compile_v3_config_05_manifest, parse_v3_config_02_authoring, V3EntryProtocolExecutionMode,
+    V3EntryProtocolExecutionMode, compile_v3_config_05_manifest, parse_v3_config_02_authoring,
 };
 use routecodex_v3_server::spawn_v3_server_aggregate;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{mpsc, oneshot, Mutex, Semaphore},
-    time::{sleep, timeout, Duration},
+    sync::{Mutex, Semaphore, mpsc, oneshot},
+    time::{Duration, sleep, timeout},
 };
 use tokio_tungstenite::{
     accept_hdr_async, connect_async,
     tungstenite::{
+        Message,
         client::IntoClientRequest,
         handshake::server::{Request, Response as WsResponse},
         http::HeaderValue,
-        Message,
     },
 };
 
@@ -244,12 +244,14 @@ async fn estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_
     }).collect();
     let chat_body = json!({"model":"chat_ok.chat-wire","messages":chat_history,"stream":false});
     let chat_url = format!("{base}/v1/chat/completions");
-    assert!(client
-        .post(&chat_url)
-        .json(&chat_body)
-        .send()
-        .await
-        .is_err());
+    assert!(
+        client
+            .post(&chat_url)
+            .json(&chat_body)
+            .send()
+            .await
+            .is_err()
+    );
     assert!(captures.try_recv().is_err());
     let compact = client
         .post(&chat_url)
@@ -259,11 +261,13 @@ async fn estimated_turn_filter_respects_chat_compact_purpose_and_gemini_default_
         .await
         .unwrap();
     assert_eq!(compact.status(), StatusCode::OK);
-    assert!(compact
-        .text()
-        .await
-        .unwrap()
-        .contains("controlled chat JSON"));
+    assert!(
+        compact
+            .text()
+            .await
+            .unwrap()
+            .contains("controlled chat JSON")
+    );
     let capture = captures
         .try_recv()
         .expect("Chat compact must reach its provider");
@@ -705,7 +709,10 @@ async fn responses_session_turn_limit_skips_every_key_until_compact() {
                     );
                     assert!(primary.try_recv().is_ok());
                 } else {
-                    assert!(next.is_err(), "invalid compact result cleared the block: relay={relay} stream={stream} purpose={marker}");
+                    assert!(
+                        next.is_err(),
+                        "invalid compact result cleared the block: relay={relay} stream={stream} purpose={marker}"
+                    );
                     assert!(primary.try_recv().is_err());
                 }
             }
@@ -1386,14 +1393,18 @@ async fn assert_estimated_turn_filter_through_responses(relay: bool, active: boo
             .try_recv()
             .expect("original 98-turn WebSocket request was filtered");
         let input = capture.body["input"].as_array().unwrap();
-        assert!(input
-            .iter()
-            .any(|item| item["type"] == "function_call" && item["call_id"] == "call_turn"));
-        assert!(input
-            .iter()
-            .any(|item| item["type"] == "function_call_output"
-                && item["call_id"] == "call_turn"
-                && item["output"] == "fixture result"));
+        assert!(
+            input
+                .iter()
+                .any(|item| item["type"] == "function_call" && item["call_id"] == "call_turn")
+        );
+        assert!(
+            input
+                .iter()
+                .any(|item| item["type"] == "function_call_output"
+                    && item["call_id"] == "call_turn"
+                    && item["output"] == "fixture result")
+        );
         assert!(fallback.try_recv().is_err());
         let _ = socket.close(None).await;
     }
@@ -1855,9 +1866,11 @@ async fn client_transport_observation_public_blackbox() {
         2,
         "keep-alive writes must retain their own request sequence"
     );
-    assert!(events
-        .iter()
-        .any(|e| e["stage"] == "http_connection_end" && !e["error"].is_null()));
+    assert!(
+        events
+            .iter()
+            .any(|e| e["stage"] == "http_connection_end" && !e["error"].is_null())
+    );
     assert!(events.iter().any(|e| e["stage"] == "socket_write"
         && e["prepared_status"] == control_status
         && e["endpoint"] == "/_routecodex/debug/dry-run"));
@@ -2443,7 +2456,9 @@ async fn assert_snapall_protocol_json_and_sse(
     );
     let json_provider_response = read_snapall_json(&json_dir, "provider-response.json");
     assert!(
-        json_provider_response.to_string().contains(provider_json_marker),
+        json_provider_response
+            .to_string()
+            .contains(provider_json_marker),
         "provider-response.json must preserve the genuine provider JSON body: {json_provider_response}"
     );
     assert!(
@@ -2481,7 +2496,9 @@ async fn assert_snapall_protocol_json_and_sse(
         "an SSE provider response must stay genuine SSE: {sse_provider_response}"
     );
     assert!(
-        sse_provider_response.to_string().contains(provider_sse_marker),
+        sse_provider_response
+            .to_string()
+            .contains(provider_sse_marker),
         "provider-response.json must preserve the genuine provider SSE wire: {sse_provider_response}"
     );
     let sse_response_sample = read_snapall_json(&sse_dir, "response.json");
@@ -4301,9 +4318,12 @@ async fn controlled_terminal_upstream(
     state.captures.send(capture).unwrap();
     if let Some(reply) = compact_reply {
         let (content_type, body) = if compact_stream {
-            ("text/event-stream", format!(
-                "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{reply}}}\n\ndata: [DONE]\n\n"
-            ))
+            (
+                "text/event-stream",
+                format!(
+                    "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{reply}}}\n\ndata: [DONE]\n\n"
+                ),
+            )
         } else {
             ("application/json", reply.to_owned())
         };
@@ -5241,8 +5261,7 @@ async fn assert_truncated_provider_body_status(status: StatusCode) {
     );
     if status == StatusCode::OK {
         assert_eq!(
-            terminal_row["meta"]["error_category"],
-            "network_error",
+            terminal_row["meta"]["error_category"], "network_error",
             "the public terminal row must preserve the internal response-processing category: {terminal_row}"
         );
     } else {
@@ -5423,9 +5442,11 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
         assert_eq!(health["server_id"], listener.server_id);
         assert_eq!(health["manifest_version"], 3);
         assert_ne!(health["build_version"], env!("CARGO_PKG_VERSION"));
-        assert!(health["build_version"]
-            .as_str()
-            .is_some_and(|value| value.starts_with("0.90.")));
+        assert!(
+            health["build_version"]
+                .as_str()
+                .is_some_and(|value| value.starts_with("0.90."))
+        );
         let invalid_gemini = client
             .post(format!(
                 "http://{}/v1beta/models/test/generateContent",
@@ -5592,13 +5613,15 @@ async fn openai_chat_http_entry_completes_responses_tool_round_trip() {
         "RCCV3_BODY_METADATA_TURN2_OK"
     );
     let second_capture = captures.recv().await.unwrap();
-    assert!(second_capture.body["input"]
-        .as_array()
-        .is_some_and(|items| items.iter().any(|item| {
-            item["type"] == "function_call_output"
-                && item["call_id"] == "call_body_metadata"
-                && item["output"] == "sunny"
-        })));
+    assert!(
+        second_capture.body["input"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| {
+                item["type"] == "function_call_output"
+                    && item["call_id"] == "call_body_metadata"
+                    && item["output"] == "sunny"
+            }))
+    );
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -6455,9 +6478,14 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
         "apply_patch verification failed: Failed to find expected lines in /tmp/rcc-apply-patch-probe/multi.txt:\r\nalpha\r\nbeta",
         "Success. Updated /tmp/rcc-apply-patch-probe/multi.txt\r\n",
     ] {
-        let first = client.post(&endpoint).json(&json!({
-            "model":"client-test", "input":"edit example.txt", "tools":tools, "stream":false
-        })).send().await.unwrap();
+        let first = client
+            .post(&endpoint)
+            .json(&json!({
+                "model":"client-test", "input":"edit example.txt", "tools":tools, "stream":false
+            }))
+            .send()
+            .await
+            .unwrap();
         assert_eq!(first.status(), StatusCode::OK);
         let first_body: Value = first.json().await.unwrap();
         let call = &first_body["output"][0];
@@ -6469,9 +6497,13 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
             .await
             .unwrap()
             .unwrap();
-        assert!(first_capture.body["tools"].as_array().is_some_and(|items| items.iter().any(|item| {
-            item["name"] == "apply_patch"
-        })), "provider tool declaration changed: {:?}", first_capture.body);
+        assert!(
+            first_capture.body["tools"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| { item["name"] == "apply_patch" })),
+            "provider tool declaration changed: {:?}",
+            first_capture.body
+        );
 
         let second = client.post(&endpoint).json(&json!({
             "model":"client-test", "input":[
@@ -6487,9 +6519,15 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
             .await
             .unwrap()
             .unwrap();
-        assert!(second_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|item| {
-            item["call_id"] == "call_apply_patch_parity" && item["output"] == output
-        })), "provider-bound output changed: {:?}", second_capture.body);
+        assert!(
+            second_capture.body["input"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| {
+                    item["call_id"] == "call_apply_patch_parity" && item["output"] == output
+                })),
+            "provider-bound output changed: {:?}",
+            second_capture.body
+        );
     }
 
     handle.shutdown().await;
@@ -6498,18 +6536,18 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
 }
 
 const DSML_ANTHROPIC_SSE: &str = concat!(
-        "event: message_start\n",
-        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_dsml\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"wire-test\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n",
-        "event: content_block_start\n",
-        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
-        "event: content_block_delta\n",
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
-        "event: content_block_stop\n",
-        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
-        "event: message_delta\n",
-        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n",
-        "event: message_stop\n",
-        "data: {\"type\":\"message_stop\"}\n\n"
+    "event: message_start\n",
+    "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_dsml\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"wire-test\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n",
+    "event: content_block_start\n",
+    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+    "event: content_block_delta\n",
+    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
+    "event: content_block_stop\n",
+    "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+    "event: message_delta\n",
+    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n",
+    "event: message_stop\n",
+    "data: {\"type\":\"message_stop\"}\n\n"
 );
 
 fn anthropic_sse_text_fixture(text: &str, native_tool: bool) -> Vec<u8> {
@@ -6735,6 +6773,7 @@ fn anthropic_sse_final_fixture() -> Vec<u8> {
 }
 
 const REASONING_LOOKUP_CONTROL: &str = "null-empty-ciphertext-reasoning-control";
+const REASONING_LOOKUP_ASSISTANT_TEXT: &str = "Let me check the lookup.";
 const REASONING_LOOKUP_TOOL: &str = "mcp__codex_apps__codex_security_cloud__lookup";
 const REASONING_LOOKUP_CALL_ID: &str = "toolu_p0_reasoning";
 
@@ -6783,7 +6822,7 @@ fn validate_reasoning_lookup_tool_declaration(body: &Value) -> Result<(), String
     Ok(())
 }
 
-fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
+fn validate_reasoning_lookup_opening_message(body: &Value) -> Result<(), String> {
     let messages = body["messages"]
         .as_array()
         .ok_or_else(|| format!("missing provider messages: {body}"))?;
@@ -6801,7 +6840,13 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
             "missing opening reasoning lookup control text: {body}"
         ));
     }
+    Ok(())
+}
+
+fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
+    validate_reasoning_lookup_opening_message(body)?;
     validate_reasoning_lookup_tool_declaration(body)?;
+    let messages = body["messages"].as_array().unwrap();
     let mut tool_use_at = None;
     let mut tool_result_at = None;
     let mut thinking_blocks = Vec::new();
@@ -6842,6 +6887,11 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     {
         return Err(format!("tool_use identity or input changed: {body}"));
     }
+    if thinking_blocks.len() > 1 {
+        return Err(format!(
+            "reasoning replay must contain at most one thinking block: {body}"
+        ));
+    }
     if thinking_blocks
         .iter()
         .any(|(message_index, block_index, _)| {
@@ -6850,6 +6900,27 @@ fn validate_reasoning_lookup_followup(body: &Value) -> Result<(), String> {
     {
         return Err(format!(
             "thinking must precede tool_use in the same assistant message: {body}"
+        ));
+    }
+    let assistant_content = messages[tool_use_message]["content"]
+        .as_array()
+        .ok_or_else(|| format!("missing assistant content: {body}"))?;
+    let assistant_text_positions = assistant_content
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| {
+            block["type"] == "text" && block["text"] == REASONING_LOOKUP_ASSISTANT_TEXT
+        })
+        .map(|(block_index, _)| block_index)
+        .collect::<Vec<_>>();
+    if assistant_text_positions.len() != 1 {
+        return Err(format!(
+            "assistant text must appear exactly once in the tool-use message: {body}"
+        ));
+    }
+    if assistant_text_positions[0] >= tool_use_block {
+        return Err(format!(
+            "assistant text must precede the paired tool_use: {body}"
         ));
     }
 
@@ -6881,7 +6952,7 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
         json!({"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"});
     let valid = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
-        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
         {"role":"user","content":[tool_result.clone()]}
     ],"tools":[reasoning_lookup_tool_declaration()]});
     assert!(validate_reasoning_lookup_followup(&valid).is_ok());
@@ -6889,48 +6960,58 @@ fn validate_reasoning_lookup_followup_rejects_invalid_tool_order_and_roles() {
     let reversed = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_result.clone()]},
-        {"role":"assistant","content":[tool_use.clone()]}
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]}
     ],"tools":[reasoning_lookup_tool_declaration()]});
-    assert!(validate_reasoning_lookup_followup(&reversed)
-        .unwrap_err()
-        .contains("must immediately follow"));
+    assert!(
+        validate_reasoning_lookup_followup(&reversed)
+            .unwrap_err()
+            .contains("must immediately follow")
+    );
 
     let wrong_roles = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"user","content":[tool_use.clone()]},
         {"role":"assistant","content":[tool_result.clone()]}
     ],"tools":[reasoning_lookup_tool_declaration()]});
-    assert!(validate_reasoning_lookup_followup(&wrong_roles)
-        .unwrap_err()
-        .contains("assistant message"));
+    assert!(
+        validate_reasoning_lookup_followup(&wrong_roles)
+            .unwrap_err()
+            .contains("assistant message")
+    );
 
     let intervening_message = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
-        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
         {"role":"user","content":[{"type":"text","text":"intervening"}]},
         {"role":"user","content":[tool_result.clone()]}
     ],"tools":[reasoning_lookup_tool_declaration()]});
-    assert!(validate_reasoning_lookup_followup(&intervening_message)
-        .unwrap_err()
-        .contains("must immediately follow"));
+    assert!(
+        validate_reasoning_lookup_followup(&intervening_message)
+            .unwrap_err()
+            .contains("must immediately follow")
+    );
 
     let text_before_result = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
-        {"role":"assistant","content":[tool_use.clone()]},
+        {"role":"assistant","content":[{"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},tool_use.clone()]},
         {"role":"user","content":[{"type":"text","text":"before result"},tool_result.clone()]}
     ],"tools":[reasoning_lookup_tool_declaration()]});
-    assert!(validate_reasoning_lookup_followup(&text_before_result)
-        .unwrap_err()
-        .contains("must start its user message content"));
+    assert!(
+        validate_reasoning_lookup_followup(&text_before_result)
+            .unwrap_err()
+            .contains("must start its user message content")
+    );
 
     let missing_declaration = json!({"messages":[
         {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
         {"role":"assistant","content":[tool_use]},
         {"role":"user","content":[tool_result]}
     ]});
-    assert!(validate_reasoning_lookup_followup(&missing_declaration)
-        .unwrap_err()
-        .contains("tool declarations"));
+    assert!(
+        validate_reasoning_lookup_followup(&missing_declaration)
+            .unwrap_err()
+            .contains("tool declarations")
+    );
 }
 
 #[tokio::test]
@@ -7017,6 +7098,40 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_followup() {
         .await
         .unwrap();
     assert_eq!(misplaced_thinking.status(), StatusCode::BAD_REQUEST);
+
+    let extra_thinking = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[
+                {"type":"text","text":REASONING_LOOKUP_ASSISTANT_TEXT},
+                {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}},
+                {"type":"thinking","thinking":""},
+                {"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}}
+            ]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(extra_thinking.status(), StatusCode::BAD_REQUEST);
+
+    let missing_assistant_text = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[
+            {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]},
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"plan the bounded lookup","cache_control":{"type":"ephemeral"}},
+                {"type":"tool_use","id":REASONING_LOOKUP_CALL_ID,"name":REASONING_LOOKUP_TOOL,"input":{"query":"p0 reasoning","limit":3}}
+            ]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":REASONING_LOOKUP_CALL_ID,"content":"42"}]}
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_assistant_text.status(), StatusCode::BAD_REQUEST);
     shutdown.send(()).unwrap();
 }
 
@@ -7045,6 +7160,26 @@ async fn controlled_reasoning_lookup_fixture_rejects_invalid_opening_declaration
         }],"messages":[
             {"role":"user","content":[{"type":"text","text":REASONING_LOOKUP_CONTROL}]}
         ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn controlled_reasoning_lookup_fixture_rejects_missing_opening_message() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream_with_reasoning_lookup_followup().await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let invalid = client
+        .post(format!("{provider_base_url}/messages"))
+        .header("x-api-key", "reasoning-controlled-key")
+        .json(&json!({"stream":true,"tools":[reasoning_lookup_tool_declaration()],"messages":[]}))
         .send()
         .await
         .unwrap();
@@ -7135,6 +7270,12 @@ async fn controlled_anthropic_reasoning_upstream(
     let null_empty_ciphertext_reasoning = control(REASONING_LOOKUP_CONTROL);
     let bytes = if state.strict_reasoning_lookup_followup {
         if request_index == 0 {
+            if let Err(error) = validate_reasoning_lookup_opening_message(&body) {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(error))
+                    .unwrap();
+            }
             if let Err(error) = validate_reasoning_lookup_tool_declaration(&body) {
                 return Response::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -7437,8 +7578,8 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
 }
 
 #[tokio::test]
-async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_representable_reasoning_extensions(
-) {
+async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_representable_reasoning_extensions()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
@@ -7461,7 +7602,7 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
 
     let first = client
         .post(format!("{base}/v1/responses"))
-        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .json(&json!({"model":"client-test","input":REASONING_LOOKUP_CONTROL,"stream":true,"tools":tools}))
         .send()
         .await
         .unwrap();
@@ -7572,6 +7713,15 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
                 block["type"] == "thinking" && block["thinking"] == "plan the bounded lookup"
             });
             if summary_label == "plaintext" {
+                assert_eq!(
+                    blocks
+                        .iter()
+                        .filter(|block| block["type"] == "thinking")
+                        .count(),
+                    1,
+                    "{label}: exactly one representable thinking block must survive: {}",
+                    capture.body
+                );
                 let replayed_reasoning = replayed_reasoning.unwrap_or_else(|| {
                     panic!(
                         "{label}: representable reasoning must survive without ciphertext: {}",
@@ -7636,8 +7786,8 @@ async fn responses_client_anthropic_null_or_empty_encrypted_content_preserves_re
 }
 
 #[tokio::test]
-async fn responses_client_anthropic_redacted_reasoning_association_survives_two_turn_tool_roundtrip(
-) {
+async fn responses_client_anthropic_redacted_reasoning_association_survives_two_turn_tool_roundtrip()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
@@ -8092,8 +8242,8 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
 }
 
 #[tokio::test]
-async fn responses_client_anthropic_empty_signed_thinking_completes_json_and_sse_without_reselection(
-) {
+async fn responses_client_anthropic_empty_signed_thinking_completes_json_and_sse_without_reselection()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
@@ -8469,7 +8619,8 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+        text,
+        "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -8557,7 +8708,8 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+        text,
+        "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -8588,17 +8740,42 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             "internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "",
         ),
-        ("<thinking>private</thinking>Visible answer", false, "Visible answer", "private"),
+        (
+            "<thinking>private</thinking>Visible answer",
+            false,
+            "Visible answer",
+            "private",
+        ),
         (
             "<thinking>private<\u{2f}thinking>Visible answer\n\"<\u{2f}｜DSML｜parameter>\"\n\"<\u{2f}｜DSML｜invoke>\"\n\"<\u{2f}｜DSML｜tool_calls>\"",
             false,
             "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "private",
         ),
-        ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
-        ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
-        ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),
-        ("Answer. <thinking>literal unfinished example", false, "Answer. literal unfinished example", ""),
+        (
+            "Quoted \"<thinking>literal</thinking>\" text",
+            false,
+            "Quoted \"<thinking>literal</thinking>\" text",
+            "",
+        ),
+        (
+            "```\n<thinking>literal</thinking>\n```",
+            false,
+            "```\n<thinking>literal</thinking>\n```",
+            "",
+        ),
+        (
+            "Prefix <thinking>literal</thinking>",
+            false,
+            "Prefix ",
+            "literal",
+        ),
+        (
+            "Answer. <thinking>literal unfinished example",
+            false,
+            "Answer. literal unfinished example",
+            "",
+        ),
     ];
     for (text, native_tool, expected_text, expected_reasoning) in cases {
         let (provider_base_url, mut captures, shutdown) =
@@ -8756,10 +8933,12 @@ async fn responses_relay_genuine_responses_source_preserves_literal_control_text
         .unwrap();
     let status = response.status();
     let body = response.text().await.unwrap();
-    assert!(timeout(Duration::from_secs(15), captures.recv())
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        timeout(Duration::from_secs(15), captures.recv())
+            .await
+            .unwrap()
+            .is_some()
+    );
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -8822,10 +9001,12 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
 
     assert_eq!(sample["object"], "routecodex.v3.client_response_snapshot");
     assert_eq!(sample["bodyKind"], "sse");
-    assert!(sample["rawSse"]
-        .as_str()
-        .unwrap()
-        .contains("response.completed"));
+    assert!(
+        sample["rawSse"]
+            .as_str()
+            .unwrap()
+            .contains("response.completed")
+    );
     assert_responses_sample_sse_delivered_business_text(&sample, "relay sse final text");
     assert_eq!(sample["materializedResponse"]["id"], "resp_sse");
     assert_eq!(sample["materializedResponse"]["status"], "completed");
@@ -9074,8 +9255,8 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn responses_relay_native_responses_null_reasoning_content_preserves_business_response_without_reselection(
-) {
+async fn responses_relay_native_responses_null_reasoning_content_preserves_business_response_without_reselection()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-native-null-reasoning-content");
 
@@ -10795,9 +10976,11 @@ async fn run_matching_identity_independence(second_session: &str, second_convers
             "the same session must not block another independent request before provider selection",
         )
         .expect("second independent provider request must arrive while the first is held");
-    assert!(timeout(Duration::from_millis(100), &mut second_task)
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), &mut second_task)
+            .await
+            .is_err()
+    );
 
     release.add_permits(2);
     let first = timeout(Duration::from_secs(2), first_task)
@@ -10867,9 +11050,11 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         let status = response.status();
         (status, response.text().await.unwrap())
     });
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), &mut queued)
+            .await
+            .is_err()
+    );
     release.add_permits(1);
     let first_body = timeout(Duration::from_secs(5), first)
         .await
@@ -10879,9 +11064,11 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
     assert_responses_sse_delivered_business_text(&first_body, "held response released");
     // Only explicit maintenance pauses dispatch. The first response finishing
     // must not let a new request escape that maintenance owner.
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), &mut queued)
+            .await
+            .is_err()
+    );
     assert!(
         captures.try_recv().is_err(),
         "independent request escaped maintenance"
@@ -10916,7 +11103,10 @@ async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
         .unwrap();
     let mut socket = TcpStream::connect(handle.listeners[0].addr).await.unwrap();
     let body = json!({"model":"client-test", "input":"keepalive", "stream":false}).to_string();
-    let request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
     socket.write_all(request.as_bytes()).await.unwrap();
     let first = timeout(
         Duration::from_secs(5),
@@ -10929,9 +11119,11 @@ async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
     captures.recv().await.unwrap();
     let preparation = handle.prepare_exec_attempt().await.unwrap();
     socket.write_all(request.as_bytes()).await.unwrap();
-    assert!(timeout(Duration::from_millis(100), captures.recv())
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err()
+    );
     drop(preparation);
     let second = timeout(
         Duration::from_secs(5),
@@ -11578,18 +11770,20 @@ async fn responses_inbound_websocket_accepts_binary_response_create_payload() {
 
     let _handshake_capture = captures.recv().await.unwrap();
     let provider_event = captures.recv().await.unwrap();
-    assert!(provider_event.body["input"]
-        .as_array()
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item["role"] == "user"
-                    && item["content"].as_array().is_some_and(|content| {
-                        content
-                            .iter()
-                            .any(|part| part["type"] == "input_text" && part["text"] == "binary ok")
-                    })
+    assert!(
+        provider_event.body["input"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item["role"] == "user"
+                        && item["content"].as_array().is_some_and(|content| {
+                            content.iter().any(|part| {
+                                part["type"] == "input_text" && part["text"] == "binary ok"
+                            })
+                        })
+                })
             })
-        }));
+    );
     assert_control_fields_absent(&provider_event.body);
 
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -12384,9 +12578,11 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
         router_hits, 1,
         "Target reselection must not re-enter Router"
     );
-    assert!(events
-        .iter()
-        .any(|event| event["node_id"] == "V3TargetLocalReselected"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["node_id"] == "V3TargetLocalReselected")
+    );
     std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
     std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
     handle.shutdown().await;
@@ -13347,7 +13543,8 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                     )
                     .await;
                 let mut config = p6_manifest(free_port(), free_port(), &provider_url);
-                let transport_log = std::env::temp_dir().join(format!("v3-isolation-wire-{}.jsonl", free_port()));
+                let transport_log =
+                    std::env::temp_dir().join(format!("v3-isolation-wire-{}.jsonl", free_port()));
                 config.debug.log_file = Some(transport_log.to_string_lossy().into_owned());
                 if endpoint.starts_with("/v1beta/") {
                     let provider = config.providers.get_mut("test").unwrap();
@@ -13396,11 +13593,30 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 shutdown.send(()).unwrap();
                 let records = fs::read_to_string(&transport_log).unwrap();
                 fs::remove_file(&transport_log).unwrap();
-                let observations = records.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                    .filter(|event| event["event"] == "client_transport").collect::<Vec<_>>();
-                assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
-                let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
-                assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
+                let observations = records
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .filter(|event| event["event"] == "client_transport")
+                    .collect::<Vec<_>>();
+                assert!(
+                    observations
+                        .iter()
+                        .any(|e| e["stage"] == "request_identified"
+                            && e["request_id"].as_str().is_some()),
+                    "{endpoint} needs the actual allocated request identity"
+                );
+                let writes = observations
+                    .iter()
+                    .filter(|e| e["stage"] == "socket_write")
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    writes
+                        .iter()
+                        .map(|e| e["written_bytes"].as_u64().unwrap())
+                        .sum::<u64>(),
+                    wire.len() as u64,
+                    "{endpoint} socket receipts must match actual received bytes"
+                );
                 let capture = captures.try_recv().unwrap_or_else(|_| {
                     panic!("{endpoint} must exercise actual provider transport")
                 });
@@ -13465,13 +13681,10 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                         .expect("the qualified JSON error must have an HTTP head");
                     let (head, body) = wire.split_at(head_end + 4);
                     if head.starts_with(format!("HTTP/1.1 {status}").as_bytes()) {
-                        let body = if head
-                            .split(|byte| *byte == b'\n')
-                            .any(|line| {
-                                line.windows(b"chunked".len())
-                                    .any(|window| window.eq_ignore_ascii_case(b"chunked"))
-                            })
-                        {
+                        let body = if head.split(|byte| *byte == b'\n').any(|line| {
+                            line.windows(b"chunked".len())
+                                .any(|window| window.eq_ignore_ascii_case(b"chunked"))
+                        }) {
                             decode_chunked_http_body(body)
                         } else {
                             body.to_vec()
@@ -13485,9 +13698,11 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                         assert!(
                             streaming
                                 && head.starts_with(b"HTTP/1.1 200")
-                                && head
-                                    .split(|byte| *byte == b'\n')
-                                    .any(|line| line.windows(17).any(|window| window.eq_ignore_ascii_case(b"text/event-stream"))),
+                                && head.split(|byte| *byte == b'\n').any(|line| line
+                                    .windows(17)
+                                    .any(
+                                        |window| window.eq_ignore_ascii_case(b"text/event-stream")
+                                    )),
                             "{endpoint} qualified streaming Provider error must use the SSE protocol: {text}"
                         );
                         assert!(
@@ -14834,10 +15049,12 @@ async fn responses_direct_followup_preserves_function_strict_presence() {
                     .find(|event| event["type"] == "response.completed")
                     .expect("SSE completion");
                 for item in completed["response"]["output"].as_array().unwrap() {
-                    assert!(events
-                        .iter()
-                        .any(|event| event["type"] == "response.output_item.done"
-                            && event["item"] == *item));
+                    assert!(
+                        events
+                            .iter()
+                            .any(|event| event["type"] == "response.output_item.done"
+                                && event["item"] == *item)
+                    );
                 }
                 completed["response"].clone()
             } else {
@@ -16190,8 +16407,8 @@ async fn run_namespace_public_case(
 // binds a distinct failure mechanism: source discovery, nested traversal, separator
 // preservation, custom kind projection, or plain-name collision allocation.
 #[tokio::test]
-async fn responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer(
-) {
+async fn responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("direct-namespace-public-sources");
     // This case counts provider attempts per declared source, so the Chat Process
@@ -16671,16 +16888,22 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
 
     assert_eq!(json_sample["id"], "resp_json");
     assert_eq!(sse_sample["bodyKind"], "sse");
-    assert!(sse_sample["rawSse"]
-        .as_str()
-        .is_some_and(|value| value.contains("response.completed")));
+    assert!(
+        sse_sample["rawSse"]
+            .as_str()
+            .is_some_and(|value| value.contains("response.completed"))
+    );
     assert_responses_sample_sse_delivered_business_text(&sse_sample, "controlled SSE response");
-    assert!(!serde_json::to_string(&json_sample)
-        .unwrap()
-        .contains("secret-key"));
-    assert!(!serde_json::to_string(&sse_sample)
-        .unwrap()
-        .contains("secret-key"));
+    assert!(
+        !serde_json::to_string(&json_sample)
+            .unwrap()
+            .contains("secret-key")
+    );
+    assert!(
+        !serde_json::to_string(&sse_sample)
+            .unwrap()
+            .contains("secret-key")
+    );
     assert!(captures.recv().await.is_some());
     assert!(captures.recv().await.is_some());
 
@@ -16729,10 +16952,12 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
             .any(|failure| failure.file_name == "request.json"),
         "aggregate shutdown must return the residual request sample failure"
     );
-    assert!(persist_failures
-        .codex_sample_persist_failures
-        .iter()
-        .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    assert!(
+        persist_failures
+            .codex_sample_persist_failures
+            .iter()
+            .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() })
+    );
     assert!(persist_failures.control_cleanup_failures.is_empty());
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -16793,9 +17018,11 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
             "model": "client-test", "input": "queued while draining accepted jobs", "stream": false
         }))
         .send());
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), &mut queued)
+            .await
+            .is_err()
+    );
     assert!(
         captures.try_recv().is_err(),
         "maintenance must block provider dispatch"
@@ -16820,9 +17047,11 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
             }
         }
     }
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), &mut queued)
+            .await
+            .is_err()
+    );
     assert!(
         captures.try_recv().is_err(),
         "prepared maintenance must retain admission"
@@ -16889,10 +17118,12 @@ async fn responses_direct_historical_sample_failure_does_not_reject_exec_prepara
         .prepare_exec_attempt()
         .await
         .expect("diagnostic failures do not deny restart");
-    assert!(preparation
-        .codex_sample_persist_failures
-        .iter()
-        .any(|failure| failure.file_name == "request.json"));
+    assert!(
+        preparation
+            .codex_sample_persist_failures
+            .iter()
+            .any(|failure| failure.file_name == "request.json")
+    );
     drop(preparation);
     fs::remove_file(&samples_root).unwrap();
     let preparation = handle
@@ -17070,10 +17301,12 @@ async fn responses_direct_sample_persist_failure_is_reported_during_exec_prepara
             .any(|failure| failure.file_name == "request.json"),
         "exec preparation must return the residual request sample failure"
     );
-    assert!(preparation
-        .codex_sample_persist_failures
-        .iter()
-        .all(|failure| !failure.request_id.is_empty() && !failure.reason.is_empty()));
+    assert!(
+        preparation
+            .codex_sample_persist_failures
+            .iter()
+            .all(|failure| !failure.request_id.is_empty() && !failure.reason.is_empty())
+    );
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
@@ -17177,10 +17410,12 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
     assert_eq!(body["evidence"]["stoppedBeforeProviderSend"], true);
     assert_eq!(body["evidence"]["providerNetworkSend"], false);
     assert_eq!(body["providerRequest"]["method"], "POST");
-    assert!(body["providerRequest"]["url"]
-        .as_str()
-        .unwrap()
-        .ends_with("/responses"));
+    assert!(
+        body["providerRequest"]["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/responses")
+    );
     assert!(
         body["providerRequest"]["headers"]
             .get("authorization")
@@ -17210,9 +17445,11 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
         "routecodex.provider_request_dry_run_terminal"
     );
     assert!(body["dry_run"]["response_payload"].get("id").is_none());
-    assert!(body["dry_run"]["response_payload"]
-        .get("previous_response_id")
-        .is_none());
+    assert!(
+        body["dry_run"]["response_payload"]
+            .get("previous_response_id")
+            .is_none()
+    );
     assert!(
         !provider_hit,
         "provider-request dry-run must not call the controlled upstream"
@@ -17257,10 +17494,12 @@ async fn responses_direct_binding_uses_post_target_relay_for_openai_chat_provide
     assert_eq!(body["object"], "routecodex.pipeline_dry_run");
     assert_eq!(body["kind"], "provider_request");
     assert_eq!(body["evidence"]["providerNetworkSend"], false);
-    assert!(body["providerRequest"]["url"]
-        .as_str()
-        .unwrap()
-        .ends_with("/chat/completions"));
+    assert!(
+        body["providerRequest"]["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/chat/completions")
+    );
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-protocol");
     assert!(body["providerRequest"]["body"].get("messages").is_some());
     assert!(body["providerRequest"]["body"].get("input").is_none());
@@ -17271,12 +17510,16 @@ async fn responses_direct_binding_uses_post_target_relay_for_openai_chat_provide
             .any(|node| node.as_str() == Some("V3HubReqTarget06Resolved")),
         "post-Chat target selection must appear in the dry-run trace: {body}"
     );
-    assert!(!node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision")));
-    assert!(!node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3ResponsesDirect11Policy")));
+    assert!(
+        !node_ids
+            .iter()
+            .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision"))
+    );
+    assert!(
+        !node_ids
+            .iter()
+            .any(|node| node.as_str() == Some("V3ResponsesDirect11Policy"))
+    );
     assert!(
         !response_body.contains("secret-key"),
         "dry-run projection must not leak auth secrets"
@@ -17338,17 +17581,21 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
             .any(|node| node.as_str() == Some("V3HubReqTarget06Resolved")),
         "post-Chat target selection must appear in the dry-run trace: {body}"
     );
-    assert!(!node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision")));
-    assert!(!node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3ResponsesDirect11Policy")));
+    assert!(
+        !node_ids
+            .iter()
+            .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision"))
+    );
+    assert!(
+        !node_ids
+            .iter()
+            .any(|node| node.as_str() == Some("V3ResponsesDirect11Policy"))
+    );
 }
 
 #[tokio::test]
-async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_before_provider_send(
-) {
+async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_before_provider_send()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
     let handle = spawn_v3_server_aggregate(
@@ -17440,10 +17687,12 @@ async fn error01_protocol_decision_normal_http_failure_no_client_error() {
         "the request must end detectably before timeout"
     );
     assert_eq!(sends.load(std::sync::atomic::Ordering::SeqCst), 0);
-    assert!(health
-        .expect("listener remains available")
-        .status()
-        .is_success());
+    assert!(
+        health
+            .expect("listener remains available")
+            .status()
+            .is_success()
+    );
     assert!(
         diagnostic.contains("V3Execution11ProtocolDecision"),
         "{diagnostic}"
@@ -17455,8 +17704,8 @@ async fn error01_protocol_decision_normal_http_failure_no_client_error() {
 }
 
 #[tokio::test]
-async fn responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send(
-) {
+async fn responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("relay-dry-run-blackbox");
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
@@ -17559,9 +17808,11 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
         "routecodex.provider_request_dry_run_terminal"
     );
     assert!(body["dry_run"]["response_payload"].get("id").is_none());
-    assert!(body["dry_run"]["response_payload"]
-        .get("previous_response_id")
-        .is_none());
+    assert!(
+        body["dry_run"]["response_payload"]
+            .get("previous_response_id")
+            .is_none()
+    );
     assert!(
         !provider_hit,
         "Responses Relay provider-request dry-run must not call upstream"
@@ -17573,8 +17824,8 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
 }
 
 #[tokio::test]
-async fn anthropic_messages_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send(
-) {
+async fn anthropic_messages_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send()
+ {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_anthropic_wire_upstream().await;
@@ -17914,9 +18165,11 @@ async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_witho
                 .and_then(|data| serde_json::from_str::<Value>(data).ok())
         })
         .collect::<Vec<_>>();
-    assert!(projected_events
-        .iter()
-        .any(|event| event.get("type").and_then(Value::as_str) == Some("response.completed")));
+    assert!(
+        projected_events
+            .iter()
+            .any(|event| event.get("type").and_then(Value::as_str) == Some("response.completed"))
+    );
     assert!(!projected_events.iter().any(|event| {
         event.get("type").and_then(Value::as_str) == Some("response.output_item.added")
             && event.pointer("/item/type").and_then(Value::as_str) == Some("message")
@@ -18017,8 +18270,7 @@ async fn debug_response_dry_run_preserves_missing_reason_and_rejects_malformed_e
         "malformed captured response must fail explicitly: {malformed_body}"
     );
     assert_eq!(
-        malformed_body["clientResponse"]["body"]["error"]["code"],
-        "network_error",
+        malformed_body["clientResponse"]["body"]["error"]["code"], "network_error",
         "malformed response must remain on the typed provider-response error chain: {malformed_body}"
     );
 }
@@ -18133,10 +18385,12 @@ async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic
     assert_eq!(malformed.status(), 598);
     let malformed_body: serde_json::Value = malformed.json().await.unwrap();
     assert_eq!(malformed_body["error"]["code"], "v3_debug_failure");
-    assert!(malformed_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("malformed dry-run fixture"));
+    assert!(
+        malformed_body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("malformed dry-run fixture")
+    );
     enabled.shutdown().await;
 
     let disabled =
@@ -18160,10 +18414,12 @@ async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic
         .unwrap();
     assert_eq!(response.status(), 598);
     let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("debug feature disabled: dry_run"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("debug feature disabled: dry_run")
+    );
     disabled.shutdown().await;
 }
 
@@ -18572,9 +18828,11 @@ async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbo
     assert_eq!(models.status(), StatusCode::OK);
     let models: Value = models.json().await.unwrap();
     assert_eq!(models["object"], "list");
-    assert!(models["data"]
-        .as_array()
-        .is_some_and(|data| !data.is_empty()));
+    assert!(
+        models["data"]
+            .as_array()
+            .is_some_and(|data| !data.is_empty())
+    );
 
     // Restore the scan permission so the test home can be removed.
     fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o700)).unwrap();
@@ -18698,9 +18956,11 @@ async fn snapall_openai_chat_direct_persists_complete_four_stage_wire() {
     )
     .unwrap();
     assert_eq!(sse_provider_response["bodyKind"], "sse");
-    assert!(sse_provider_response["rawSse"]
-        .as_str()
-        .is_some_and(|raw| raw.contains("controlled chat SSE")));
+    assert!(
+        sse_provider_response["rawSse"]
+            .as_str()
+            .is_some_and(|raw| raw.contains("controlled chat SSE"))
+    );
     let sse_response_sample: Value =
         serde_json::from_str(&fs::read_to_string(sse_sample_dir.join("response.json")).unwrap())
             .unwrap();
