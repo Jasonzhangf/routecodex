@@ -117,6 +117,22 @@ fn classify_inactive_runtime(
     })
 }
 
+pub(crate) fn is_settled_stopped_instance_dir(
+    dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> bool {
+    if !matches!(
+        classify_inactive_runtime(dir, expected),
+        Ok(ReapState::Terminal)
+    ) {
+        return false;
+    }
+    matches!(
+        regular_handoff_exists(&dir.join(HOOKS_SIDECAR_PROCESS_FILE)),
+        Ok(false)
+    )
+}
+
 pub(crate) fn reap_inactive_runtime_files(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,

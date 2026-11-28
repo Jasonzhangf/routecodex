@@ -502,7 +502,7 @@ async fn no_first_failure_cooldown_public_http() {
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
 
     for phase in 0..3 {
-        let attempts = if phase == 2 { 8 } else { 9 };
+        let attempts = if phase == 2 { 3 } else { 4 };
         for attempt in 1..=attempts {
             let marker = format!("health-test:forbidden-{phase}-{attempt}");
             request(&client, &base, "main", &marker).await;
@@ -550,14 +550,10 @@ async fn no_first_failure_cooldown_public_http() {
         .post(format!("{base}/v1/responses"))
         .json(&json!({"model":"main","input":terminal,"stream":false}))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    assert!(response
-        .text()
-        .await
-        .unwrap()
-        .contains("controlled real upstream failure"));
+        .await;
+    response.expect_err(
+        "exhausted final provider 403 must terminate transport without HTTP error projection",
+    );
     receipt(&state, terminal).await;
     assert_identities(pool(&client, &base).await, &[]);
     handle.shutdown().await;
@@ -683,35 +679,39 @@ async fn no_first_failure_cooldown_public_http() {
     receipt(&state, "health-test:after-server-failure").await;
     assert_identities(pool(&client, &base).await, &[]);
 
-    request_with_input(
-        &client,
-        &base,
-        "independent",
-        "health-test:auth-terminal",
-        json!([{
-            "type": "message",
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "health-test:auth-terminal"},
-                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
-            ]
-        }]),
-        None,
-    )
-    .await;
-    assert_eq!(
-        state
-            .receipts
-            .lock()
-            .await
-            .get("independent:health-test:auth-terminal"),
-        Some(&1)
-    );
-    fallback_receipt(&state, "health-test:auth-terminal").await;
-    assert_identities(
-        pool(&client, &base).await,
-        &[("independent", "default", "independent", "main")],
-    );
+    for attempt in 1..=5 {
+        let marker = format!("health-test:auth-terminal-{attempt}");
+        request_with_input(
+            &client,
+            &base,
+            "independent",
+            &marker,
+            json!([{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": marker},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+                ]
+            }]),
+            None,
+        )
+        .await;
+        assert_eq!(
+            state
+                .receipts
+                .lock()
+                .await
+                .get(&format!("independent:health-test:auth-terminal-{attempt}")),
+            Some(&1)
+        );
+        fallback_receipt(&state, &format!("health-test:auth-terminal-{attempt}")).await;
+        let expected = [("independent", "default", "independent", "main")];
+        assert_identities(
+            pool(&client, &base).await,
+            if attempt == 5 { &expected } else { &[] },
+        );
+    }
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -730,7 +730,7 @@ async fn relay_http_400_breaks_forbidden_streak_without_cooling() {
             .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    for attempt in 1..=9 {
+    for attempt in 1..=4 {
         let marker = format!("health-test:forbidden-before-invalid-{attempt}");
         request(&client, &base, "main", &marker).await;
         receipt(&state, &marker).await;
@@ -745,7 +745,7 @@ async fn relay_http_400_breaks_forbidden_streak_without_cooling() {
         assert_identities(pool(&client, &base).await, &[]);
     }
     request(&client, &base, "main", "health-test:success-after-invalid").await;
-    for attempt in 1..=10 {
+    for attempt in 1..=5 {
         let marker = format!("health-test:forbidden-invalid-{attempt}");
         request(&client, &base, "main", &marker).await;
         receipt(&state, &marker).await;
@@ -753,7 +753,7 @@ async fn relay_http_400_breaks_forbidden_streak_without_cooling() {
         let expected = [("primary", "default", alias.as_str(), "main")];
         assert_identities(
             pool(&client, &base).await,
-            if attempt == 10 { &expected } else { &[] },
+            if attempt == 5 { &expected } else { &[] },
         );
     }
     handle.shutdown().await;

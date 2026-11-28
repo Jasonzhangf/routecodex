@@ -2994,3 +2994,77 @@ async fn exact_custody_recovery_requires_independent_generation_evidence() {
         "only independent complete generation evidence authorizes disposition"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn start_foreground_prunes_aged_stopped_generations_for_same_config() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let (config, _, state) = fixture_with_port(&root, port);
+    let executable = write_finite_restart_child_fixture(root.path());
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+
+    let instances = state.join("instances");
+    fs::create_dir_all(&instances).unwrap();
+    let mut old_dirs = Vec::new();
+    for idx in 0..3 {
+        let old_id = format!("v3-fg-old-{idx}");
+        let old_dir = instances.join(&old_id);
+        fs::create_dir_all(&old_dir).unwrap();
+        let mut old_decl = declaration.clone();
+        old_decl.instance_id = old_id.clone();
+        old_decl.config_digest = format!("old-digest-{idx}");
+        write_json_atomic(&old_dir.join("instance.json"), &old_decl).unwrap();
+        write_status(&old_dir, &old_id, V3ManagedRunState::Stopped, None).unwrap();
+        let modified = std::time::SystemTime::now() - Duration::from_secs((48 - idx as u64) * 3600);
+        fs::File::open(&old_dir)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        old_dirs.push(old_dir);
+    }
+
+    let other_dir = instances.join("v3-fg-other-config");
+    fs::create_dir_all(&other_dir).unwrap();
+    let mut other_decl = declaration.clone();
+    other_decl.instance_id = "v3-fg-other-config".to_string();
+    other_decl.config_path = "/tmp/unrelated-config.toml".to_string();
+    write_json_atomic(&other_dir.join("instance.json"), &other_decl).unwrap();
+    write_status(
+        &other_dir,
+        "v3-fg-other-config",
+        V3ManagedRunState::Stopped,
+        None,
+    )
+    .unwrap();
+    let other_modified = std::time::SystemTime::now() - Duration::from_secs(72 * 3600);
+    fs::File::open(&other_dir)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(other_modified))
+        .unwrap();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let _ = rt.block_on(lifecycle.start_foreground(&executable));
+
+    assert!(
+        !old_dirs[0].exists(),
+        "oldest >24h stopped dir for same config must be pruned by start_foreground"
+    );
+    assert!(old_dirs[1].exists(), "second newest stopped dir must stay");
+    assert!(old_dirs[2].exists(), "newest stopped dir must stay");
+    assert!(
+        other_dir.exists(),
+        "stopped dir for unrelated config must stay"
+    );
+}

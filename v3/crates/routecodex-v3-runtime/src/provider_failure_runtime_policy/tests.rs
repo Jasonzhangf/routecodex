@@ -1113,7 +1113,7 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
     };
     assert!(
         ["first", "second"].contains(&selected.candidate.provider_id.as_str()),
-        "unexpected cooled candidate: {}",
+        "unexpected selected candidate: {}",
         selected.candidate.provider_id
     );
 }
@@ -1178,10 +1178,9 @@ fn assert_resolution_failure(
     expected_stage: &str,
     expected_code: &str,
 ) {
-    let V3RelayProviderTargetResolution::Failed(failure) = resolution else {
+    let V3RelayProviderTargetResolution::Failed(source) = resolution else {
         panic!("expected independent target-resolution source failure");
     };
-    let source = failure.source;
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.source_stage, expected_stage);
     assert_eq!(source.code, expected_code);
@@ -1727,7 +1726,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     };
     assert!(
         ["first", "second"].contains(&selected.candidate.provider_id.as_str()),
-        "unexpected cooled candidate: {}",
+        "unexpected selected candidate: {}",
         selected.candidate.provider_id
     );
     assert_eq!(selected.candidate.auth_alias, "key1");

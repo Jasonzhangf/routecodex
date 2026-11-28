@@ -70,7 +70,7 @@ pub(crate) use request_outbound_format::{
     build_v3_openai_chat_standard_request_from_chat_canonical_recording,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
-    normalize_v3_openai_responses_provider_request_payload,
+    normalize_v3_openai_responses_provider_request_payload, project_gemini_store_to_wire,
 };
 mod anthropic_codec_tool_projection;
 mod anthropic_request_field_projection;

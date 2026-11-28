@@ -278,12 +278,8 @@ async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
         }))
         .send()
         .await;
-    let error_response = error_result.expect("the final provider 429 must reach the client");
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(
-        error_response.text().await.unwrap(),
-        r#"{"error":{"type":"rate_limit_error","message":"raw provider secret detail"}}"#
-    );
+    error_result
+        .expect_err("the final provider 429 must break transport without reaching the client");
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
         .expect("provider failure must produce a capture")

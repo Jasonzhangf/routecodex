@@ -158,13 +158,14 @@ impl FieldWalker {
             }
             let structural = rule.structure_only && (value.is_object() || value.is_array());
             if !structural {
-                let operator = branch.map(|case| case.operator.as_str()).or({
-                    if rule.structure_only {
-                        rule.scalar_consumer.as_deref()
-                    } else {
-                        rule.consumer.as_deref()
-                    }
-                });
+                let operator =
+                    branch
+                        .map(|case| case.operator.as_str())
+                        .or(if rule.structure_only {
+                            rule.scalar_consumer.as_deref()
+                        } else {
+                            rule.consumer.as_deref()
+                        });
                 if let Some(key) = operator {
                     // Registry resolution is proved at compile, never a request-time gate.
                     if let Some(operator) = self.registry.get(key) {

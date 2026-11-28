@@ -1189,7 +1189,7 @@ targets = [
     }
 
     #[test]
-    fn cooldown_only_selection_returns_without_waiting_for_probes() {
+    fn cooldown_only_exhaustion_returns_without_waiting_for_probes() {
         let provider_ids = ["e37891a_cool_a", "e37891a_cool_b", "e37891a_cool_c"];
         let manifest = multi_provider_manifest(&provider_ids);
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
@@ -1204,41 +1204,46 @@ targets = [
         let failure =
             routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
         for id in provider_ids {
-            let interface_id = expanded
-                .candidates
-                .iter()
-                .find(|candidate| candidate.provider_id == id)
-                .expect("declared cooldown candidate must be expanded")
-                .interface_id
-                .clone();
             for _ in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
-                let projection = health
-                    .record_provider_key_failure_action_for_interface(
+                health
+                    .record_provider_key_failure_action(
                         id,
-                        &interface_id,
                         Some("key1"),
                         Some("gpt-test"),
                         &failure,
                         now_ms,
                     )
                     .expect("cooldown setup");
-                assert!(projection.is_some(), "cooldown setup must record {id}");
             }
-            let availability = health.store().availability_for_session_for_interface(
-                &scope,
-                id,
-                &interface_id,
-                Some("key1"),
-                Some("gpt-test"),
-                now_ms,
-            );
-            assert!(
-                !availability.available,
-                "cooldown must mark {id} unavailable"
-            );
         }
         let budget =
             crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let mut excluded = BTreeSet::new();
+        let empty_probe_pending = BTreeSet::new();
+        for expected in provider_ids {
+            let selection = run_v3_plan_execution_operator_with_probes(
+                budget.clone(),
+                request.clone(),
+                &manifest,
+                V3PlanExecutionTargetSource::Expanded(expanded.clone()),
+                &scope,
+                &health,
+                &excluded,
+                &empty_probe_pending,
+                now_ms,
+                0,
+                true,
+                None,
+                direct_policy(),
+            );
+            let Ok((_, plan)) = futures_util::FutureExt::now_or_never(selection)
+                .expect("cooled candidate must select without awaiting probes")
+            else {
+                panic!("untried cooled candidate {expected} in multi-candidate pool must remain selectable");
+            };
+            assert_eq!(plan.selected.candidate.provider_id, expected);
+            excluded.insert(candidate_key(&plan.selected.candidate));
+        }
         let selection = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
@@ -1251,7 +1256,7 @@ targets = [
                         V3PlanExecutionTargetSource::Expanded(expanded),
                         &scope,
                         &health,
-                        &BTreeSet::new(),
+                        &excluded,
                         &BTreeSet::new(),
                         now_ms,
                         0,
@@ -1262,14 +1267,12 @@ targets = [
                 )
                 .await
             });
-        let (_, completed) =
-            match selection.expect("cooldown-only selection must not await a rescue probe") {
-                Ok(selected) => selected,
-                Err(_) => panic!("cooled candidates remain immediately selectable"),
-            };
-        assert_eq!(
-            completed.selected.candidate.provider_id, "e37891a_cool_a",
-            "immediate selection must keep declared candidate order"
+        let selection = selection.expect(
+            "cooldown-only exhaustion must return immediately instead of awaiting rescue probes",
+        );
+        assert!(
+            matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
+            "all-cooled candidates must produce a typed exhaustion once untried candidates are spent"
         );
     }
 

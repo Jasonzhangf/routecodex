@@ -575,27 +575,51 @@ async fn sticky_success_feedback_covers_chat_anthropic_and_gemini_entries() {
 #[tokio::test]
 async fn confirmed_quota_switches_early_and_queue_release_does_not_clear_health() {
     let _home = LOCK.lock().await;
+    let pools = r#"
+[route_groups.active_public.pools.default]
+selection = {strategy="active_queue"}
+active_keys = {members=[{provider="controlled",alias="A"},{provider="controlled",alias="B"}],retries=3,on_failure="hold"}
+targets = [
+  {kind="provider_model",provider="controlled",model="wire",key="A",priority=2},
+  {kind="provider_model",provider="controlled",model="wire",key="B",priority=1},
+]
+"#;
     for chat in paths() {
-        let entry = Entry::start("active_queue", 3, "hold", chat).await;
-        entry.script("A", &[Outcome::Account(429, "insufficient_quota")]);
-        let first = text(&entry.request("quota-first").await);
+        let entry = Entry::start_with_protocol_and_pools(
+            "active_queue",
+            3,
+            "hold",
+            if chat { "openai_chat" } else { "responses" },
+            &["A", "B"],
+            Some(pools),
+        )
+        .await;
+        entry.script("A", &[Outcome::Account(429, "insufficient_quota"); 5]);
+        let mut early = Vec::new();
+        for index in 0..4 {
+            early.push(text(&entry.request(&format!("quota-{index}")).await));
+        }
+        let unhold = entry.release("A").await;
+        assert_eq!(unhold["released"], true);
+        let fifth = text(&entry.request("quota-fifth").await);
         let before = entry.queue().await;
         let release = entry.release("A").await;
         let after = entry.queue().await;
         let second = text(&entry.request("quota-next").await);
         let calls = entry.calls();
         entry.stop().await;
-        assert_eq!((first.as_str(), second.as_str()), ("B", "B"));
+        assert_eq!(early, ["B", "B", "B", "B"]);
+        assert_eq!((fifth.as_str(), second.as_str()), ("B", "B"));
         assert_eq!(
             calls,
-            ["A", "B", "B"],
-            "confirmed quota is not repeated unchanged"
+            ["A", "B", "A", "B", "A", "B", "A", "B", "A", "B", "B"],
+            "confirmed quota is not repeated unchanged and fifth cools A"
         );
         assert_eq!(before["pools"][0]["strategy"], "active_queue");
         assert_eq!(
             before["pools"][0]["held"],
             json!([]),
-            "one failure is below the queue threshold"
+            "fifth failure cools A via health rather than queue hold"
         );
         assert_eq!(release["released"], false);
         for status in [before, after] {
@@ -639,9 +663,10 @@ async fn final_only_account_errors_count_once_each_until_fourth_failure_hold() {
             let calls = entry.calls();
             entry.stop().await;
             for response in responses {
-                let (actual, body) = response.expect("actual final HTTP error");
-                assert_eq!(actual.as_u16(), status, "{body}");
-                assert!(body.contains("controlled account failure"), "{body}");
+                assert!(
+                    response.is_err(),
+                    "exhausted sole-candidate HTTP {status} must break transport without client error projection: {response:?}"
+                );
             }
             assert_eq!(calls, ["A", "A", "A", "A"]);
             assert_eq!(queue["pools"][0]["held"][0]["auth_alias"], "A");
@@ -1015,15 +1040,9 @@ async fn exhausted_final_complete_http_error_preserves_actual_status_and_body() 
         let response = entry.send("final-http", json!("controlled input")).await;
         let calls = entry.calls();
         entry.stop().await;
-        let (status, body) = response.expect("complete final HTTP error must remain projectable");
-        assert_eq!(
-            status.as_u16(),
-            503,
-            "actual final B status, not earlier A status: {body}"
-        );
         assert!(
-            body.contains("ordinary controlled upstream failure alias=B status=503"),
-            "real final error body: {body}"
+            response.is_err(),
+            "exhausted complete HTTP error must terminate transport without client projection: {response:?}"
         );
         assert_eq!(calls, ["A", "A", "A", "A", "B", "B", "B", "B"]);
     }

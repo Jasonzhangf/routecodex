@@ -24,10 +24,10 @@
     "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}
   },
   "expected_client": {
-    "transport": "complete",
-    "status": 429,
-    "body_must": {"error.type": "rate_limit_error", "error.message": "controlled rate limit"},
-    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "transport": "closed",
+    "status": null,
+    "body_must": {},
+    "body_must_not": ["rate_limit_error", "controlled rate limit", "provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": false
   },
   "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
@@ -42,7 +42,9 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/stream_error_open_test.go"],
     "tests": ["internal/gateway/stream_error_open_test.go::TestStreamErrorKeptOpenFailsOverAtOnce"],
-    "adaptation": "The only eligible provider returns a complete HTTP error. RCC projects its actual status and body when the declared candidates are exhausted."
+    "adaptation": "The provider error body is used only as an error stimulus. Current RCC requirement closes the exhausted client connection and never returns the provider error."
   },
-  "contract_differences": []
+  "contract_differences": [
+    {"source_behavior": "Magpie reports the provider error to the client when no account remains.", "rcc_requirement": "Provider errors stay internal; on exhaustion close the client connection with no substitute error or success."}
+  ]
 }

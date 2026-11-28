@@ -19,18 +19,17 @@ fn unavailable_protocol_admission_fixture(
     let now =
         crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().unwrap();
     for provider in ["first", "second"] {
-        for _ in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
-            health
-                .record_provider_failure_record(
-                    &session,
-                    provider,
-                    Some("key"),
-                    Some("test"),
-                    Some("controlled unavailable identity"),
-                    now,
-                )
-                .unwrap();
-        }
+        health
+            .store()
+            .record_provider_transient_bypass_in_session(
+                &session,
+                provider,
+                Some("key"),
+                Some("test"),
+                Some("controlled unavailable identity"),
+                now,
+            )
+            .unwrap();
     }
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
         "test".to_string(),

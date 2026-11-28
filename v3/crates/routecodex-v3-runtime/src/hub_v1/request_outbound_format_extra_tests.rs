@@ -2109,3 +2109,52 @@ fn openai_chat_builtin_tool_projection_rejects_malformed_types_before_drop() {
         );
     }
 }
+
+#[test]
+fn gemini_direct_store_projects_booleans_and_rejects_malformed_or_conflicting() {
+    for value in [json!(false), json!(true)] {
+        let mut root_payload = json!({
+            "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+            "store": value
+        });
+        let mut drops = Vec::new();
+        super::project_gemini_store_to_wire(&mut root_payload, &mut drops)
+            .expect("boolean root store must omit with drop record");
+        assert!(root_payload.get("store").is_none());
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].json_path, "$.store");
+        assert_eq!(drops[0].canonical_value, value);
+
+        let mut ext_payload = json!({
+            "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+            "routecodex_chat_extension": {"responses_request": {"store": value}}
+        });
+        let mut ext_drops = Vec::new();
+        super::project_gemini_store_to_wire(&mut ext_payload, &mut ext_drops)
+            .expect("boolean extension store must omit with drop record");
+        assert!(ext_payload.get("routecodex_chat_extension").is_none());
+        assert_eq!(ext_drops.len(), 1);
+        assert_eq!(
+            ext_drops[0].json_path,
+            "$.routecodex_chat_extension.responses_request.store"
+        );
+        assert_eq!(ext_drops[0].canonical_value, value);
+    }
+
+    let mut malformed = json!({"contents": [], "store": "true"});
+    let err = super::project_gemini_store_to_wire(&mut malformed, &mut Vec::new())
+        .expect_err("non-boolean store must fail");
+    assert!(err.contains("MalformedOutboundField"), "{err}");
+
+    let mut conflict = json!({
+        "contents": [],
+        "store": true,
+        "routecodex_chat_extension": {"responses_request": {"store": false}}
+    });
+    let conflict_err = super::project_gemini_store_to_wire(&mut conflict, &mut Vec::new())
+        .expect_err("conflicting root vs extension store must fail");
+    assert!(
+        conflict_err.contains("ConflictingOutboundFields"),
+        "{conflict_err}"
+    );
+}
