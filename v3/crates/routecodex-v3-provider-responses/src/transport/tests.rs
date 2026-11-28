@@ -1089,3 +1089,689 @@ async fn discover_models_rejects_unknown_provider_type_without_network_call() {
     .expect_err("unknown provider type must fail explicitly");
     assert!(error.to_string().contains("carrier_pigeon"), "got {error}");
 }
+
+#[tokio::test]
+async fn json_intent_decodes_json_body_when_provider_labels_content_type_as_sse() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    for (payload, expect_json) in [
+        (
+            r#"{"id":"resp_mislabeled","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#,
+            true,
+        ),
+        (
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[]}}\n\n",
+            false,
+        ),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body_text = payload.to_string();
+        let server = tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut req_buf = [0_u8; 4096];
+            assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body_text.len()
+            );
+            conn.write_all(head.as_bytes()).await.unwrap();
+            conn.write_all(body_text.as_bytes()).await.unwrap();
+        });
+        let request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+            "req-mislabeled-ct",
+            "xingchiapi-test",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key10".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-mislabeled".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-6.1-sol","input":"Reply with only: ok","stream":false}),
+            vec![],
+            Some(Duration::from_secs(5)),
+        )
+        .unwrap();
+        let raw = ProviderResponsesTransport::default()
+            .send(request)
+            .await
+            .expect("response should succeed");
+        server.abort();
+        match raw.into_body() {
+            crate::V3ProviderResponseBody::Json(bytes) => {
+                assert!(expect_json, "expected SSE body, got JSON");
+                let parsed: Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(parsed["id"], "resp_mislabeled");
+            }
+            crate::V3ProviderResponseBody::Sse(_) => {
+                assert!(!expect_json, "expected JSON body, got SSE");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn json_intent_preserves_sse_first_frame_elapsed_budget_over_short_request_deadline() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // 1. Delayed genuine SSE past request_timeout_ms (80ms) succeeds within sse_first_frame_timeout_ms (500ms)
+    // and records elapsed peek wait for the downstream Runtime first-frame guard.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_delayed_sse\",\"status\":\"completed\",\"output\":[]}}\n\n";
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
+        conn.write_all(chunk.as_bytes()).await.unwrap();
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-delayed-sse-vs-json-budget",
+            "delayed-sse-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-delayed-sse".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(80)),
+            5_000,
+            Some(500),
+        )
+        .unwrap();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect(
+            "genuine SSE within sse_first_frame_timeout_ms must survive short request deadline",
+        );
+    server.abort();
+    assert!(
+        raw.sse_first_frame_elapsed_ms() >= 120,
+        "expected sniff elapsed >= 120ms, got {}",
+        raw.sse_first_frame_elapsed_ms()
+    );
+    assert_eq!(raw.body_kind(), crate::V3ProviderResponseBodyKind::Sse);
+
+    // 2. Mislabeled JSON arriving after request_timeout_ms (80ms) is still rejected by request deadline.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: up-case2-req-deadline-200\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let json_body = r#"{"id":"resp_late_json"}"#;
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-late-json-vs-budget",
+            "delayed-json-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-late-json".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(80)),
+            5_000,
+            Some(500),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("mislabeled JSON delayed past request deadline must time out");
+    server.abort();
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-case2-req-deadline-200"
+                }),
+                "expected retained Case 2 x-request-id: {headers:?}"
+            );
+            assert!(
+                reason.contains("budget exhausted"),
+                "expected request budget timeout error, got {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
+
+    // 3. Disguised JSON under text/event-stream whose leading `{` arrives within
+    // sse_first_frame_timeout_ms (80ms) continues reading the remaining JSON body up to
+    // request_timeout_ms (500ms) and succeeds as Json.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let part1 = "{";
+        let chunk1 = format!("{:x}\r\n{}\r\n", part1.len(), part1);
+        let _ = conn.write_all(chunk1.as_bytes()).await;
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        let part2 = r#""id":"resp_slow_disguised_json_ok"}"#;
+        let chunk2 = format!("{:x}\r\n{}\r\n0\r\n\r\n", part2.len(), part2);
+        let _ = conn.write_all(chunk2.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-slow-disguised-json-ok",
+            "slow-disguised-json-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-slow-disguised-json".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(500)),
+            5_000,
+            Some(80),
+        )
+        .unwrap();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect(
+        "mislabeled JSON whose opener arrives within sse_first_frame_timeout_ms must obey request_timeout_ms",
+    );
+    server.abort();
+    assert_eq!(raw.body_kind(), crate::V3ProviderResponseBodyKind::Json);
+    let parsed: Value = serde_json::from_slice(&raw.into_body_bytes().await.unwrap()).unwrap();
+    assert_eq!(parsed["id"], "resp_slow_disguised_json_ok");
+
+    // 4. Genuine SSE / silent headers with request_timeout_ms=5000 and sse_first_frame_timeout_ms=80
+    // must fail near 80ms instead of waiting up to request_timeout_ms.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_late_sse\",\"status\":\"completed\",\"output\":[]}}\n\n";
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", sse.len(), sse);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let started = std::time::Instant::now();
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-late-sse-long-req",
+            "late-sse-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-late-sse-long-req".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(5_000)),
+            5_000,
+            Some(80),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err(
+            "silent text/event-stream past sse_first_frame_timeout_ms must fail immediately",
+        );
+    let elapsed = started.elapsed();
+    server.abort();
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "silent text/event-stream waited {elapsed:?} instead of failing near sse_first_frame_timeout_ms=80ms"
+    );
+    assert!(
+        err.to_string().contains("first frame"),
+        "expected SSE first-frame timeout error, got {err}"
+    );
+
+    // 5. Whitespace-only flood exceeding SseTransportLimits::max_buffer_bytes under text/event-stream
+    // must be rejected cleanly instead of buffering unbounded prefix chunks.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        let _ = conn.write_all(head.as_bytes()).await;
+        let blank_chunk = " ".repeat(256 * 1024);
+        let framed = format!("{:x}\r\n{}\r\n", blank_chunk.len(), blank_chunk);
+        for _ in 0..10 {
+            if conn.write_all(framed.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-ws-flood-sse",
+            "ws-flood-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-ws-flood".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(5_000)),
+            5_000,
+            Some(1_000),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("whitespace-only SSE prefix flood must be rejected at buffer limit");
+    server.abort();
+    assert!(
+        err.to_string().contains("SSE prefix exceeded buffer limit"),
+        "expected SSE prefix limit error, got {err}"
+    );
+
+    // 6. Post-read elapsed-budget exit preserves the received HTTP head, headers,
+    // and upstream request ID via `response_body_read_error` (body_read_failure=Some)
+    // so it remains ineligible for final HTTP projection while retaining provenance.
+    let err = super::sse_first_frame_timeout_error_if_elapsed(
+        Duration::from_millis(81),
+        Duration::from_millis(80),
+        200,
+        "req-deadline-boundary-200",
+        "deadline-boundary-provider",
+        &[
+            V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            },
+            V3ProviderResponseHeader {
+                name: "x-request-id".into(),
+                value: b"up-deadline-boundary-200".to_vec(),
+            },
+        ],
+    )
+    .expect_err("elapsed past sse_first_frame_budget must fail cleanly");
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            request_id,
+            provider_id,
+            status,
+            headers,
+            reason,
+        } => {
+            assert_eq!(status, 200);
+            assert_eq!(request_id, "req-deadline-boundary-200");
+            assert_eq!(provider_id, "deadline-boundary-provider");
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-deadline-boundary-200"
+                }),
+                "expected retained upstream x-request-id header: {headers:?}"
+            );
+            assert!(
+                reason.contains("did not produce a first frame"),
+                "expected first-frame reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable preserving HTTP 200 head, got {other:?}"),
+    }
+
+    // 7. End-to-end transport: mislabeled text/event-stream delivering JSON past
+    // sse_first_frame_timeout_ms (even while request_timeout_ms is still open) fails
+    // with ResponseBodyUnreadable retaining status 200 and upstream x-request-id.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: up-late-json-prefix-200\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let json_body = r#"{"id":"resp_late_json_rejected"}"#;
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", json_body.len(), json_body);
+        let _ = conn.write_all(chunk.as_bytes()).await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-late-json-prefix-200",
+            "late-json-prefix-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-late-json".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(5_000)),
+            5_000,
+            Some(25),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("delayed JSON past sse_first_frame_timeout_ms must fail");
+    server.abort();
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-late-json-prefix-200"
+                }),
+                "expected retained upstream x-request-id: {headers:?}"
+            );
+            assert!(
+                reason.contains("did not produce a first frame"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
+
+    // 8. End-to-end transport: mislabeled JSON whose `{` arrives within
+    // sse_first_frame_timeout_ms but whose request_timeout_ms expires mid-body
+    // fails with ResponseBodyUnreadable retaining status 200 and x-request-id.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut conn, _) = listener.accept().await.unwrap();
+        let mut req_buf = [0_u8; 4096];
+        assert!(conn.read(&mut req_buf).await.unwrap() > 0);
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: up-json-body-deadline-200\r\ntransfer-encoding: chunked\r\n\r\n";
+        conn.write_all(head.as_bytes()).await.unwrap();
+        conn.write_all(b"1\r\n{\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(90)).await;
+        let _ = conn.write_all(b"1\r\n}\r\n0\r\n\r\n").await;
+    });
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-json-body-deadline-200",
+            "json-body-deadline-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-json-deadline".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"gpt-test","input":"hi","stream":false}),
+            vec![],
+            Some(Duration::from_millis(35)),
+            35,
+            Some(500),
+        )
+        .unwrap();
+    let err = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("truncated JSON past request_timeout_ms must fail cleanly");
+    server.abort();
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name.eq_ignore_ascii_case("x-request-id")
+                        && header.value == b"up-json-body-deadline-200"
+                }),
+                "expected retained upstream x-request-id: {headers:?}"
+            );
+            assert!(
+                reason.contains("budget exhausted"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable with HTTP 200 head, got {other:?}"),
+    }
+
+    // 9. Deterministic ready-when-polled after sniff deadline expiry: JSON prefix yields
+    // Poll::Ready synchronously on poll after waiting past sse_first_frame_budget=0ms,
+    // proving the pre-branch deadline check catches late ready JSON with head provenance.
+    struct LateReadyBodyStream {
+        chunks: Vec<(&'static [u8], u64)>,
+        index: usize,
+    }
+    impl futures_util::Stream for LateReadyBodyStream {
+        type Item = Result<bytes::Bytes, std::io::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            if let Some(&(data, delay_ms)) = self.chunks.get(self.index) {
+                if delay_ms > 0 {
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+                }
+                self.index += 1;
+                std::task::Poll::Ready(Some(Ok(bytes::Bytes::from_static(data))))
+            } else {
+                std::task::Poll::Ready(None)
+            }
+        }
+    }
+    let response_case9: reqwest::Response = axum::http::Response::builder()
+        .status(200)
+        .header("content-type", "text/event-stream")
+        .header("x-request-id", "up-ready-json-past-sniff-200")
+        .body(reqwest::Body::wrap_stream(LateReadyBodyStream {
+            chunks: vec![(br#"{"id":"ready_past_sniff"}"#, 2)],
+            index: 0,
+        }))
+        .unwrap()
+        .into();
+    let err = super::read_json_disguised_as_sse_or_stream(
+        response_case9,
+        "req-ready-past-sniff".into(),
+        "ready-past-sniff-provider".into(),
+        200,
+        vec![
+            V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            },
+            V3ProviderResponseHeader {
+                name: "x-request-id".into(),
+                value: b"up-ready-json-past-sniff-200".to_vec(),
+            },
+        ],
+        None,
+        Some(std::time::Instant::now() + Duration::from_secs(5)),
+        None,
+        Some(0),
+    )
+    .await
+    .expect_err("ready JSON prefix after sniff budget expiry must fail cleanly");
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(headers.iter().any(|h| {
+                h.name.eq_ignore_ascii_case("x-request-id")
+                    && h.value == b"up-ready-json-past-sniff-200"
+            }));
+            assert!(
+                reason.contains("did not produce a first frame"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable on late ready JSON prefix, got {other:?}"),
+    }
+
+    // 10. Deterministic ready-when-polled after request_deadline expiry inside JSON body loop:
+    // opener `{` is ready inside sniff budget, then final chunk becomes Poll::Ready after
+    // deadline expiry and must fail via ResponseBodyUnreadable rather than succeeding.
+    let response_case10: reqwest::Response = axum::http::Response::builder()
+        .status(200)
+        .header("content-type", "text/event-stream")
+        .header("x-request-id", "up-ready-json-past-req-200")
+        .body(reqwest::Body::wrap_stream(LateReadyBodyStream {
+            chunks: vec![(b"{", 0), (br#""id":"ready_past_req"}"#, 15)],
+            index: 0,
+        }))
+        .unwrap()
+        .into();
+    let err = super::read_json_disguised_as_sse_or_stream(
+        response_case10,
+        "req-ready-past-req".into(),
+        "ready-past-req-provider".into(),
+        200,
+        vec![
+            V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            },
+            V3ProviderResponseHeader {
+                name: "x-request-id".into(),
+                value: b"up-ready-json-past-req-200".to_vec(),
+            },
+        ],
+        None,
+        Some(std::time::Instant::now() + Duration::from_millis(5)),
+        None,
+        Some(500),
+    )
+    .await
+    .expect_err("ready JSON chunk completing after request_deadline must fail");
+    match err {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(headers.iter().any(|h| {
+                h.name.eq_ignore_ascii_case("x-request-id")
+                    && h.value == b"up-ready-json-past-req-200"
+            }));
+            assert!(
+                reason.contains("budget exhausted"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected ResponseBodyUnreadable on late ready JSON body, got {other:?}"),
+    }
+
+    // 11. Single direct call to `next_stream_chunk_with_budget` where `poll_next`
+    // enters BEFORE deadline and crosses the deadline while returning Poll::Ready
+    // (both a data chunk and an EOF None). Proves the post-read deadline guard rejects
+    // late Ready completions with ResponseBodyUnreadable preserving HTTP 200 head & x-request-id.
+    struct CrossingDeadlineSinglePollStream {
+        polls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        item: Option<&'static [u8]>,
+        sleep_ms: u64,
+    }
+    impl futures_util::Stream for CrossingDeadlineSinglePollStream {
+        type Item = Result<bytes::Bytes, reqwest::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            self.polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(self.sleep_ms));
+            std::task::Poll::Ready(self.item.take().map(|b| Ok(bytes::Bytes::from_static(b))))
+        }
+    }
+    for (req_id, up_req_id, payload) in [
+        (
+            "req-single-poll-chunk",
+            "up-single-poll-chunk-200",
+            Some(b"{" as &[u8]),
+        ),
+        ("req-single-poll-eof", "up-single-poll-eof-200", None),
+    ] {
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut pinned = Box::pin(CrossingDeadlineSinglePollStream {
+            polls: polls.clone(),
+            item: payload,
+            sleep_ms: 15,
+        });
+        let err = super::next_stream_chunk_with_budget(
+            &mut pinned,
+            req_id,
+            "single-poll-provider",
+            200,
+            &[
+                V3ProviderResponseHeader {
+                    name: "content-type".into(),
+                    value: b"text/event-stream".to_vec(),
+                },
+                V3ProviderResponseHeader {
+                    name: "x-request-id".into(),
+                    value: up_req_id.as_bytes().to_vec(),
+                },
+            ],
+            None,
+            Some(std::time::Instant::now() + Duration::from_millis(5)),
+        )
+        .await
+        .expect_err("single poll crossing deadline must fail via post-read guard");
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        match err {
+            V3ProviderError::ResponseBodyUnreadable {
+                status,
+                headers,
+                reason,
+                ..
+            } => {
+                assert_eq!(status, 200);
+                assert!(headers.iter().any(|h| {
+                    h.name.eq_ignore_ascii_case("x-request-id") && h.value == up_req_id.as_bytes()
+                }));
+                assert!(reason.contains("budget exhausted"), "{reason}");
+            }
+            other => panic!(
+                "expected ResponseBodyUnreadable on single-poll deadline cross, got {other:?}"
+            ),
+        }
+    }
+}

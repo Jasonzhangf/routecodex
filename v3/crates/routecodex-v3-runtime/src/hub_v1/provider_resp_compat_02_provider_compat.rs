@@ -73,7 +73,18 @@ pub fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(
 }
 
 pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
+    input: V3ProviderRespInbound01Raw,
+) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
+    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse_with_observation(
+        input,
+        &super::V3RuntimeStreamObservation::default(),
+    )
+    .await
+}
+
+pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse_with_observation(
     mut input: V3ProviderRespInbound01Raw,
+    observation: &super::V3RuntimeStreamObservation,
 ) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
     let provider_protocol = input.provider_protocol;
     let chunks = input.take_raw_sse_chunks().ok_or_else(|| {
@@ -85,9 +96,10 @@ pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
     })?;
     let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
     let payload =
-        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response_with_observation(
             provider_protocol,
             provider,
+            observation,
         )
         .await
         .map_err(|error| {

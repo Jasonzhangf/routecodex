@@ -3034,8 +3034,7 @@ struct LiveForward {
     captures: Arc<std::sync::Mutex<Vec<LiveForwardExchange>>>,
 }
 
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct LiveForwardExchange {
     request_body: Vec<u8>,
     response_status: Option<StatusCode>,
@@ -3043,7 +3042,6 @@ struct LiveForwardExchange {
     response_body: Vec<u8>,
     transport_error: Option<String>,
 }
-
 
 /// Explicit Anthropic SSE failures must stay failures at the public entry.
 /// This covers the user-reported risk: an explicit provider error or an

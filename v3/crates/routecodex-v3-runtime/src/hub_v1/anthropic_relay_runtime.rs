@@ -6,22 +6,19 @@ use crate::operation_runner::plan_execution::{
 };
 mod response_closeout;
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy,
+    project_v3_client_disconnect, provider_runtime_failure_stage,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
 };
 use futures_util::StreamExt;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_error::{
-    V3ErrorActionScope, V3ErrorSourceKind, V3ProviderFailureSessionScope,
-};
+use routecodex_v3_error::{V3ErrorActionScope, V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use routecodex_v3_provider_responses::{
-    build_v3_anthropic_provider_request_header,
-    is_v3_anthropic_provider_request_header_name, ResponsesTransport, V3ProviderError, V3ProviderResponseBody,
-    V3ProviderSseStream,
+    build_v3_anthropic_provider_request_header, is_v3_anthropic_provider_request_header_name,
+    ResponsesTransport, V3ProviderError, V3ProviderResponseBody, V3ProviderSseStream,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_02_from_fields,
@@ -1043,7 +1040,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         request_execution_control.begin_actual_send();
         active_attempt_dispatched = true;
         let transport_result = match tokio::time::timeout(
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
+            v3_relay_transport_send_timeout(
+                manifest,
+                &selected_target_provider_id,
+                transport_request.stream_intent(),
+            ),
             transport.send(transport_request),
         )
         .await
@@ -1170,6 +1171,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
         let provider_status = provider_raw.status();
+        let sse_first_frame_elapsed =
+            std::time::Duration::from_millis(provider_raw.sse_first_frame_elapsed_ms());
         match provider_raw.into_body() {
             V3ProviderResponseBody::Sse(stream) => {
                 let sse_idle_timeout =
@@ -1185,12 +1188,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         stream,
                         attempt_budget.residence_deadline(),
                     );
-                let stream = crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                    &input.request_id,
-                    &selected_target_provider_id,
-                    stream,
-                    sse_idle_timeout,
-                );
+                let stream =
+                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle_with_first_frame_elapsed(
+                        &input.request_id,
+                        &selected_target_provider_id,
+                        stream,
+                        sse_idle_timeout,
+                        sse_first_frame_elapsed,
+                    );
                 let local_failure = Arc::new(Mutex::new(None));
                 let stream = crate::hub_v1::relay_runtime_core::guard_v3_relay_sse_payload(
                     &input.request_id,
@@ -1265,11 +1270,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     .with_source_provider_protocol(provider_wire_protocol)
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
+                let attempt_drop_context = projection_drop_context
+                    .clone()
+                    .with_attempt_target(&selected.route.pool_id, &selected_target_provider_id);
                 let (client_response, stream_observation) =
                     match closeout_anthropic_relay_sse_response(
                         resp01,
                         &input.request_id,
                         &response_hook_profile,
+                        &attempt_drop_context,
                         trace.as_mut(),
                         // anthropic 整流缓冲：两种客户端传输都由这一份完整
                         // client_response 派生，因此 SSE 出口同样可以发布 round。

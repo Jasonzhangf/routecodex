@@ -1,7 +1,7 @@
-use super::*;
 use super::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical;
 use super::responses_relay_dry_run::execute_v3_responses_relay_dry_run_runtime;
 use super::responses_relay_runtime_inner::find_responses_tool_output_ids;
+use super::*;
 use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
@@ -250,7 +250,7 @@ impl ResponsesTransport for RecordingChatTransport {
 }
 
 #[tokio::test]
-async fn target_protocol_unmapped_field_recovers_through_next_provider() {
+async fn target_protocol_unmapped_field_continues_first_attempt_without_reselection() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let mut manifest = anthropic_then_openai_chat_manifest();
@@ -286,15 +286,17 @@ async fn target_protocol_unmapped_field_recovers_through_next_provider() {
         V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-    .expect("unmapped target field must enter provider recovery");
+    .expect("unmapped optional field must omit and continue on first attempt without reselection");
 
     assert_eq!(output.status, 200);
-    assert!(output
-        .node_trace.contains(&"V3TargetLocalReselected"));
-    assert_eq!(
-        *transport.provider_ids.lock().expect("provider ids"),
-        vec!["openai_second"]
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "allowlist absence must not trigger V3TargetLocalReselected: {:?}",
+        output.node_trace
     );
+    let provider_ids = transport.provider_ids.lock().expect("provider ids");
+    assert_eq!(provider_ids.len(), 1);
+    assert_ne!(provider_ids[0], "openai_second");
 }
 
 #[tokio::test]
@@ -1435,4 +1437,73 @@ fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
             response["usage"].get("completion_tokens").is_none(),
             "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
         );
+}
+
+#[tokio::test]
+async fn responses_sse_materializer_rejects_cross_protocol_midstream_and_tolerates_unknown_items_with_text(
+) {
+    let cross_protocol_stream = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"valid body\"}\n\n".to_vec()),
+        Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mix\",\"status\":\"completed\"}}\n\n".to_vec()),
+    ]));
+    let cross_err = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        cross_protocol_stream,
+    )
+    .await
+    .expect_err("cross-protocol Anthropic SSE frame mid-stream must fail Responses attempt");
+    assert!(cross_err.to_string().contains("Anthropic"), "{cross_err}");
+
+    let unknown_item_with_text = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_item\",\"id\":\"fi_1\"}}\n\n".to_vec()),
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok text\"}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"status\":\"completed\"}}\n\n".to_vec()),
+    ]));
+    let materialized = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        unknown_item_with_text,
+    )
+    .await
+    .expect("complete unknown output item alongside deliverable text must succeed");
+    assert_eq!(materialized["output"][0]["text"], "ok text");
+
+    let unknown_item_only = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_item\",\"id\":\"fi_only\"}}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[{\"type\":\"future_item\",\"id\":\"fi_only\"}]}}\n\n".to_vec()),
+    ]));
+    let empty_err = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        unknown_item_only,
+    )
+    .await
+    .expect_err("stream with only unknown non-deliverable item must fail GovernedAttemptEmpty");
+    assert!(
+        empty_err.to_string().contains("provider_response_empty"),
+        "{empty_err}"
+    );
+
+    let refusal_only = Box::pin(stream::iter(vec![
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refusal\",\"status\":\"completed\",\"output\":[{\"type\":\"refusal\",\"refusal\":\"policy decline\"}]}}\n\n".to_vec()),
+    ]));
+    let refusal_mat = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        refusal_only,
+    )
+    .await
+    .expect("refusal output item must be preserved as deliverable response");
+    assert_eq!(refusal_mat["output"][0]["type"], "refusal");
+    assert_eq!(refusal_mat["output"][0]["refusal"], "policy decline");
+
+    let refusal_plus_text = Box::pin(stream::iter(vec![
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refusal_mix\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]},{\"type\":\"refusal\",\"refusal\":\"partial decline\"}]}}\n\n".to_vec()),
+    ]));
+    let mix_mat = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        refusal_plus_text,
+    )
+    .await
+    .expect("refusal alongside text must keep both items");
+    assert_eq!(mix_mat["output"].as_array().unwrap().len(), 2);
+    assert_eq!(mix_mat["output"][1]["type"], "refusal");
 }

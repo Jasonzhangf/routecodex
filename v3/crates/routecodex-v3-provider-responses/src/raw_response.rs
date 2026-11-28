@@ -44,6 +44,8 @@ pub struct V3ProviderResp14Raw {
     compatibility_profile: Option<String>,
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
     sse_first_frame_timeout_ms: Option<u64>,
+    /// Elapsed milliseconds spent peeking response headers/prefix before SSE handoff.
+    sse_first_frame_elapsed_ms: u64,
     status: u16,
     headers: Vec<V3ProviderResponseHeader>,
     body: V3ProviderResponseBody,
@@ -62,6 +64,7 @@ impl V3ProviderResp14Raw {
             provider_id: provider_id.into(),
             compatibility_profile: None,
             sse_first_frame_timeout_ms: None,
+            sse_first_frame_elapsed_ms: 0,
             status,
             headers,
             body: V3ProviderResponseBody::Json(body),
@@ -80,6 +83,7 @@ impl V3ProviderResp14Raw {
             provider_id,
             compatibility_profile: None,
             sse_first_frame_timeout_ms: None,
+            sse_first_frame_elapsed_ms: 0,
             status,
             headers,
             body: V3ProviderResponseBody::Sse(body),
@@ -96,6 +100,11 @@ impl V3ProviderResp14Raw {
         self
     }
 
+    pub fn with_sse_first_frame_elapsed_ms(mut self, elapsed_ms: u64) -> Self {
+        self.sse_first_frame_elapsed_ms = elapsed_ms;
+        self
+    }
+
     pub fn request_id(&self) -> &str {
         &self.request_id
     }
@@ -106,6 +115,10 @@ impl V3ProviderResp14Raw {
 
     pub fn sse_first_frame_timeout_ms(&self) -> Option<u64> {
         self.sse_first_frame_timeout_ms
+    }
+
+    pub fn sse_first_frame_elapsed_ms(&self) -> u64 {
+        self.sse_first_frame_elapsed_ms
     }
 
     pub fn compatibility_profile(&self) -> Option<&str> {

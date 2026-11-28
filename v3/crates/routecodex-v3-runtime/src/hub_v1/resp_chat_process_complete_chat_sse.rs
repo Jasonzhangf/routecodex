@@ -68,8 +68,7 @@ pub(crate) fn projected_sse_has_business_content(
 
 /// Keep exact surviving source spans, including literal/code contexts and
 /// opaque invocations. Never synthesize text or touch native tool arguments.
-type V3CompleteChatSseResult =
-    Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError>;
+type V3CompleteChatSseResult = Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError>;
 type V3ToolCarrierMap = BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)>;
 
 #[cfg(test)]

@@ -9,10 +9,7 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
-use routecodex_v3_provider_responses::{
-    ResponsesTransport,
-    V3ProviderError, V3ProviderSseStream,
-};
+use routecodex_v3_provider_responses::{ResponsesTransport, V3ProviderError, V3ProviderSseStream};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
 pub type V3OpenAiChatClientStream = V3RelayProjectedSseStream;

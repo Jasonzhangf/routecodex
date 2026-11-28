@@ -95,6 +95,19 @@ pub async fn materialize_v3_provider_sse_as_canonical_response(
     .await
 }
 
+pub(crate) async fn materialize_v3_provider_sse_as_canonical_response_with_observation(
+    provider_protocol: V3HubProviderWireProtocol,
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        provider_protocol,
+        provider,
+        observation,
+    )
+    .await
+}
+
 pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
     provider_protocol: V3HubProviderWireProtocol,
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
@@ -416,7 +429,7 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         &anthropic_message,
         anthropic_context,
     )
-    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseProjection(error.to_string()))?;
     observation
         .record_provider_event_json(&response)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;

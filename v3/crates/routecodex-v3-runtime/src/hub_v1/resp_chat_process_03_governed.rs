@@ -1351,11 +1351,12 @@ type V3NormalizeHookFn = fn(
     Option<&Value>,
     Option<&str>,
 ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>;
-type V3CompleteChatSseHookFn = fn(
-    &[Vec<u8>],
-    Option<usize>,
-    &V3HubRelaySerializedToolContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>;
+type V3CompleteChatSseHookFn =
+    fn(
+        &[Vec<u8>],
+        Option<usize>,
+        &V3HubRelaySerializedToolContext,
+    ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct V3HubRelayResponseHookRegistry {
@@ -1438,11 +1439,11 @@ fn normalize_v3_hub_relay_response(
             }
         })?;
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
-            compat,
-            chat_request,
-            request_id,
-        )
-        .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })
+        compat,
+        chat_request,
+        request_id,
+    )
+    .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })
 }
 
 fn govern_v3_hub_relay_response(

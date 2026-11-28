@@ -16,6 +16,7 @@ pub(super) enum V3AnthropicResponseContentBlockKind {
     TextEditorCodeExecutionToolResult,
     ToolSearchToolResult,
     ContainerUpload,
+    Unknown,
 }
 
 impl V3AnthropicResponseContentBlockKind {
@@ -38,10 +39,12 @@ impl V3AnthropicResponseContentBlockKind {
             "text_editor_code_execution_tool_result" => Ok(Self::TextEditorCodeExecutionToolResult),
             "tool_search_tool_result" => Ok(Self::ToolSearchToolResult),
             "container_upload" => Ok(Self::ContainerUpload),
-            other => Err(V3AnthropicCodecError::UnknownResponseContentBlock {
-                index,
-                content_type: other.to_string(),
-            }),
+            other => {
+                eprintln!(
+                    "[v3-response-warning] protocol=anthropic stage=response_content_block index={index} content_type={other:?} reason=unknown_block_ignored"
+                );
+                Ok(Self::Unknown)
+            }
         }
     }
 
@@ -59,6 +62,7 @@ impl V3AnthropicResponseContentBlockKind {
             Self::TextEditorCodeExecutionToolResult => "text_editor_code_execution_tool_result",
             Self::ToolSearchToolResult => "tool_search_tool_result",
             Self::ContainerUpload => "container_upload",
+            Self::Unknown => "unknown",
         }
     }
 
@@ -156,10 +160,10 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         }
         (_, None | Some(Value::Null)) => None,
         (_, Some(_)) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_sequence",
-                reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
+            eprintln!(
+                "[v3-response-warning] protocol=anthropic stage=terminal_projection stop_reason={stop_reason:?} reason=extraneous_stop_sequence_omitted"
+            );
+            None
         }
     };
 
@@ -204,10 +208,25 @@ pub(super) fn flush_v3_anthropic_text_content_as_responses_message(
     }));
 }
 
+pub(super) fn anthropic_history_reasoning_part_as_responses_reasoning(
+    part: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    anthropic_reasoning_part_as_responses_reasoning_with_omission(part, None, false)?
+        .ok_or(V3AnthropicCodecError::MalformedField { field: "thinking" })
+}
+
 pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
     part: &Value,
     summary_policy: Option<&str>,
-) -> Result<Value, V3AnthropicCodecError> {
+) -> Result<Option<Value>, V3AnthropicCodecError> {
+    anthropic_reasoning_part_as_responses_reasoning_with_omission(part, summary_policy, true)
+}
+
+fn anthropic_reasoning_part_as_responses_reasoning_with_omission(
+    part: &Value,
+    summary_policy: Option<&str>,
+    allow_empty_unsigned_omission: bool,
+) -> Result<Option<Value>, V3AnthropicCodecError> {
     let object = part
         .as_object()
         .ok_or(V3AnthropicCodecError::MalformedField {
@@ -227,10 +246,21 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 item["encrypted_content"] =
                     Value::String(signature.unwrap_or_default().to_string());
                 preserve_anthropic_reasoning_extensions(object, &[], &mut item);
-                return Ok(item);
+                return Ok(Some(item));
             }
             if thinking.trim().is_empty() {
-                return Err(V3AnthropicCodecError::MalformedField { field: "thinking" });
+                if object.contains_key("text") {
+                    return Err(V3AnthropicCodecError::MalformedField { field: "thinking" });
+                }
+                if !allow_empty_unsigned_omission {
+                    let mut item = json!({"type":"reasoning","summary":[]});
+                    preserve_anthropic_reasoning_extensions(object, &[], &mut item);
+                    return Ok(Some(item));
+                }
+                eprintln!(
+                    "[v3-response-warning] protocol=anthropic stage=reasoning_projection reason=empty_unsigned_thinking_omitted"
+                );
+                return Ok(None);
             }
             let summary_text = match summary_policy {
                 None | Some("auto" | "concise" | "detailed") => thinking,
@@ -252,7 +282,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 &["type", "thinking", "signature"],
                 &mut item,
             );
-            Ok(item)
+            Ok(Some(item))
         }
         Some("redacted_thinking") => {
             let data = require_nonempty_reasoning_string(object.get("data"), "data")?;
@@ -261,7 +291,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 "encrypted_content":data
             });
             preserve_anthropic_reasoning_extensions(object, &["type", "data"], &mut item);
-            Ok(item)
+            Ok(Some(item))
         }
         _ => Err(V3AnthropicCodecError::MalformedField {
             field: "reasoning content",

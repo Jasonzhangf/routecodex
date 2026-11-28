@@ -1158,7 +1158,7 @@ fn registered_responses_metadata_is_lossless_but_does_not_complete_chat() {
     assert_eq!(
         transducer
             .push_event(json!({"type":"response.metadata_unknown"}))
-            .unwrap_err(),
-        "Responses SSE event type response.metadata_unknown is unsupported"
+            .expect("unknown non-error Responses SSE event must be skipped with warning"),
+        Vec::<Value>::new()
     );
 }

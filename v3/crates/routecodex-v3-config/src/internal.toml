@@ -40,6 +40,16 @@ path = [
 ]
 
 [[error.provider_error_action_policy]]
+policy_id = "xingchiapi_transport_connection_closed"
+scope = { provider_id = "xingchiapi" }
+match = { http_status = 502, provider_code = "provider_transport_error", content_contains_any = ["connection closed before message completed"] }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
+  { step = "cooldown", scope = "auth_key", duration_ms = 5000, failure_threshold = 3 },
+  { step = "project", reason_code = "xingchiapi_transport_connection_closed" },
+]
+
+[[error.provider_error_action_policy]]
 policy_id = "account_http_401_two_errors"
 match = { http_status = 401 }
 path = [

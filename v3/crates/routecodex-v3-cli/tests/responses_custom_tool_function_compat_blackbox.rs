@@ -504,35 +504,31 @@ async fn responses_gateway(
                 .collect::<String>();
             ([("content-type", "text/event-stream")], body).into_response()
         }
-        GatewayMode::SseMalformed => {
-            (
-                [("content-type", "text/event-stream")],
-                malformed_sse_frame(),
-            )
-                .into_response()
-        }
-        GatewayMode::AllowedToolsRoundTrip => {
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "id": "resp_allowed_tools",
-                    "object": "response",
-                    "created_at": 1,
-                    "status": "completed",
-                    "model": "kimi-k3",
-                    "output": [{
-                        "id": "fc_custom",
-                        "type": "function_call",
-                        "call_id": "call_compat",
-                        "name": custom_wire_name,
-                        "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}",
-                        "status": "completed"
-                    }],
-                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-                })),
-            )
-                .into_response()
-        }
+        GatewayMode::SseMalformed => (
+            [("content-type", "text/event-stream")],
+            malformed_sse_frame(),
+        )
+            .into_response(),
+        GatewayMode::AllowedToolsRoundTrip => (
+            StatusCode::OK,
+            Json(json!({
+                "id": "resp_allowed_tools",
+                "object": "response",
+                "created_at": 1,
+                "status": "completed",
+                "model": "kimi-k3",
+                "output": [{
+                    "id": "fc_custom",
+                    "type": "function_call",
+                    "call_id": "call_compat",
+                    "name": custom_wire_name,
+                    "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}",
+                    "status": "completed"
+                }],
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+            })),
+        )
+            .into_response(),
         GatewayMode::NamespaceRoundTrip => {
             let has_history = body["input"]
                 .as_array()

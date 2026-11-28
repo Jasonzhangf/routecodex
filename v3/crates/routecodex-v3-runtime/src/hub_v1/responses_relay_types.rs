@@ -164,12 +164,10 @@ pub struct V3RelayProviderSnapshots {
     pub provider_response: Option<Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct V3ResponsesRelayRetryPolicy {
     pub same_candidate_retries: usize,
 }
-
 
 impl V3ResponsesRelayRetryPolicy {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
@@ -282,6 +280,7 @@ pub struct V3RuntimeStreamObservation {
     /// snapshot (`provider_raw_sse`) so a 2 MiB diagnostic cap or a split UTF-8
     /// chunk can never hide a provider-explicit reasoning summary.
     source_summary_observed: Arc<AtomicBool>,
+    projection_drop_context: crate::projection_drop_log::V3ProjectionDropContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,6 +390,22 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
 }
 
 impl V3RuntimeStreamObservation {
+    pub(crate) fn with_projection_drop_context(
+        mut self,
+        context: crate::projection_drop_log::V3ProjectionDropContext,
+    ) -> Self {
+        self.projection_drop_context = context;
+        self
+    }
+
+    pub(crate) fn record_response_drops(
+        &self,
+        records: &mut [crate::projection_drop_log::V3ProjectionDropRecord],
+    ) {
+        self.projection_drop_context
+            .restamp_response_and_emit(records);
+    }
+
     #[cfg(test)]
     pub(crate) fn poison_diagnostics_for_test(&self) {
         let inner = self.inner.clone();
@@ -1260,6 +1275,8 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
     ProviderResponseEventCodec(String),
+    #[error("V3 Responses Relay provider response projection failed: {0}")]
+    ProviderResponseProjection(String),
     #[error("V3 Responses Relay provider response body is empty for provider {provider_id}")]
     ProviderResponseEmpty { provider_id: String },
     #[error("V3 Responses Relay Runtime timing failed: {0}")]

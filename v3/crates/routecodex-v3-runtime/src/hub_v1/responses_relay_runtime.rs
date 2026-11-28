@@ -1,8 +1,7 @@
 use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect,
-    provider_runtime_failure_stage,
+    project_v3_client_disconnect, provider_runtime_failure_stage,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
@@ -10,21 +9,17 @@ use crate::provider_failure_runtime_policy::{
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
 use futures_util::StreamExt;
-use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest,
-};
+use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest};
 use routecodex_v3_debug::V3DebugError;
 use routecodex_v3_error::{
-    V3Error05ExecutionAction,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind,
+    V3Error05ExecutionAction, V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    v3_provider_auth_handle_from_manifest_entry,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle, V3ProviderError,
-    V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderResp14Raw,
-    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
-    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    v3_provider_auth_handle_from_manifest_entry, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderError, V3ProviderHealthListenerScope, V3ProviderHealthStore,
+    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -940,6 +935,7 @@ pub(super) fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> V
 mod provider_stream_materialization;
 mod responses_provider_event_codec;
 
+pub(crate) use provider_stream_materialization::materialize_v3_provider_sse_as_canonical_response_with_observation;
 use provider_stream_materialization::*;
 pub use provider_stream_materialization::{
     materialize_v3_provider_sse_as_canonical_response,

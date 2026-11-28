@@ -89,6 +89,7 @@ impl V3ProviderFailureRuntimeHealth {
         now_ms: u64,
         action: &V3ProviderFailureAction,
         observed_http_failure: bool,
+        matched_policy_id: Option<&str>,
         policy: Option<V3ProviderFailurePolicy>,
         _minimum_delay_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
@@ -173,13 +174,22 @@ impl V3ProviderFailureRuntimeHealth {
         }
         if let Some(cooled) = self
             .store
-            .record_provider_failure_action_if_cooled_for_interface(
+            .record_provider_failure_action_if_cooled_with_matched_policy_for_interface(
                 provider_id,
                 interface_id,
                 auth_alias.unwrap(),
                 model_id.unwrap(),
                 &late_action,
                 now_ms,
+                matched_policy_id
+                    .zip(policy)
+                    .map(|(policy_id, override_policy)| {
+                        routecodex_v3_provider_responses::V3ProviderMatchedPolicyRule {
+                            policy_id,
+                            failure_threshold: override_policy.failure_threshold,
+                            cooldown_ms: override_policy.cooldown_ms,
+                        }
+                    }),
             )?
         {
             // The failure is already retained by the typed Error event. Do
@@ -195,10 +205,21 @@ impl V3ProviderFailureRuntimeHealth {
         drop(pending);
         let now_ms = self.observation_now_ms(now_ms);
         if let Some(policy) = policy {
-            let mut record = self.store.record_provider_failure_in_session_with_policy_for_interface(
-                scope, provider_id, interface_id, auth_alias, model_id, reason,
-                action.failure_fingerprint.clone(), now_ms, Some(policy),
-            ).map_err(|error| error.to_string())?;
+            let mut record = self
+                .store
+                .record_provider_failure_in_session_with_matched_policy_for_interface(
+                    scope,
+                    provider_id,
+                    interface_id,
+                    auth_alias,
+                    model_id,
+                    reason,
+                    action.failure_fingerprint.clone(),
+                    now_ms,
+                    matched_policy_id,
+                    Some(policy),
+                )
+                .map_err(|error| error.to_string())?;
             record.state = if record.cooldown_until_ms.is_some() {
                 "cooldown"
             } else {
