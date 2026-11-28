@@ -390,6 +390,22 @@ fn prune_stale_provider_cooldown_scope_files(
         return;
     };
     let now = std::time::SystemTime::now();
+    let current_tmp_prefix = current
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.tmp."));
+    let legacy_tmp_prefix = legacy
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.tmp."));
+    let current_lock_name = current
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.lock"));
+    let legacy_lock_name = legacy
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.lock"));
     let mut superseded = Vec::new();
     for entry in entries.flatten() {
         let candidate = entry.path();
@@ -402,6 +418,50 @@ fn prune_stale_provider_cooldown_scope_files(
         let Some(name) = candidate.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
+        if !name.starts_with("provider-cooldowns") {
+            continue;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&candidate) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            continue;
+        }
+        let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+        let age = now.duration_since(modified).ok();
+        if name.contains(".tmp.") {
+            let owned_tmp = current_tmp_prefix
+                .as_deref()
+                .is_some_and(|prefix| name.starts_with(prefix))
+                || legacy_tmp_prefix
+                    .as_deref()
+                    .is_some_and(|prefix| name.starts_with(prefix));
+            if owned_tmp
+                && age.is_some_and(|elapsed| elapsed >= std::time::Duration::from_secs(3600))
+            {
+                let _ = fs::remove_file(&candidate);
+            }
+            continue;
+        }
+        if name.ends_with(".json.lock") {
+            let companion_name = name.trim_end_matches(".lock");
+            let owned_lock = current_lock_name.as_deref() == Some(name)
+                || legacy_lock_name.as_deref() == Some(name)
+                || scope_suffix.is_some_and(|suffix| companion_name.ends_with(suffix));
+            let companion_json = PathBuf::from(
+                candidate
+                    .to_string_lossy()
+                    .trim_end_matches(".lock")
+                    .to_string(),
+            );
+            if owned_lock
+                && !companion_json.exists()
+                && age.is_some_and(|elapsed| elapsed >= PRUNABLE_GENERATION_AGE)
+            {
+                let _ = fs::remove_file(&candidate);
+            }
+            continue;
+        }
         if !name.starts_with("provider-cooldowns-") || !name.ends_with(".json") {
             continue;
         }
@@ -420,19 +480,8 @@ fn prune_stale_provider_cooldown_scope_files(
         {
             continue;
         }
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        if !metadata.is_file() {
-            continue;
-        }
-        let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
         // A future or unreadable timestamp is never treated as prunable.
-        if now
-            .duration_since(modified)
-            .map(|age| age < PRUNABLE_GENERATION_AGE)
-            .unwrap_or(true)
-        {
+        if age.is_none_or(|elapsed| elapsed < PRUNABLE_GENERATION_AGE) {
             continue;
         }
         superseded.push((modified, candidate));
@@ -449,6 +498,10 @@ fn prune_stale_provider_cooldown_scope_files(
                 "[RouteCodexV3] superseded provider cooldown state not removed {}: {error}",
                 candidate.display()
             );
+        }
+        let lock_path = PathBuf::from(format!("{}.lock", candidate.display()));
+        if lock_path.exists() {
+            let _ = fs::remove_file(&lock_path);
         }
     }
 }
@@ -1285,7 +1338,36 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let concurrent = root.path().join("provider-cooldowns-concurrent.json");
         fs::write(&concurrent, b"{}").expect("write concurrent scope state");
 
+        let old_lock = root.path().join("provider-cooldowns-rev0.json.lock");
+        fs::write(&old_lock, b"").expect("write companion lock");
+        backdate(&old_lock);
+
+        let orphan_tmp = root
+            .path()
+            .join("provider-cooldowns-current.json.tmp.99999.1");
+        fs::write(&orphan_tmp, b"{}").expect("write owned orphan tmp");
+        backdate(&orphan_tmp);
+
+        let unrelated_tmp = root
+            .path()
+            .join("provider-cooldowns-other-manifest.json.tmp.99999.1");
+        fs::write(&unrelated_tmp, b"{}").expect("write unrelated manifest tmp");
+        backdate(&unrelated_tmp);
+
         prune_stale_provider_cooldown_scope_files(&current, Some(&legacy), &[], None);
+
+        assert!(
+            !old_lock.exists(),
+            "companion lock of pruned scope file must be removed"
+        );
+        assert!(
+            !orphan_tmp.exists(),
+            "owned orphaned tmp file older than 1 hour must be removed"
+        );
+        assert!(
+            unrelated_tmp.exists(),
+            "unrelated single-listener manifest tmp file must not be removed"
+        );
 
         assert!(
             other_listener.exists(),

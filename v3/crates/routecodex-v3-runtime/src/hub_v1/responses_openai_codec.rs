@@ -930,17 +930,18 @@ fn retain_anthropic_reasoning_block_association(
         return;
     }
     let mut block = Map::new();
+    let has_encrypted_content = item
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty());
     let native_type = anthropic_reasoning
         .and_then(|extension| extension.get("type"))
         .and_then(Value::as_str)
+        .filter(|native_type| *native_type != "redacted_thinking" || has_encrypted_content)
         .unwrap_or_else(|| {
             // `encrypted_content: null` is a present key without ciphertext.
             // Only non-empty ciphertext can form a legal `redacted_thinking`
             // block; key presence alone would fabricate a data-less block.
-            let has_encrypted_content = item
-                .get("encrypted_content")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty());
             if reasoning_content.trim().is_empty() && has_encrypted_content {
                 "redacted_thinking"
             } else {
@@ -952,7 +953,14 @@ fn retain_anthropic_reasoning_block_association(
         "reasoning_content".to_string(),
         Value::String(reasoning_content.to_string()),
     );
-    if let Some(encrypted_content) = item.get("encrypted_content") {
+    let downgraded_redacted_thinking = anthropic_reasoning
+        .and_then(|extension| extension.get("type"))
+        .and_then(Value::as_str)
+        == Some("redacted_thinking")
+        && !has_encrypted_content;
+    if let Some(encrypted_content) = item.get("encrypted_content").filter(|value| {
+        !downgraded_redacted_thinking || value.as_str().is_none_or(|raw| !raw.is_empty())
+    }) {
         block.insert("encrypted_content".to_string(), encrypted_content.clone());
     }
     if let Some(anthropic_reasoning) = anthropic_reasoning {

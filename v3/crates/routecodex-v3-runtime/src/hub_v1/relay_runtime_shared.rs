@@ -1841,11 +1841,7 @@ mod tests {
             let terminal = terminalize_provider_failure(failure, Some(witness.clone()));
             assert_eq!(
                 terminal.terminal_disposition,
-                Some(
-                    routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
-                        witness
-                    )
-                )
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
             );
             let projection = terminal
                 .terminal_projection

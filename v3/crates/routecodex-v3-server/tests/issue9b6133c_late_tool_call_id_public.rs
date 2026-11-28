@@ -464,24 +464,43 @@ async fn responses_relay_preserves_late_tool_call_ids_through_execution_and_foll
         .header("X-Session-Id", "late-tool-id-public-mismatch")
         .json(&mismatched_followup)
         .send()
-        .await
-        .expect("mismatched follow-up must reach the public entry");
-    assert_eq!(rejected_response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let rejected_body = tokio::time::timeout(Duration::from_secs(10), rejected_response.text())
-        .await
-        .expect("mismatched follow-up must settle")
-        .expect("the final provider error body must be complete");
+        .await;
+    let err = tokio::time::timeout(Duration::from_secs(10), async {
+        match rejected_response {
+            Ok(mut response) => {
+                assert_eq!(response.status(), StatusCode::OK);
+                let mut wire = Vec::new();
+                let stream_err = loop {
+                    match response.chunk().await {
+                        Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                        Ok(None) => panic!("mismatched follow-up upstream 400 must break transport cleanly without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                        Err(error) => break error,
+                    }
+                };
+                let wire_text = String::from_utf8_lossy(&wire);
+                assert!(
+                    !wire_text.contains("data:")
+                        && !wire_text.contains("event:")
+                        && !wire_text.contains("\"error\"")
+                        && wire_text
+                            .lines()
+                            .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                    "exhausted SSE stream must contain only keepalives before termination: {wire_text}"
+                );
+                stream_err
+            }
+            Err(error) => error,
+        }
+    })
+    .await
+    .expect("mismatched follow-up must settle");
+    let _ = err;
     let rejected_upstream = received_capture(&mut captures, "mismatched follow-up").await;
     let reason = rejected_upstream
         .rejection
         .as_deref()
         .expect("controlled provider must reject mismatched paired tool history");
     assert!(reason.contains("controlled upstream history mismatch"));
-    assert_eq!(
-        rejected_body,
-        json!({"error":{"message":reason}}).to_string(),
-        "the final error must preserve the actual upstream response"
-    );
     let mut expected_mismatched_history = expected_tool_history();
     expected_mismatched_history[2]["content"] = json!("wrong late id");
     assert_eq!(

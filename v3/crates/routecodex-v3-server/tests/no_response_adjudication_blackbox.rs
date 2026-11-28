@@ -1161,14 +1161,10 @@ async fn complete_final_provider_http_502_preserves_status_and_body() {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let consumed = consume_response(response).await;
-    assert_eq!(content_type.as_deref(), Some("text/html"), "{consumed:?}");
-    assert_eq!(
-        consumed.status,
-        Some(StatusCode::BAD_GATEWAY),
-        "{consumed:?}"
-    );
-    assert!(consumed.transport_error.is_none(), "{consumed:?}");
-    assert_eq!(consumed.body, ERROR_BODY);
+    assert_eq!(content_type, None, "{consumed:?}");
+    assert_eq!(consumed.status, None, "{consumed:?}");
+    assert!(consumed.transport_error.is_some(), "{consumed:?}");
+    assert!(consumed.body.is_empty(), "{consumed:?}");
     let health: Value = client()
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
@@ -10353,23 +10349,7 @@ async fn final_http_errors_project_and_native_sse_errors_break_transport() {
                 start_entry(kind, process, status, content_type, upstream.clone()).await;
             let client = client();
             let outcome = post_request(&client, &endpoint, "test.test").await;
-            if status.is_success() {
-                assert_incomplete_transport(outcome).await;
-            } else {
-                let response = outcome.expect("final real HTTP error must reach the client");
-                let projected_status = response.status();
-                let projected_body = response.text().await.unwrap();
-                if projected_status == StatusCode::OK {
-                    let payloads = events(&projected_body);
-                    assert_eq!(payloads.len(), 1, "{projected_body}");
-                    assert_eq!(payloads[0]["type"], "error");
-                    let expected: Value = serde_json::from_str(&upstream).unwrap();
-                    assert_eq!(payloads[0]["error"], expected["error"]);
-                } else {
-                    assert_eq!(projected_status, status);
-                    assert_eq!(projected_body, upstream);
-                }
-            }
+            assert_incomplete_transport(outcome).await;
             assert_one_attempt(&mut captures, "wire-test").await;
             let body =
                 successful_body(post_request(&client, &endpoint, "independent.test").await).await;

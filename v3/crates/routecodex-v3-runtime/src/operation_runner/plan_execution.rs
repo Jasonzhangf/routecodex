@@ -1218,6 +1218,32 @@ targets = [
         }
         let budget =
             crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let mut excluded = BTreeSet::new();
+        let empty_probe_pending = BTreeSet::new();
+        for expected in provider_ids {
+            let selection = run_v3_plan_execution_operator_with_probes(
+                budget.clone(),
+                request.clone(),
+                &manifest,
+                V3PlanExecutionTargetSource::Expanded(expanded.clone()),
+                &scope,
+                &health,
+                &excluded,
+                &empty_probe_pending,
+                now_ms,
+                0,
+                true,
+                None,
+                direct_policy(),
+            );
+            let Ok((_, plan)) = futures_util::FutureExt::now_or_never(selection)
+                .expect("cooled candidate must select without awaiting probes")
+            else {
+                panic!("untried cooled candidate {expected} in multi-candidate pool must remain selectable");
+            };
+            assert_eq!(plan.selected.candidate.provider_id, expected);
+            excluded.insert(candidate_key(&plan.selected.candidate));
+        }
         let selection = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
@@ -1230,7 +1256,7 @@ targets = [
                         V3PlanExecutionTargetSource::Expanded(expanded),
                         &scope,
                         &health,
-                        &BTreeSet::new(),
+                        &excluded,
                         &BTreeSet::new(),
                         now_ms,
                         0,
@@ -1246,7 +1272,7 @@ targets = [
         );
         assert!(
             matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-            "all-cooled candidates must produce a typed exhaustion, not a probe wait"
+            "all-cooled candidates must produce a typed exhaustion once untried candidates are spent"
         );
     }
 

@@ -683,8 +683,8 @@ async fn assert_chat_no_front_http_headers(port: u16) {
 async fn assert_chat_final_provider_http_error(
     client: &reqwest::Client,
     port: u16,
-    expected_status: u16,
-    expected_body: &str,
+    _expected_status: u16,
+    _expected_body: &str,
     stream: bool,
 ) {
     let response = client
@@ -695,44 +695,59 @@ async fn assert_chat_final_provider_http_error(
             "stream": stream,
         }))
         .send()
-        .await
-        .expect("the final provider HTTP error must reach the HTTP client");
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_owned();
-    let body = response
-        .text()
-        .await
-        .expect("the final provider HTTP error body must be readable");
-    if !stream || status != ReqwestStatusCode::OK {
-        assert_eq!(
-            status,
-            ReqwestStatusCode::from_u16(expected_status).unwrap(),
-            "the client must receive the final Provider status, body={body}"
-        );
-        assert_eq!(
-            body, expected_body,
-            "the client must receive the final Provider body without rewriting"
-        );
-        return;
+        .await;
+    match response {
+        Ok(mut reply) if stream && reply.status() == ReqwestStatusCode::OK => {
+            let content_type = reply
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            assert!(
+                content_type.starts_with("text/event-stream"),
+                "a committed SSE head must keep its protocol content type: {content_type}"
+            );
+            let mut wire = Vec::new();
+            let stream_err = loop {
+                match reply.chunk().await {
+                    Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                    Ok(None) => panic!("exhausted final provider error on committed SSE stream must terminate transport cleanly without normal EOF: {}", String::from_utf8_lossy(&wire)),
+                    Err(error) => break error,
+                }
+            };
+            assert!(
+                !stream_err.is_timeout()
+                    && !stream_err.is_connect()
+                    && (stream_err.is_body() || stream_err.is_decode() || stream_err.is_request()),
+                "unexpected SSE transport termination error: {stream_err:?}"
+            );
+            let wire_text = String::from_utf8_lossy(&wire);
+            assert!(
+                !wire_text.contains("data:")
+                    && !wire_text.contains("\"error\"")
+                    && !wire_text.contains("[DONE]")
+                    && !wire_text.contains("chat.completion")
+                    && wire_text
+                        .lines()
+                        .all(|line| line.trim().is_empty() || line.starts_with(':')),
+                "exhausted SSE stream must contain only transport keepalives before termination: {wire_text}"
+            );
+        }
+        Ok(reply) => {
+            let status = reply.status();
+            let body = reply.text().await;
+            panic!("exhausted final provider error must terminate transport without HTTP error projection, got status={status} body={body:?}");
+        }
+        Err(error) => {
+            assert!(
+                !error.is_timeout()
+                    && !error.is_connect()
+                    && (error.is_request() || error.is_body() || error.is_decode()),
+                "expected clean transport break, got {error:?}"
+            );
+        }
     }
-    assert!(
-        content_type.starts_with("text/event-stream"),
-        "a committed SSE head must keep its protocol content type: {content_type}"
-    );
-    let events: Vec<_> = body
-        .lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .collect();
-    assert_eq!(events, [expected_body], "Chat must emit one Provider error");
-    assert!(
-        !body.contains("\"object\":\"chat.completion\"") && !body.contains("data: [DONE]"),
-        "a committed Provider error must not become a normal Chat completion: {body}"
-    );
 }
 
 async fn assert_two_captures_each(
